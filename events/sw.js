@@ -1,5 +1,5 @@
 // Offline cache for Event Scout (app shell only — searches always go to the network).
-var CACHE = 'event-scout-v2';
+var CACHE = 'event-scout-v3';
 var FILES = [
   './',
   'index.html',
