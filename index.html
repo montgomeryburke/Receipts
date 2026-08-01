@@ -140,6 +140,7 @@
       <div id="entriesWrap"></div>
       <div class="webonly hidden" id="webExportRow">
         <div class="btn-row">
+          <button class="btn-secondary" id="btnOpenSheet">&#128202; Open spreadsheet</button>
           <button class="btn-secondary" id="btnPhotos">&#128247; View photos</button>
         </div>
       </div>
@@ -176,14 +177,20 @@
       </div>
       <div class="amount-row">
         <div class="field">
-          <label for="fAmount">Total (incl. GST)</label>
-          <input type="number" id="fAmount" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
+          <label for="fAmountEx">Amount (excl. tax)</label>
+          <input type="number" id="fAmountEx" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
         </div>
         <div class="field">
-          <label for="fGst">GST (optional)</label>
+          <label for="fGst">Tax (GST)</label>
           <input type="number" id="fGst" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
         </div>
+        <div class="field">
+          <label for="fTotal">Total (incl. tax)</label>
+          <input type="number" id="fTotal" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
+        </div>
       </div>
+      <div class="hint" style="margin-top:6px">Fill in any of the three amounts — if you
+        enter two, the third is worked out for you.</div>
       <div class="detected" id="detectedNote"></div>
       <div class="field">
         <label for="fDesc">What was it for?</label>
@@ -209,7 +216,9 @@
 var IS_ANDROID = typeof window.AndroidBridge !== 'undefined';
 var VENDOR = new URL('./', location.href).href;
 
-var HEADERS = ['Date', 'Description', 'Amount (incl. GST)', 'GST', 'Receipt photo'];
+var HEADERS = ['Date', 'Comments', 'Amount (excl. tax)', 'Tax (GST)',
+               'Total (incl. tax)', 'Receipt photo'];
+var COL_DATE = 0, COL_DESC = 1, COL_EX = 2, COL_TAX = 3, COL_TOTAL = 4, COL_PHOTO = 5;
 var SHEET_NAME = 'Receipts';
 
 var state = {
@@ -406,16 +415,18 @@ function readMirrorXlsx(year) {
   return opfsReadFile(year, xlsxName(year)).catch(function () { return null; });
 }
 
+/* The spreadsheet file is the single source of truth. When a folder is
+   chosen it is authoritative — the app's private mirror is only a backup
+   copy and is never read while the folder is accessible, so deleting the
+   file from your folder really does start the year fresh. */
 function readXlsx(year) {
   if (IS_ANDROID) {
     var b64 = AndroidBridge.readSpreadsheet(year);
     return Promise.resolve(b64 ? b64ToU8(b64) : null);
   }
-  return readFolderXlsx(year).then(function (u8) {
-    if (u8) return u8;
-    return readMirrorXlsx(year).then(function (m) {
-      return m || (state._memXlsx && state._memXlsx[year]) || null;
-    });
+  if (chosenDir) return readFolderXlsx(year);
+  return readMirrorXlsx(year).then(function (m) {
+    return m || (state._memXlsx && state._memXlsx[year]) || null;
   });
 }
 
@@ -444,122 +455,98 @@ function deleteCapturedPhoto() {
 }
 
 /* ================= Spreadsheet logic =================
-   The app keeps its own permanent ledger of entries in the browser database
-   (IndexedDB). The Excel file is rebuilt from the FULL ledger on every save,
-   so it is always cumulative — even if the file on disk can't be read back
-   (flaky folder access, first run, fallback mode, etc.). When the file on
-   disk IS readable, it wins, so edits you make to it in Excel are kept. */
+   The Excel file IS the record. On every refresh the app reads it and shows
+   exactly what it contains; if there is no file yet (first run, or you
+   deleted it to start fresh) a new empty one is created. */
 
 function parseRows(u8) {
   try {
     var wb = XLSX.read(u8, { type: 'array' });
     var ws = wb.Sheets[wb.SheetNames[0]];
     var rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-    if (rows.length && String(rows[0][0]).toLowerCase() === 'date') rows.shift();
-    rows = rows.filter(function (r) { return r && r.length; });
+    var header = null;
+    if (rows.length && String(rows[0][0]).toLowerCase() === 'date') header = rows.shift();
+    rows = rows.filter(function (r) {
+      return r && r.length && String(r[0]).toLowerCase() !== 'totals';
+    });
     // Normalise dates the user reformatted in Excel (serial numbers → text).
     rows.forEach(function (r) {
       if (typeof r[0] === 'number') {
         try { r[0] = XLSX.SSF.format('yyyy-mm-dd', r[0]); } catch (e) {}
       }
     });
+    // Files from the old layout (Date, Description, Amount incl. GST, GST,
+    // photo) are lifted into the current columns.
+    if (header && /incl/i.test(String(header[2] || ''))) {
+      rows = rows.map(function (r) {
+        return [r[0], r[1], '', r[3] == null ? '' : r[3],
+                r[2] == null ? '' : r[2], r[4] == null ? '' : r[4]];
+      });
+    }
     return rows;
   } catch (e) {
     return null;
   }
 }
 
-/* ---- Sync engine: ledger (app database) + mirror + chosen folder ----
-   Rows are merged by identity, so the app, the mirror, and the spreadsheet in
-   your folder always end up showing the SAME receipts. On a clash for the
-   same receipt, the folder spreadsheet wins (your Excel edits are kept). */
-
-function rowKey(r) {
-  return r[4] ? 'p:' + r[4]
-    : 'd:' + r[0] + '|' + (r[1] || '') + '|' + r[2] + '|' + (r[3] || '');
-}
-
-function mergeRows(base, over) {
-  var map = {}, order = [];
-  function addAll(list, wins) {
-    (list || []).forEach(function (r) {
-      var k = rowKey(r);
-      if (!(k in map)) order.push(k);
-      if (wins || !(k in map)) map[k] = r;
-    });
-  }
-  addAll(base, false);
-  addAll(over, true);
-  return order.map(function (k) { return map[k]; });
-}
-
 function sortRows(rows) {
   rows.sort(function (a, b) {
-    var d = String(a[0]).localeCompare(String(b[0]));
+    var d = String(a[COL_DATE]).localeCompare(String(b[COL_DATE]));
     if (d !== 0) return d;
-    return String(a[4] || '').localeCompare(String(b[4] || ''));
+    return String(a[COL_PHOTO] || '').localeCompare(String(b[COL_PHOTO] || ''));
   });
   return rows;
 }
 
-function persistRows(year, rows) {
-  return idbSet('entries:' + year, rows).catch(function () {}).then(function () {
-    return writeXlsx(year, buildXlsx(rows));
-  });
-}
-
-function syncYear(year) {
-  if (IS_ANDROID) {
-    return readXlsx(year).then(function (u8) {
-      var rows = u8 ? (parseRows(u8) || []) : [];
-      return idbGet('entries:' + year).then(function (ledger) {
-        var merged = sortRows(mergeRows(ledger || [], rows));
-        idbSet('entries:' + year, merged).catch(function () {});
-        return merged;
-      });
-    });
-  }
-  return Promise.all([
-    idbGet('entries:' + year),
-    readMirrorXlsx(year),
-    readFolderXlsx(year)
-  ]).then(function (res) {
-    var ledger = res[0] || [];
-    var mirror = res[1] ? (parseRows(res[1]) || []) : [];
-    var folder = res[2] ? (parseRows(res[2]) || []) : [];
-    var merged = sortRows(mergeRows(mergeRows(ledger, mirror), folder));
-    var s = JSON.stringify(merged);
-    var jobs = [idbSet('entries:' + year, merged).catch(function () {})];
-    if (opfsOk && s !== JSON.stringify(mirror)) {
-      jobs.push(opfsWriteFile(year, xlsxName(year), buildXlsx(merged))
-        .catch(function () {}));
-    }
-    if (chosenDir && s !== JSON.stringify(folder)) {
-      jobs.push(folderWriteFile(year, xlsxName(year), buildXlsx(merged))
-        .catch(function () { return addPendingSync(year, xlsxName(year)); }));
-    }
-    return Promise.all(jobs).then(function () { return merged; });
-  });
-}
-
 function loadRows(year) {
-  return syncYear(year);
+  return readXlsx(year).then(function (u8) {
+    var rows = u8 ? parseRows(u8) : null;
+    if (rows) return rows;
+    // No spreadsheet yet (or it can't be read) → start the year fresh.
+    return writeXlsx(year, buildXlsx([]))
+      .catch(function () {})
+      .then(function () { return []; });
+  });
 }
 
 function buildXlsx(rows) {
   var data = [HEADERS].concat(rows);
   var ws = XLSX.utils.aoa_to_sheet(data);
-  ws['!cols'] = [{ wch: 11 }, { wch: 28 }, { wch: 16 }, { wch: 10 }, { wch: 30 }];
+  ws['!cols'] = [{ wch: 11 }, { wch: 28 }, { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 30 }];
+
+  // Totals row: label + live SUM formulas so it stays right when the file
+  // is edited in Excel. (A cached value is stored for readers that don't
+  // calculate formulas.)
+  var lastData = Math.max(rows.length + 1, 2);
+  var totalRow = rows.length + 2;
+  ws['A' + totalRow] = { t: 's', v: 'Totals' };
+  ['C', 'D', 'E'].forEach(function (col, i) {
+    var idx = [COL_EX, COL_TAX, COL_TOTAL][i], sum = 0;
+    rows.forEach(function (r) {
+      var v = parseFloat(r[idx]);
+      if (isFinite(v)) sum += v;
+    });
+    ws[col + totalRow] = {
+      t: 'n', v: Math.round(sum * 100) / 100,
+      f: 'SUM(' + col + '2:' + col + lastData + ')'
+    };
+  });
+  var range = XLSX.utils.decode_range(ws['!ref']);
+  range.e.r = totalRow - 1;
+  range.e.c = Math.max(range.e.c, HEADERS.length - 1);
+  ws['!ref'] = XLSX.utils.encode_range(range);
+
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME);
   return new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
 }
 
 function appendRow(year, row) {
-  // Sync first so the new row is added on top of the complete picture.
-  return syncYear(year).then(function (rows) {
+  // Read the file first so the new row lands on top of whatever it holds now.
+  return loadRows(year).then(function (rows) {
     rows.push(row);
-    return persistRows(year, rows);
+    sortRows(rows);
+    return writeXlsx(year, buildXlsx(rows));
   });
 }
 
@@ -665,12 +652,23 @@ function showReview() {
   $('viewReview').classList.remove('hidden');
 }
 
+/* Best "what this receipt cost" figure for a row: the total incl. tax when
+   present, otherwise whatever parts were entered added together. */
+function rowTotal(r) {
+  var t = parseFloat(r[COL_TOTAL]);
+  if (isFinite(t)) return t;
+  var ex = parseFloat(r[COL_EX]), tax = parseFloat(r[COL_TAX]), sum = 0, any = false;
+  if (isFinite(ex)) { sum += ex; any = true; }
+  if (isFinite(tax)) { sum += tax; any = true; }
+  return any ? sum : null;
+}
+
 function refreshEntries() {
   loadRows(state.year).then(function (rows) {
     var total = 0;
     for (var i = 0; i < rows.length; i++) {
-      var v = parseFloat(rows[i][2]);
-      if (isFinite(v)) total += v;
+      var v = rowTotal(rows[i]);
+      if (v !== null) total += v;
     }
     $('sumCount').textContent = rows.length === 1 ? '1 receipt in ' + state.year
       : rows.length + ' receipts in ' + state.year;
@@ -682,13 +680,13 @@ function refreshEntries() {
         '.<br>Tap &ldquo;Scan a receipt&rdquo; to add the first one.</div>';
       return;
     }
-    var html = '<table><tr><th>Date</th><th>Description</th><th class="amt">Amount</th></tr>';
+    var html = '<table><tr><th>Date</th><th>Comments</th><th class="amt">Total</th></tr>';
     var start = Math.max(0, rows.length - 8);
     for (var j = rows.length - 1; j >= start; j--) {
       var r = rows[j];
-      var amt = parseFloat(r[2]);
-      html += '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) +
-        '</td><td class="amt">' + (isFinite(amt) ? money(amt) : esc(r[2])) + '</td></tr>';
+      var amt = rowTotal(r);
+      html += '<tr><td>' + esc(r[COL_DATE]) + '</td><td>' + esc(r[COL_DESC]) +
+        '</td><td class="amt">' + (amt !== null ? money(amt) : '') + '</td></tr>';
     }
     html += '</table>';
     if (start > 0) {
@@ -766,8 +764,9 @@ function beginReview(url, name, photoId, blob) {
 
   $('photoPreview').src = url;
   $('fDate').value = todayISO();
-  $('fAmount').value = '';
+  $('fAmountEx').value = '';
   $('fGst').value = '';
+  $('fTotal').value = '';
   $('fDesc').value = '';
   $('detectedNote').textContent = '';
   $('ocrProgress').classList.remove('hidden');
@@ -815,12 +814,13 @@ function ocrDone(found, errMsg) {
     return;
   }
   if (found && found.total !== null) {
-    $('fAmount').value = found.total.toFixed(2);
+    $('fTotal').value = found.total.toFixed(2);
     var note = found.confident
       ? 'Found total ' + money(found.total) + ' — please check it.'
       : 'Best guess: ' + money(found.total) + ' — please check it.';
     if (found.gst !== null) {
       $('fGst').value = found.gst.toFixed(2);
+      $('fAmountEx').value = (found.total - found.gst).toFixed(2);
       note += ' GST ' + money(found.gst) + '.';
     }
     $('detectedNote').textContent = note;
@@ -832,15 +832,26 @@ function ocrDone(found, errMsg) {
 }
 
 function saveCurrent() {
-  var amt = parseFloat($('fAmount').value);
-  if (!isFinite(amt) || amt <= 0) { toast('Please enter the receipt amount'); return; }
-  var gstRaw = parseFloat($('fGst').value);
-  var gstVal = isFinite(gstRaw) && gstRaw > 0 ? Math.round(gstRaw * 100) / 100 : '';
+  function num(id) {
+    var v = parseFloat($(id).value);
+    return isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : null;
+  }
+  var ex = num('fAmountEx'), tax = num('fGst'), tot = num('fTotal');
+  if (ex === null && tax === null && tot === null) {
+    toast('Please enter at least one amount'); return;
+  }
+  // When two of the three are given, fill in the missing one.
+  if (tot === null && ex !== null && tax !== null) tot = Math.round((ex + tax) * 100) / 100;
+  else if (ex === null && tot !== null && tax !== null) ex = Math.round((tot - tax) * 100) / 100;
+  else if (tax === null && tot !== null && ex !== null) tax = Math.round((tot - ex) * 100) / 100;
   var desc = $('fDesc').value.trim() || 'Receipt';
   var date = $('fDate').value || todayISO();
-  amt = Math.round(amt * 100) / 100;
 
-  var row = [date, desc, amt, gstVal, state.photoName];
+  var row = [date, desc,
+             ex === null ? '' : ex,
+             tax === null ? '' : tax,
+             tot === null ? '' : tot,
+             state.photoName];
   var btn = $('btnSave');
   btn.disabled = true;
 
@@ -895,14 +906,39 @@ function downloadBlob(blob, name) {
 }
 
 function offerWebDownloads(photoBlob, photoName) {
-  // No file storage available: hand the user the cumulative spreadsheet
-  // (rebuilt from the app's ledger, so it contains ALL rows so far) plus
+  // No file storage available: hand the user the cumulative spreadsheet plus
   // the receipt photo, so nothing is lost.
   loadRows(state.year).then(function (rows) {
     downloadBlob(new Blob([buildXlsx(rows)], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    }), 'Receipts-' + state.year + '.xlsx');
+    }), xlsxName(state.year));
     if (photoBlob) downloadBlob(photoBlob, photoName || 'receipt.jpg');
+  });
+}
+
+/* "Open spreadsheet": hands the up-to-date Excel file to the phone —
+   pick Excel / Sheets in the menu to open it, or it saves to Downloads. */
+function openSpreadsheet() {
+  loadRows(state.year).then(function (rows) {
+    var f = new File([buildXlsx(rows)], xlsxName(state.year), {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    var can = false;
+    try { can = !!(navigator.canShare && navigator.canShare({ files: [f] })); } catch (e) {}
+    if (can) {
+      navigator.share({ files: [f] }).catch(function (err) {
+        // User closing the share sheet is fine; anything else → download instead.
+        if (!err || err.name !== 'AbortError') {
+          downloadBlob(f, f.name);
+          toast('Saved to your Downloads');
+        }
+      });
+    } else {
+      downloadBlob(f, f.name);
+      toast('Saved to your Downloads');
+    }
+  }).catch(function (e) {
+    toast('Could not open the spreadsheet: ' + (e && e.message ? e.message : 'error'));
   });
 }
 
@@ -995,6 +1031,7 @@ function init() {
   $('btnScan').addEventListener('click', startScan);
   $('btnSave').addEventListener('click', saveCurrent);
   $('btnDiscard').addEventListener('click', discardCurrent);
+  $('btnOpenSheet').addEventListener('click', openSpreadsheet);
   $('btnPhotos').addEventListener('click', showPhotos);
   $('btnPhotosBack').addEventListener('click', closePhotos);
 
