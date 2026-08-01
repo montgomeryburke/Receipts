@@ -365,6 +365,13 @@ function flushPendingSync(year) {
           .then(function (u8) { return folderWriteFile(year, name, u8); })
           .then(function () {
             remaining = remaining.filter(function (n) { return n !== name; });
+            // Photos live in ONE place — now that it's in the folder,
+            // drop the copy from app storage.
+            if (/\.(jpe?g|png|webp)$/i.test(name)) {
+              return opfsDir(year, false).then(function (d) {
+                return d.removeEntry(name);
+              }).catch(function () {});
+            }
           })
           .catch(function () {});
       });
@@ -443,9 +450,64 @@ function writeXlsx(year, u8) {
   return saveFileEverywhere(year, xlsxName(year), u8);
 }
 
+/* Photos are saved to ONE place: the chosen folder when there is one,
+   otherwise the app's private storage. App storage is only used as a
+   holding area when the folder is temporarily unreachable — the photo is
+   queued and moved into the folder as soon as it's accessible again. */
 function savePhotoWeb(year, blob, name) {
-  if (!hasFileStorage()) return Promise.resolve(false);
-  return saveFileEverywhere(year, name, blob).then(function () { return true; });
+  if (chosenDir) {
+    return folderWriteFile(year, name, blob)
+      .then(function () { return true; })
+      .catch(function () {
+        if (!opfsOk) return false;
+        return opfsWriteFile(year, name, blob)
+          .then(function () { return addPendingSync(year, name); })
+          .then(function () { return true; });
+      });
+  }
+  if (opfsOk) {
+    return opfsWriteFile(year, name, blob).then(function () {
+      if (pendingDirHandle) return addPendingSync(year, name);
+    }).then(function () { return true; });
+  }
+  return Promise.resolve(false);
+}
+
+/* Remove photo copies left in the app's private storage once a folder is
+   the real home for them. Photos still queued for copying into the folder
+   are left alone until they've been moved. */
+function cleanMirrorPhotos() {
+  if (!opfsOk || !chosenDir) return Promise.resolve();
+  return navigator.storage.getDirectory().then(function (root) {
+    return root.getDirectoryHandle('Receipts');
+  }).then(function (rk) {
+    var it = rk.values();
+    function nextYear() {
+      return it.next().then(function (r) {
+        if (r.done) return;
+        var yearDir = r.value;
+        if (yearDir.kind !== 'directory') return nextYear();
+        return idbGet('pending:' + yearDir.name).then(function (pending) {
+          pending = pending || [];
+          var fit = yearDir.values();
+          function nextFile() {
+            return fit.next().then(function (fr) {
+              if (fr.done) return;
+              var f = fr.value;
+              if (f.kind === 'file' && /\.(jpe?g|png|webp)$/i.test(f.name) &&
+                  pending.indexOf(f.name) < 0) {
+                return yearDir.removeEntry(f.name)
+                  .catch(function () {}).then(nextFile);
+              }
+              return nextFile();
+            });
+          }
+          return nextFile();
+        }).then(nextYear);
+      });
+    }
+    return nextYear();
+  }).catch(function () {});
 }
 
 function deleteCapturedPhoto() {
@@ -718,7 +780,7 @@ function ensureDirPermission() {
     return h.requestPermission({ mode: 'readwrite' }).then(function (p2) {
       if (p2 === 'granted') {
         chosenDir = h; pendingDirHandle = null;
-        flushPendingSync(state.year);
+        flushPendingSync(state.year).then(cleanMirrorPhotos);
       } else {
         pendingDirHandle = h; chosenDir = null;
         toast('Folder access not allowed — saving to app storage instead');
@@ -1065,7 +1127,8 @@ function init() {
     return h.queryPermission({ mode: 'readwrite' }).then(function (p) {
       if (p === 'granted') {
         chosenDir = h;
-        flushPendingSync(state.year); // push anything saved while disconnected
+        // Push anything saved while disconnected, then tidy stray copies.
+        flushPendingSync(state.year).then(cleanMirrorPhotos);
       } else if (p === 'prompt') {
         pendingDirHandle = h;
       }
@@ -1130,6 +1193,7 @@ function chooseDir() {
     .then(function () {
       if (!chosenDir) return;
       toast('Receipts will be saved to “' + chosenDir.name + '”');
+      cleanMirrorPhotos();
       refreshStorageUI();
       refreshEntries();
     })
@@ -1152,6 +1216,7 @@ function reconnectDir() {
       chosenDir = pendingDirHandle;
       pendingDirHandle = null;
       toast('Folder reconnected');
+      flushPendingSync(state.year).then(cleanMirrorPhotos);
     } else {
       toast('Folder access was not allowed');
     }

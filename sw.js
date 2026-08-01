@@ -1,5 +1,5 @@
 // Offline cache for Receipt Keeper (web version).
-var CACHE = 'receipt-keeper-v8';
+var CACHE = 'receipt-keeper-v9';
 var FILES = [
   './',
   'index.html',
