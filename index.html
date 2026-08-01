@@ -140,11 +140,7 @@
       <div id="entriesWrap"></div>
       <div class="webonly hidden" id="webExportRow">
         <div class="btn-row">
-          <button class="btn-secondary" id="btnOpenSheet">&#128202; Open spreadsheet</button>
           <button class="btn-secondary" id="btnPhotos">&#128247; View photos</button>
-        </div>
-        <div class="btn-row">
-          <button class="btn-secondary" id="btnExportZip">&#128230; Export year (photos + spreadsheet)</button>
         </div>
       </div>
     </div>
@@ -910,71 +906,6 @@ function offerWebDownloads(photoBlob, photoName) {
   });
 }
 
-function currentSheetFile() {
-  return loadRows(state.year).then(function (rows) {
-    if (!rows.length) return null;
-    return new File([buildXlsx(rows)], 'Receipts-' + state.year + '.xlsx', {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    });
-  });
-}
-
-/* "Open spreadsheet": hands the up-to-date Excel file to the phone —
-   pick Excel / Sheets in the menu to open it, or it saves to Downloads. */
-function openSpreadsheet() {
-  currentSheetFile().then(function (f) {
-    if (!f) { toast('No receipts yet for ' + state.year); return; }
-    shareOrDownload([f]);
-  }).catch(function (e) {
-    toast('Could not build the spreadsheet: ' + (e && e.message ? e.message : 'error'));
-  });
-}
-
-function exportZip() {
-  if (!hasFileStorage()) { openSpreadsheet(); return; }
-  var entries = [];
-  yearSourceDir(state.year).then(function (dir) {
-    var it = dir.values();
-    function next() {
-      return it.next().then(function (r) {
-        if (r.done) return entries;
-        var h = r.value;
-        if (h.kind !== 'file') return next();
-        return h.getFile().then(function (f) {
-          return f.arrayBuffer().then(function (ab) {
-            entries.push({ name: state.year + '/' + f.name, data: new Uint8Array(ab) });
-            return next();
-          });
-        });
-      });
-    }
-    return next();
-  }).catch(function () { return []; })
-    .then(function (list) {
-      if (!list || !list.length) { openSpreadsheet(); return; }
-      var zip = makeZip(list);
-      var f = new File([zip], 'Receipts-' + state.year + '.zip', { type: 'application/zip' });
-      shareOrDownload([f]);
-    });
-}
-
-function shareOrDownload(files) {
-  var can = false;
-  try { can = !!(navigator.canShare && navigator.canShare({ files: files })); } catch (e) {}
-  if (can) {
-    navigator.share({ files: files }).catch(function (err) {
-      // User closing the share sheet is fine; anything else → download instead.
-      if (!err || err.name !== 'AbortError') downloadAll(files);
-    });
-  } else {
-    downloadAll(files);
-  }
-}
-function downloadAll(files) {
-  for (var i = 0; i < files.length; i++) downloadBlob(files[i], files[i].name);
-  toast('Saved to your Downloads');
-}
-
 /* ================= Photo gallery ================= */
 var photoUrls = [];
 
@@ -1022,8 +953,7 @@ function showPhotos() {
     $('photosHint').textContent = chosenDir
       ? 'These photos live in the “' + chosenDir.name + ' › ' + state.year +
         '” folder on this device — you can also browse them with your Files app.'
-      : 'These photos live in this app’s storage. Use “Export year” to copy ' +
-        'them into your Files app.';
+      : 'These photos live in this app’s storage.';
   });
 }
 
@@ -1043,50 +973,6 @@ function openPhotoOverlay(url, name) {
   ov.addEventListener('click', close);
   ov.appendChild(img); ov.appendChild(x);
   document.body.appendChild(ov);
-}
-
-/* Store-only ZIP builder */
-var CRC_TABLE = (function () {
-  var t = new Uint32Array(256);
-  for (var n = 0; n < 256; n++) {
-    var c = n;
-    for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
-function crc32(u8) {
-  var c = 0xFFFFFFFF;
-  for (var i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
-  return (c ^ 0xFFFFFFFF) >>> 0;
-}
-function makeZip(entries) {
-  var enc = new TextEncoder();
-  var chunks = [], central = [], offset = 0;
-  function u16(v) { return new Uint8Array([v & 255, (v >> 8) & 255]); }
-  function u32(v) { return new Uint8Array([v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255]); }
-  for (var i = 0; i < entries.length; i++) {
-    var e = entries[i], name = enc.encode(e.name), crc = crc32(e.data);
-    var head = [u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0x21),
-      u32(crc), u32(e.data.length), u32(e.data.length), u16(name.length), u16(0)];
-    var localSize = 30 + name.length + e.data.length;
-    for (var h = 0; h < head.length; h++) chunks.push(head[h]);
-    chunks.push(name, e.data);
-    central.push({ name: name, crc: crc, size: e.data.length, offset: offset });
-    offset += localSize;
-  }
-  var cdStart = offset, cdSize = 0;
-  for (var j = 0; j < central.length; j++) {
-    var c = central[j];
-    var rec = [u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0x21),
-      u32(c.crc), u32(c.size), u32(c.size), u16(c.name.length), u16(0), u16(0),
-      u16(0), u16(0), u32(0), u32(c.offset)];
-    for (var r = 0; r < rec.length; r++) { chunks.push(rec[r]); cdSize += rec[r].length; }
-    chunks.push(c.name); cdSize += c.name.length;
-  }
-  chunks.push(u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length),
-    u32(cdSize), u32(cdStart), u16(0));
-  return new Blob(chunks, { type: 'application/zip' });
 }
 
 /* ================= Init ================= */
@@ -1109,10 +995,8 @@ function init() {
   $('btnScan').addEventListener('click', startScan);
   $('btnSave').addEventListener('click', saveCurrent);
   $('btnDiscard').addEventListener('click', discardCurrent);
-  $('btnOpenSheet').addEventListener('click', openSpreadsheet);
   $('btnPhotos').addEventListener('click', showPhotos);
   $('btnPhotosBack').addEventListener('click', closePhotos);
-  $('btnExportZip').addEventListener('click', exportZip);
 
   // Re-sync whenever the app comes back to the foreground, so the list always
   // matches the spreadsheet even if it was edited elsewhere.
@@ -1183,8 +1067,7 @@ function refreshStorageUI() {
   } else if (opfsOk) {
     $('storageHint').innerHTML =
       'Receipts are stored inside this app’s private storage, one folder per tax year. ' +
-      '(This browser doesn’t allow direct folder access.) Use <b>Export year</b> any time ' +
-      'to save the photos and spreadsheet to your Files app.';
+      '(This browser doesn’t allow direct folder access.)';
   } else {
     $('storageHint').innerHTML =
       'This browser can’t write files directly. Your receipt records are kept safely in ' +

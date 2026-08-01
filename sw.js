@@ -1,5 +1,5 @@
 // Offline cache for Receipt Keeper (web version).
-var CACHE = 'receipt-keeper-v5';
+var CACHE = 'receipt-keeper-v6';
 var FILES = [
   './',
   'index.html',
@@ -24,7 +24,13 @@ self.addEventListener('install', function (e) {
 });
 
 self.addEventListener('activate', function (e) {
-  e.waitUntil(self.clients.claim());
+  e.waitUntil(
+    caches.keys().then(function (keys) {
+      return Promise.all(keys.map(function (k) {
+        if (k !== CACHE) return caches.delete(k);
+      }));
+    }).then(function () { return self.clients.claim(); })
+  );
 });
 
 self.addEventListener('fetch', function (e) {
