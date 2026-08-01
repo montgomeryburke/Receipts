@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0e7c66">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Receipt Keeper</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --brand: #0e7c66;
+    --brand-dark: #0a5c4c;
+    --bg: #f4f6f5;
+    --card: #ffffff;
+    --text: #1c2321;
+    --muted: #6b7773;
+    --danger: #b3402a;
+    --line: #e3e8e6;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, Roboto, "Segoe UI", sans-serif; }
+  body { padding-bottom: 40px; }
+  header {
+    background: var(--brand); color: #fff; padding: 14px 16px;
+    padding-top: calc(14px + env(safe-area-inset-top));
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 19px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  .yearwrap { display: flex; align-items: center; gap: 6px; }
+  .yearwrap label { font-size: 12px; opacity: .85; }
+  select#year {
+    background: var(--brand-dark); color: #fff; border: none; border-radius: 8px;
+    font-size: 15px; padding: 7px 10px; font-weight: 600;
+  }
+  main { padding: 16px; max-width: 560px; margin: 0 auto; }
+  .card {
+    background: var(--card); border-radius: 14px; padding: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 14px;
+  }
+  button {
+    font-family: inherit; border: none; border-radius: 12px; cursor: pointer;
+    font-size: 16px; font-weight: 600;
+  }
+  .btn-big {
+    width: 100%; padding: 18px; background: var(--brand); color: #fff; font-size: 18px;
+  }
+  .btn-big:active { background: var(--brand-dark); }
+  .btn-secondary { background: #e8eeec; color: var(--text); padding: 12px 16px; }
+  .btn-danger { background: #f6e5e0; color: var(--danger); padding: 12px 16px; }
+  .btn-row { display: flex; gap: 10px; margin-top: 14px; }
+  .btn-row button { flex: 1; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 10px; line-height: 1.45; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .6px;
+       color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  #photoPreview { width: 100%; border-radius: 10px; max-height: 260px; object-fit: contain;
+                  background: #222; }
+  .progresswrap { margin: 12px 0 4px; }
+  .progressbar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .progressbar > div { height: 100%; width: 0%; background: var(--brand); transition: width .2s; }
+  .progresslabel { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .field { margin-top: 12px; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+  .field input {
+    width: 100%; font-size: 17px; padding: 12px; border: 1.5px solid var(--line);
+    border-radius: 10px; font-family: inherit; background: #fff; color: var(--text);
+  }
+  .field input:focus { outline: none; border-color: var(--brand); }
+  .amount-row { display: flex; gap: 10px; }
+  .amount-row .field { flex: 1; }
+  .detected { font-size: 12px; color: var(--brand); margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px;
+       padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.amt, th.amt { text-align: right; white-space: nowrap; }
+  .summary { display: flex; justify-content: space-between; align-items: baseline;
+             margin-bottom: 10px; }
+  .summary .total { font-size: 22px; font-weight: 700; color: var(--brand); }
+  .summary .count { font-size: 13px; color: var(--muted); }
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #24312d; color: #fff; padding: 12px 20px; border-radius: 10px;
+    font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .25s;
+    max-width: 86%; text-align: center; z-index: 50;
+  }
+  #toast.show { opacity: 1; }
+  .hidden { display: none !important; }
+  .spinner {
+    width: 22px; height: 22px; border: 3px solid var(--line);
+    border-top-color: var(--brand); border-radius: 50%; margin: 0 auto;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 14px 0; }
+  .webonly { }
+</style>
+</head>
+<body>
+<header>
+  <h1>Receipt Keeper</h1>
+  <div class="yearwrap">
+    <label for="year">Tax year</label>
+    <select id="year"></select>
+  </div>
+</header>
+
+<main>
+  <!-- HOME VIEW -->
+  <div id="viewHome">
+    <div class="card">
+      <button class="btn-big" id="btnScan">&#128247;&nbsp; Scan a receipt</button>
+      <div class="btn-row hidden" id="reconnectRow">
+        <button class="btn-secondary" id="btnReconnect">Reconnect your receipts folder</button>
+      </div>
+      <div class="hint" id="storageHint"></div>
+      <div class="btn-row hidden" id="folderRow">
+        <button class="btn-secondary" id="btnChooseDir">Choose folder&hellip;</button>
+        <button class="btn-secondary hidden" id="btnForgetDir">Use private storage</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="summary">
+        <span class="count" id="sumCount"></span>
+        <span class="total" id="sumTotal"></span>
+      </div>
+      <div id="entriesWrap"></div>
+      <div class="btn-row webonly hidden" id="webExportRow">
+        <button class="btn-secondary" id="btnExportXlsx">Save spreadsheet</button>
+        <button class="btn-secondary" id="btnExportZip">Export year (zip)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REVIEW VIEW -->
+  <div id="viewReview" class="hidden">
+    <div class="card">
+      <h2>Receipt photo</h2>
+      <img id="photoPreview" alt="receipt photo">
+      <div class="progresswrap" id="ocrProgress">
+        <div class="progressbar"><div id="ocrBar"></div></div>
+        <div class="progresslabel" id="ocrLabel">Reading receipt&hellip;</div>
+      </div>
+    </div>
+    <div class="card" id="reviewForm">
+      <h2>Confirm details</h2>
+      <div class="field">
+        <label for="fDate">Date</label>
+        <input type="date" id="fDate">
+      </div>
+      <div class="amount-row">
+        <div class="field">
+          <label for="fAmount">Total (incl. GST)</label>
+          <input type="number" id="fAmount" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <div class="field">
+          <label for="fGst">GST (optional)</label>
+          <input type="number" id="fGst" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
+        </div>
+      </div>
+      <div class="detected" id="detectedNote"></div>
+      <div class="field">
+        <label for="fDesc">What was it for?</label>
+        <input type="text" id="fDesc" placeholder="e.g. office supplies" autocomplete="off">
+      </div>
+      <div class="btn-row">
+        <button class="btn-danger" id="btnDiscard">Discard</button>
+        <button class="btn-big" id="btnSave" style="flex:2">Save receipt</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+<input type="file" accept="image/*" capture="environment" id="webCamInput" class="hidden">
+
+<script src="xlsx.full.min.js"></script>
+<script src="tesseract.min.js"></script>
+<script>
+'use strict';
+
+/* ================= Environment ================= */
+var IS_ANDROID = typeof window.AndroidBridge !== 'undefined';
+var VENDOR = new URL('./', location.href).href;
+
+var HEADERS = ['Date', 'Description', 'Amount (incl. GST)', 'GST', 'Receipt photo'];
+var SHEET_NAME = 'Receipts';
+
+var state = {
+  year: String(new Date().getFullYear()),
+  photoUrl: null,      // URL for preview + OCR
+  photoName: null,     // file name recorded in the spreadsheet
+  photoId: null,       // Android MediaStore id (for discard)
+  photoBlob: null,     // web mode: blob to persist on save
+  worker: null,
+  workerReady: false,
+  busy: false
+};
+
+/* ================= Small helpers ================= */
+function $(id) { return document.getElementById(id); }
+
+function toast(msg) {
+  var t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+}
+
+function b64ToU8(b64) {
+  var bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+function u8ToB64(u8) {
+  var s = '', chunk = 0x8000;
+  for (var i = 0; i < u8.length; i += chunk) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+  }
+  return btoa(s);
+}
+function money(n) {
+  return '$' + (Math.round(n * 100) / 100).toFixed(2);
+}
+function todayISO() {
+  var d = new Date();
+  var m = ('0' + (d.getMonth() + 1)).slice(-2), day = ('0' + d.getDate()).slice(-2);
+  return d.getFullYear() + '-' + m + '-' + day;
+}
+function tsName() {
+  var d = new Date();
+  function p(x) { return ('0' + x).slice(-2); }
+  return 'receipt_' + d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+         '_' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '.jpg';
+}
+
+/* ================= Storage adapters ================= */
+var opfsOk = !IS_ANDROID && !!(navigator.storage && navigator.storage.getDirectory);
+var dirSupport = !IS_ANDROID && ('showDirectoryPicker' in window);
+var chosenDir = null;        // FileSystemDirectoryHandle the user picked
+var pendingDirHandle = null; // saved handle waiting for permission re-grant
+
+/* --- tiny IndexedDB key-value store (persists the folder handle) --- */
+function idbOpen() {
+  return new Promise(function (res, rej) {
+    var r = indexedDB.open('rk-db', 1);
+    r.onupgradeneeded = function () { r.result.createObjectStore('kv'); };
+    r.onsuccess = function () { res(r.result); };
+    r.onerror = function () { rej(r.error); };
+  });
+}
+function idbSet(key, val) {
+  return idbOpen().then(function (db) {
+    return new Promise(function (res, rej) {
+      var tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put(val, key);
+      tx.oncomplete = res; tx.onerror = function () { rej(tx.error); };
+    });
+  });
+}
+function idbGet(key) {
+  return idbOpen().then(function (db) {
+    return new Promise(function (res) {
+      var r = db.transaction('kv').objectStore('kv').get(key);
+      r.onsuccess = function () { res(r.result || null); };
+      r.onerror = function () { res(null); };
+    });
+  }).catch(function () { return null; });
+}
+function idbDel(key) {
+  return idbOpen().then(function (db) {
+    return new Promise(function (res) {
+      var tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').delete(key);
+      tx.oncomplete = res; tx.onerror = res;
+    });
+  }).catch(function () {});
+}
+
+/* Year directory in whichever storage is active (chosen folder, else private) */
+function activeYearDir(year, create) {
+  if (chosenDir) return chosenDir.getDirectoryHandle(year, { create: !!create });
+  return opfsDir(year, create);
+}
+function hasFileStorage() { return !!chosenDir || opfsOk; }
+
+function opfsDir(year, create) {
+  return navigator.storage.getDirectory().then(function (root) {
+    return root.getDirectoryHandle('Receipts', { create: !!create });
+  }).then(function (r) {
+    return r.getDirectoryHandle(year, { create: !!create });
+  });
+}
+
+function readXlsx(year) {
+  if (IS_ANDROID) {
+    var b64 = AndroidBridge.readSpreadsheet(year);
+    return Promise.resolve(b64 ? b64ToU8(b64) : null);
+  }
+  if (!hasFileStorage()) {
+    return Promise.resolve(state._memXlsx && state._memXlsx[year] || null);
+  }
+  return activeYearDir(year, false).then(function (dir) {
+    return dir.getFileHandle('Receipts-' + year + '.xlsx');
+  }).then(function (fh) { return fh.getFile(); })
+    .then(function (f) { return f.arrayBuffer(); })
+    .then(function (ab) { return new Uint8Array(ab); })
+    .catch(function () { return null; });
+}
+
+function writeXlsx(year, u8) {
+  if (IS_ANDROID) {
+    var res = AndroidBridge.writeSpreadsheet(year, u8ToB64(u8));
+    return res === 'ok' ? Promise.resolve() : Promise.reject(new Error(res));
+  }
+  if (!hasFileStorage()) {
+    state._memXlsx = state._memXlsx || {};
+    state._memXlsx[year] = u8;
+    return Promise.resolve();
+  }
+  return activeYearDir(year, true).then(function (dir) {
+    return dir.getFileHandle('Receipts-' + year + '.xlsx', { create: true });
+  }).then(function (fh) { return fh.createWritable(); })
+    .then(function (w) {
+      return w.write(u8).then(function () { return w.close(); });
+    });
+}
+
+function savePhotoWeb(year, blob, name) {
+  if (!hasFileStorage()) return Promise.resolve(false);
+  return activeYearDir(year, true).then(function (dir) {
+    return dir.getFileHandle(name, { create: true });
+  }).then(function (fh) { return fh.createWritable(); })
+    .then(function (w) {
+      return w.write(blob).then(function () { return w.close(); });
+    }).then(function () { return true; });
+}
+
+function deleteCapturedPhoto() {
+  if (IS_ANDROID && state.photoId) {
+    try { AndroidBridge.deletePhoto(String(state.photoId)); } catch (e) {}
+  }
+}
+
+/* ================= Spreadsheet logic ================= */
+function loadRows(year) {
+  return readXlsx(year).then(function (u8) {
+    if (!u8) return [];
+    try {
+      var wb = XLSX.read(u8, { type: 'array' });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (rows.length && String(rows[0][0]).toLowerCase() === 'date') rows.shift();
+      return rows;
+    } catch (e) {
+      return [];
+    }
+  });
+}
+
+function appendRow(year, row) {
+  return loadRows(year).then(function (rows) {
+    rows.push(row);
+    var data = [HEADERS].concat(rows);
+    var ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [{ wch: 11 }, { wch: 28 }, { wch: 16 }, { wch: 10 }, { wch: 30 }];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME);
+    var out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    return writeXlsx(year, new Uint8Array(out));
+  });
+}
+
+/* ================= OCR ================= */
+function getWorker(onProgress) {
+  if (state.worker && state.workerReady) return Promise.resolve(state.worker);
+  return Tesseract.createWorker('eng', 1, {
+    workerPath: VENDOR + 'worker.min.js',
+    corePath: VENDOR,
+    langPath: VENDOR.replace(/\/$/, ''),
+    workerBlobURL: false,
+    logger: function (m) {
+      if (onProgress) onProgress(m);
+    }
+  }).then(function (w) {
+    state.worker = w;
+    state.workerReady = true;
+    return w;
+  });
+}
+
+function preprocess(img) {
+  var MAX = 1700;
+  var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  var scale = Math.min(1, MAX / Math.max(w, h));
+  var cw = Math.round(w * scale), ch = Math.round(h * scale);
+  var c = document.createElement('canvas');
+  c.width = cw; c.height = ch;
+  var ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0, cw, ch);
+  var d = ctx.getImageData(0, 0, cw, ch), px = d.data;
+  for (var i = 0; i < px.length; i += 4) {
+    var g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    g = (g - 128) * 1.25 + 132;           // mild contrast boost
+    g = g < 0 ? 0 : (g > 255 ? 255 : g);
+    px[i] = px[i + 1] = px[i + 2] = g;
+  }
+  ctx.putImageData(d, 0, 0);
+  return c;
+}
+
+/* Extract total + GST from OCR text */
+function extractAmounts(text) {
+  var lines = text.split('\n');
+  var best = null, gst = null, all = [];
+
+  function values(line) {
+    var out = [], re = /(\d{1,3}(?:,\d{3})+\.\d{2}|\d+\.\d{2})/g, m;
+    while ((m = re.exec(line)) !== null) {
+      var v = parseFloat(m[1].replace(/,/g, ''));
+      if (isFinite(v) && v > 0 && v < 1000000) out.push(v);
+    }
+    return out;
+  }
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i], low = line.toLowerCase();
+    var vals = values(line);
+    if (!vals.length) continue;
+    var max = Math.max.apply(null, vals);
+    all.push(max);
+
+    var score = 0;
+    if (/change|cash\b|tender|rounding|loyalty|points|account|approved|auth/.test(low)) {
+      score = -1;
+    } else if (/sub\s*-?\s*total/.test(low)) {
+      score = 1;
+    } else if (/grand\s*total|total\s*due|amount\s*due|balance\s*due|total\s*incl|inc\.?\s*gst/.test(low)) {
+      score = 5;
+    } else if (/\btotal\b/.test(low)) {
+      score = 4;
+    } else if (/amount|balance/.test(low)) {
+      score = 2;
+    }
+
+    if (/\bgst\b|\btax\b|\bhst\b|\bvat\b/.test(low) && score < 4) {
+      var gv = Math.min.apply(null, vals);
+      if (gst === null || gv > gst.value) gst = { value: gv };
+      continue;
+    }
+
+    if (score > 0 && (best === null || score > best.score ||
+        (score === best.score && max > best.value))) {
+      best = { value: max, score: score };
+    }
+  }
+
+  var total = best ? best.value : (all.length ? Math.max.apply(null, all) : null);
+  var gstVal = gst && total !== null && gst.value < total ? gst.value : null;
+  return { total: total, gst: gstVal, confident: !!best };
+}
+
+/* ================= Views ================= */
+function showHome() {
+  $('viewReview').classList.add('hidden');
+  $('viewHome').classList.remove('hidden');
+  refreshEntries();
+}
+
+function showReview() {
+  $('viewHome').classList.add('hidden');
+  $('viewReview').classList.remove('hidden');
+}
+
+function refreshEntries() {
+  loadRows(state.year).then(function (rows) {
+    var total = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var v = parseFloat(rows[i][2]);
+      if (isFinite(v)) total += v;
+    }
+    $('sumCount').textContent = rows.length === 1 ? '1 receipt in ' + state.year
+      : rows.length + ' receipts in ' + state.year;
+    $('sumTotal').textContent = money(total);
+
+    var wrap = $('entriesWrap');
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="empty">No receipts yet for ' + state.year +
+        '.<br>Tap &ldquo;Scan a receipt&rdquo; to add the first one.</div>';
+      return;
+    }
+    var html = '<table><tr><th>Date</th><th>Description</th><th class="amt">Amount</th></tr>';
+    var start = Math.max(0, rows.length - 8);
+    for (var j = rows.length - 1; j >= start; j--) {
+      var r = rows[j];
+      var amt = parseFloat(r[2]);
+      html += '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) +
+        '</td><td class="amt">' + (isFinite(amt) ? money(amt) : esc(r[2])) + '</td></tr>';
+    }
+    html += '</table>';
+    if (start > 0) {
+      html += '<div class="hint">Showing latest 8 of ' + rows.length +
+        ' &mdash; the full list is in the spreadsheet.</div>';
+    }
+    wrap.innerHTML = html;
+  });
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/* ================= Scan flow ================= */
+function startScan() {
+  if (state.busy) return;
+  if (IS_ANDROID) {
+    AndroidBridge.takePhoto(state.year);
+  } else {
+    $('webCamInput').value = '';
+    $('webCamInput').click();
+  }
+}
+
+/* Android calls this after the camera returns */
+window.onPhotoResult = function (ok, url, name) {
+  if (!ok) { toast('No photo taken'); return; }
+  var id = null;
+  var m = /\/photo\/(\d+)/.exec(url);
+  if (m) id = m[1];
+  beginReview(url, name, id, null);
+};
+
+$('webCamInput').addEventListener('change', function () {
+  var f = this.files && this.files[0];
+  if (!f) return;
+  var name = tsName();
+  beginReview(URL.createObjectURL(f), name, null, f);
+});
+
+function beginReview(url, name, photoId, blob) {
+  state.photoUrl = url;
+  state.photoName = name;
+  state.photoId = photoId;
+  state.photoBlob = blob;
+  state.busy = true;
+
+  $('photoPreview').src = url;
+  $('fDate').value = todayISO();
+  $('fAmount').value = '';
+  $('fGst').value = '';
+  $('fDesc').value = '';
+  $('detectedNote').textContent = '';
+  $('ocrProgress').classList.remove('hidden');
+  $('ocrBar').style.width = '3%';
+  $('ocrLabel').textContent = 'Starting scanner…';
+  showReview();
+
+  var img = new Image();
+  img.onload = function () { runOcr(img); };
+  img.onerror = function () {
+    ocrDone(null, 'Could not load the photo — enter the amount manually.');
+  };
+  img.src = url;
+}
+
+function runOcr(img) {
+  var canvas;
+  try { canvas = preprocess(img); }
+  catch (e) { ocrDone(null, 'Could not process the photo — enter details manually.'); return; }
+
+  getWorker(function (m) {
+    if (m && m.status === 'recognizing text') {
+      $('ocrBar').style.width = Math.round(8 + m.progress * 90) + '%';
+      $('ocrLabel').textContent = 'Reading receipt… ' + Math.round(m.progress * 100) + '%';
+    } else if (m && m.status) {
+      $('ocrLabel').textContent = 'Preparing scanner…';
+    }
+  }).then(function (worker) {
+    $('ocrBar').style.width = '8%';
+    return worker.recognize(canvas);
+  }).then(function (res) {
+    var text = res && res.data && res.data.text ? res.data.text : '';
+    var found = extractAmounts(text);
+    ocrDone(found, null);
+  }).catch(function (e) {
+    ocrDone(null, 'Scanning failed — enter the amount manually.');
+  });
+}
+
+function ocrDone(found, errMsg) {
+  state.busy = false;
+  $('ocrProgress').classList.add('hidden');
+  if (errMsg) {
+    $('detectedNote').textContent = errMsg;
+    return;
+  }
+  if (found && found.total !== null) {
+    $('fAmount').value = found.total.toFixed(2);
+    var note = found.confident
+      ? 'Found total ' + money(found.total) + ' — please check it.'
+      : 'Best guess: ' + money(found.total) + ' — please check it.';
+    if (found.gst !== null) {
+      $('fGst').value = found.gst.toFixed(2);
+      note += ' GST ' + money(found.gst) + '.';
+    }
+    $('detectedNote').textContent = note;
+  } else {
+    $('detectedNote').textContent =
+      'Couldn’t read an amount — please type it in.';
+  }
+  try { $('fDesc').focus(); } catch (e) {}
+}
+
+function saveCurrent() {
+  var amt = parseFloat($('fAmount').value);
+  if (!isFinite(amt) || amt <= 0) { toast('Please enter the receipt amount'); return; }
+  var gstRaw = parseFloat($('fGst').value);
+  var gstVal = isFinite(gstRaw) && gstRaw > 0 ? Math.round(gstRaw * 100) / 100 : '';
+  var desc = $('fDesc').value.trim() || 'Receipt';
+  var date = $('fDate').value || todayISO();
+  amt = Math.round(amt * 100) / 100;
+
+  var row = [date, desc, amt, gstVal, state.photoName];
+  var btn = $('btnSave');
+  btn.disabled = true;
+
+  var photoStep = (!IS_ANDROID && state.photoBlob)
+    ? savePhotoWeb(state.year, state.photoBlob, state.photoName)
+    : Promise.resolve(true);
+
+  photoStep.then(function () {
+    return appendRow(state.year, row);
+  }).then(function () {
+    btn.disabled = false;
+    var loc = IS_ANDROID
+      ? 'Documents › Receipts › ' + state.year
+      : (chosenDir ? chosenDir.name + ' › ' + state.year : 'the ' + state.year + ' folder');
+    toast('Saved to ' + loc);
+    cleanupPhotoUrl();
+    if (!IS_ANDROID && !hasFileStorage()) offerWebDownloads(row);
+    showHome();
+  }).catch(function (e) {
+    btn.disabled = false;
+    toast('Save failed: ' + (e && e.message ? e.message : 'unknown error'));
+  });
+}
+
+function discardCurrent() {
+  deleteCapturedPhoto();
+  cleanupPhotoUrl();
+  toast('Discarded');
+  showHome();
+}
+
+function cleanupPhotoUrl() {
+  if (state.photoUrl && state.photoUrl.indexOf('blob:') === 0) {
+    try { URL.revokeObjectURL(state.photoUrl); } catch (e) {}
+  }
+  state.photoUrl = null; state.photoId = null; state.photoBlob = null;
+}
+
+/* ================= Web-mode export ================= */
+function downloadBlob(blob, name) {
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function () {
+    URL.revokeObjectURL(a.href); a.remove();
+  }, 4000);
+}
+
+function offerWebDownloads(row) {
+  // No persistent storage available: hand the user the updated spreadsheet now.
+  readXlsx(state.year).then(function (u8) {
+    if (u8) {
+      downloadBlob(new Blob([u8], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      }), 'Receipts-' + state.year + '.xlsx');
+    }
+  });
+}
+
+function exportXlsx() {
+  readXlsx(state.year).then(function (u8) {
+    if (!u8) { toast('No spreadsheet yet for ' + state.year); return; }
+    var f = new File([u8], 'Receipts-' + state.year + '.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    shareOrDownload([f]);
+  });
+}
+
+function exportZip() {
+  if (!hasFileStorage()) { exportXlsx(); return; }
+  var entries = [];
+  activeYearDir(state.year, false).then(function (dir) {
+    var it = dir.values();
+    function next() {
+      return it.next().then(function (r) {
+        if (r.done) return entries;
+        var h = r.value;
+        if (h.kind !== 'file') return next();
+        return h.getFile().then(function (f) {
+          return f.arrayBuffer().then(function (ab) {
+            entries.push({ name: state.year + '/' + f.name, data: new Uint8Array(ab) });
+            return next();
+          });
+        });
+      });
+    }
+    return next();
+  }).then(function (list) {
+    if (!list || !list.length) { toast('Nothing saved yet for ' + state.year); return; }
+    var zip = makeZip(list);
+    var f = new File([zip], 'Receipts-' + state.year + '.zip', { type: 'application/zip' });
+    shareOrDownload([f]);
+  }).catch(function () {
+    toast('Nothing saved yet for ' + state.year);
+  });
+}
+
+function shareOrDownload(files) {
+  if (navigator.canShare && navigator.canShare({ files: files })) {
+    navigator.share({ files: files }).catch(function () {});
+  } else {
+    for (var i = 0; i < files.length; i++) downloadBlob(files[i], files[i].name);
+  }
+}
+
+/* Store-only ZIP builder */
+var CRC_TABLE = (function () {
+  var t = new Uint32Array(256);
+  for (var n = 0; n < 256; n++) {
+    var c = n;
+    for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(u8) {
+  var c = 0xFFFFFFFF;
+  for (var i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function makeZip(entries) {
+  var enc = new TextEncoder();
+  var chunks = [], central = [], offset = 0;
+  function u16(v) { return new Uint8Array([v & 255, (v >> 8) & 255]); }
+  function u32(v) { return new Uint8Array([v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255]); }
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i], name = enc.encode(e.name), crc = crc32(e.data);
+    var head = [u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0x21),
+      u32(crc), u32(e.data.length), u32(e.data.length), u16(name.length), u16(0)];
+    var localSize = 30 + name.length + e.data.length;
+    for (var h = 0; h < head.length; h++) chunks.push(head[h]);
+    chunks.push(name, e.data);
+    central.push({ name: name, crc: crc, size: e.data.length, offset: offset });
+    offset += localSize;
+  }
+  var cdStart = offset, cdSize = 0;
+  for (var j = 0; j < central.length; j++) {
+    var c = central[j];
+    var rec = [u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0x21),
+      u32(c.crc), u32(c.size), u32(c.size), u16(c.name.length), u16(0), u16(0),
+      u16(0), u16(0), u32(0), u32(c.offset)];
+    for (var r = 0; r < rec.length; r++) { chunks.push(rec[r]); cdSize += rec[r].length; }
+    chunks.push(c.name); cdSize += c.name.length;
+  }
+  chunks.push(u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length),
+    u32(cdSize), u32(cdStart), u16(0));
+  return new Blob(chunks, { type: 'application/zip' });
+}
+
+/* ================= Init ================= */
+function initYearSelect() {
+  var sel = $('year'), now = new Date().getFullYear();
+  for (var y = now + 1; y >= now - 7; y--) {
+    var o = document.createElement('option');
+    o.value = String(y); o.textContent = String(y);
+    if (y === now) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.addEventListener('change', function () {
+    state.year = sel.value;
+    refreshEntries();
+  });
+}
+
+function init() {
+  initYearSelect();
+  $('btnScan').addEventListener('click', startScan);
+  $('btnSave').addEventListener('click', saveCurrent);
+  $('btnDiscard').addEventListener('click', discardCurrent);
+  $('btnExportXlsx').addEventListener('click', exportXlsx);
+  $('btnExportZip').addEventListener('click', exportZip);
+
+  $('btnChooseDir').addEventListener('click', chooseDir);
+  $('btnForgetDir').addEventListener('click', forgetDir);
+  $('btnReconnect').addEventListener('click', reconnectDir);
+
+  if (!IS_ANDROID) {
+    if (opfsOk && navigator.storage.persist) {
+      navigator.storage.persist().catch(function () {});
+    }
+    // Register the offline service worker when hosted (not on file://).
+    if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    }
+  }
+
+  // Restore a previously chosen folder, then draw.
+  var restore = dirSupport ? idbGet('dir') : Promise.resolve(null);
+  restore.then(function (h) {
+    if (!h || typeof h.queryPermission !== 'function') return;
+    return h.queryPermission({ mode: 'readwrite' }).then(function (p) {
+      if (p === 'granted') chosenDir = h;
+      else if (p === 'prompt') pendingDirHandle = h;
+    }).catch(function () {});
+  }).then(function () {
+    refreshStorageUI();
+    refreshEntries();
+  });
+}
+
+function refreshStorageUI() {
+  if (IS_ANDROID) {
+    $('storageHint').innerHTML =
+      'Each receipt photo and a running spreadsheet are saved on your phone in ' +
+      '<b>Documents &#8250; Receipts &#8250; (tax year)</b>. Open them any time with your Files app.';
+    return;
+  }
+  $('webExportRow').classList.remove('hidden');
+  $('reconnectRow').classList.toggle('hidden', !pendingDirHandle);
+  $('folderRow').classList.toggle('hidden', !dirSupport);
+  $('btnForgetDir').classList.toggle('hidden', !chosenDir);
+
+  if (pendingDirHandle) {
+    $('storageHint').innerHTML =
+      'Your receipts folder needs to be reconnected — tap the button above and allow access.';
+  } else if (chosenDir) {
+    $('storageHint').innerHTML =
+      'Saving to the <b>' + esc(chosenDir.name) + '</b> folder on this device — ' +
+      'a subfolder is created for each tax year with the photos and spreadsheet together.';
+  } else if (dirSupport) {
+    $('storageHint').innerHTML =
+      'Receipts are currently kept in this app’s private storage. ' +
+      'Tap <b>Choose folder&hellip;</b> to save them straight into a folder of your choice instead.';
+  } else if (opfsOk) {
+    $('storageHint').innerHTML =
+      'Receipts are stored inside this app’s private storage, one folder per tax year. ' +
+      '(This browser doesn’t allow direct folder access.) Use <b>Export year</b> any time ' +
+      'to save the photos and spreadsheet to your Files app.';
+  } else {
+    $('storageHint').innerHTML =
+      'This browser can’t keep files between visits — after each save, the updated ' +
+      'spreadsheet is downloaded so you can keep it in your Files app.';
+  }
+}
+
+function chooseDir() {
+  if (!dirSupport) return;
+  window.showDirectoryPicker({ mode: 'readwrite', startIn: 'documents' })
+    .then(function (h) {
+      chosenDir = h;
+      pendingDirHandle = null;
+      return idbSet('dir', h).catch(function () {});
+    })
+    .then(function () {
+      if (!chosenDir) return;
+      toast('Receipts will be saved to “' + chosenDir.name + '”');
+      refreshStorageUI();
+      refreshEntries();
+    })
+    .catch(function () { /* user cancelled */ });
+}
+
+function forgetDir() {
+  chosenDir = null;
+  pendingDirHandle = null;
+  idbDel('dir');
+  toast('Using private app storage');
+  refreshStorageUI();
+  refreshEntries();
+}
+
+function reconnectDir() {
+  if (!pendingDirHandle) return;
+  pendingDirHandle.requestPermission({ mode: 'readwrite' }).then(function (p) {
+    if (p === 'granted') {
+      chosenDir = pendingDirHandle;
+      pendingDirHandle = null;
+      toast('Folder reconnected');
+    } else {
+      toast('Folder access was not allowed');
+    }
+    refreshStorageUI();
+    refreshEntries();
+  }).catch(function () { toast('Folder access was not allowed'); });
+}
+
+init();
+</script>
+</body>
+</html>
