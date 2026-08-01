@@ -315,13 +315,13 @@ function idbDel(key) {
 
 function hasFileStorage() { return !!chosenDir || opfsOk; }
 
-/* Best directory to VIEW files for a year: the chosen folder when accessible,
-   otherwise the app's private mirror. Never triggers a permission prompt. */
+/* Directory to VIEW files for a year. The chosen folder is authoritative:
+   when one is set, only it is read — the app's private mirror is just a
+   backup, so photos you deleted from your folder stay deleted. The mirror
+   is only shown when no folder has been chosen at all. */
 function yearSourceDir(year) {
-  var p = chosenDir
-    ? chosenDir.getDirectoryHandle(year)
-    : Promise.reject(new Error('no folder'));
-  return p.catch(function () { return opfsDir(year, false); });
+  if (chosenDir) return chosenDir.getDirectoryHandle(year);
+  return opfsDir(year, false);
 }
 
 function opfsReadFile(year, name) {
