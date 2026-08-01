@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#1d3f6e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Event Scout</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+  :root {
+    --brand: #1d3f6e;
+    --brand-dark: #142c4e;
+    --accent: #e0562c;
+    --bg: #f4f6f5;
+    --card: #ffffff;
+    --text: #1c2321;
+    --muted: #6b7773;
+    --danger: #b3402a;
+    --line: #e3e8e6;
+    --racing: #b3402a;
+    --music: #6d4bb8;
+    --comedy: #b8860b;
+    --sports: #1a7a4a;
+    --arts: #8a4b6e;
+    --deals: #c05621;
+    --other: #5a6b78;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, Roboto, "Segoe UI", sans-serif; }
+  body { padding-bottom: 50px; }
+  header {
+    background: var(--brand); color: #fff; padding: 12px 16px;
+    padding-top: calc(12px + env(safe-area-inset-top));
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 20;
+  }
+  header h1 { font-size: 19px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  header .gear {
+    background: var(--brand-dark); color: #fff; border-radius: 10px;
+    padding: 8px 12px; font-size: 15px; font-weight: 600;
+  }
+  main { padding: 12px; max-width: 620px; margin: 0 auto; }
+  .card {
+    background: var(--card); border-radius: 14px; padding: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 12px;
+  }
+  button {
+    font-family: inherit; border: none; border-radius: 12px; cursor: pointer;
+    font-size: 16px; font-weight: 600;
+  }
+  .btn-big { width: 100%; padding: 16px; background: var(--brand); color: #fff; font-size: 17px; }
+  .btn-big:active { background: var(--brand-dark); }
+  .btn-big:disabled { opacity: .6; }
+  .btn-secondary { background: #e8eeec; color: var(--text); padding: 11px 14px; font-size: 14px; }
+  .btn-danger { background: #f6e5e0; color: var(--danger); padding: 10px 14px; font-size: 14px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; line-height: 1.45; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px;
+       color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  input[type=text], input[type=search], input[type=url], select, textarea {
+    width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
+    font-size: 15px; font-family: inherit; background: #fff; color: var(--text);
+  }
+  /* location + radius */
+  .locrow { display: flex; gap: 8px; }
+  .locrow input { flex: 1; }
+  .locrow button { white-space: nowrap; padding: 11px 14px; font-size: 14px;
+    background: var(--brand); color: #fff; }
+  #locStatus { font-size: 13px; margin-top: 8px; color: var(--muted); }
+  #locStatus.ok { color: var(--sports); font-weight: 600; }
+  .radiusrow { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .radiusrow input[type=range] { flex: 1; accent-color: var(--brand); }
+  .radiusrow .val { font-weight: 700; font-size: 15px; min-width: 62px; text-align: right; }
+  /* day strip */
+  .daystrip { display: flex; gap: 6px; overflow-x: auto; padding: 4px 2px 8px;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .daystrip::-webkit-scrollbar { display: none; }
+  .daychip {
+    flex: 0 0 auto; background: #fff; border: 1px solid var(--line); border-radius: 12px;
+    padding: 7px 10px; text-align: center; font-size: 12px; color: var(--text); min-width: 56px;
+  }
+  .daychip .dow { display: block; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .daychip .dnum { display: block; font-size: 14px; font-weight: 700; margin-top: 1px; }
+  .daychip .cnt { display: block; font-size: 10px; color: var(--brand); font-weight: 700; margin-top: 1px; min-height: 12px; }
+  .daychip.sel { background: var(--brand); border-color: var(--brand); }
+  .daychip.sel .dow, .daychip.sel .dnum, .daychip.sel .cnt { color: #fff; }
+  /* category chips */
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 8px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: 0 0 auto; border: 1px solid var(--line); background: #fff; border-radius: 999px;
+    padding: 8px 13px; font-size: 13.5px; font-weight: 600; color: var(--text);
+  }
+  .chip.sel { background: var(--brand); color: #fff; border-color: var(--brand); }
+  /* status */
+  #srcStatus { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+  #srcStatus .err { color: var(--danger); }
+  /* event cards */
+  .ev { background: var(--card); border-radius: 14px; padding: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 10px; }
+  .ev .toprow { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+  .ev h3 { margin: 0; font-size: 16px; line-height: 1.3; }
+  .badge { display: inline-block; border-radius: 6px; padding: 2px 7px; font-size: 10.5px;
+    font-weight: 700; color: #fff; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
+  .b-racing { background: var(--racing); } .b-music { background: var(--music); }
+  .b-comedy { background: var(--comedy); } .b-sports { background: var(--sports); }
+  .b-arts { background: var(--arts); } .b-deals { background: var(--deals); }
+  .b-other { background: var(--other); }
+  .ev .meta { font-size: 13.5px; color: var(--muted); margin-top: 6px; line-height: 1.55; }
+  .ev .meta b { color: var(--text); }
+  .ev .desc { font-size: 13.5px; margin-top: 8px; line-height: 1.5; }
+  .ev .foot { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+  .ev .foot a { flex: 1; text-align: center; background: var(--brand); color: #fff;
+    text-decoration: none; border-radius: 10px; padding: 10px; font-weight: 600; font-size: 14px; min-width: 120px; }
+  .srcTag { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .lead { border-left: 4px solid var(--accent); }
+  .lead .unconf { font-size: 11.5px; color: var(--accent); font-weight: 700; }
+  .kwhit { background: #ffe9d6; border-radius: 4px; padding: 0 3px; }
+  #results .empty { text-align: center; color: var(--muted); padding: 30px 10px; font-size: 14px; }
+  /* banner */
+  .banner { background: #fff7e8; border: 1px solid #f0dcb0; border-radius: 12px;
+    padding: 12px; font-size: 13.5px; line-height: 1.5; margin-bottom: 12px; }
+  .banner b { color: #8a6008; }
+  .banner button { margin-top: 8px; }
+  /* modal */
+  .modal-wrap { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 50;
+    display: none; align-items: flex-end; justify-content: center; }
+  .modal-wrap.open { display: flex; }
+  .modal { background: var(--bg); width: 100%; max-width: 620px; max-height: 92vh;
+    overflow-y: auto; border-radius: 18px 18px 0 0; padding: 16px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  .modal h2 { margin-top: 18px; }
+  .modal h2:first-child { margin-top: 0; }
+  .modal .close { float: right; background: #e8eeec; padding: 8px 14px; font-size: 14px; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .srcItem { display: flex; align-items: center; gap: 8px; background: #fff;
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; }
+  .srcItem .nm { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srcItem .tp { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
+  .srcItem button { background: #f6e5e0; color: var(--danger); padding: 6px 10px; font-size: 12px; }
+  .addsrc { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .addsrc input[type=url] { grid-column: 1 / -1; }
+  .addsrc button { background: var(--brand); color: #fff; padding: 11px; font-size: 14px; }
+  details { background: #fff; border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; margin-top: 10px; font-size: 13.5px; line-height: 1.55; }
+  details summary { font-weight: 600; cursor: pointer; }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff;
+    border-top-color: transparent; border-radius: 50%; animation: sp 0.8s linear infinite;
+    vertical-align: -2px; margin-right: 6px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏁 Event Scout</h1>
+  <button class="gear" id="btnSettings">⚙︎ Settings</button>
+</header>
+
+<main>
+  <div id="setupBanner" class="banner" style="display:none">
+    <b>One-time setup needed:</b> to search real events, add a free
+    <b>Ticketmaster API key</b> (and optionally a SeatGeek key) in Settings.
+    It takes about 2 minutes and instructions are in there.
+    You can also add your local race tracks' websites so demolition derby /
+    hit-to-pass events show up.
+    <button class="btn-secondary" id="btnOpenSettings2">Open Settings</button>
+    <button class="btn-secondary" id="btnSample">Try sample data</button>
+  </div>
+
+  <div class="card">
+    <h2>Where &amp; how far</h2>
+    <div class="locrow">
+      <input type="text" id="cityInput" placeholder="City or ZIP (or use GPS)" autocomplete="postal-code">
+      <button id="btnGPS">📍 GPS</button>
+    </div>
+    <div id="locStatus">No location set yet.</div>
+    <div class="radiusrow">
+      <span style="font-size:13px;color:var(--muted)">Radius</span>
+      <input type="range" id="radius" min="5" max="300" step="5" value="50">
+      <span class="val" id="radiusVal">50 mi</span>
+    </div>
+    <button class="btn-big" id="btnSearch" style="margin-top:12px">Search next 30 days</button>
+    <div id="srcStatus" style="margin-top:10px"></div>
+  </div>
+
+  <div class="daystrip" id="dayStrip"></div>
+  <div class="chips" id="catChips"></div>
+  <input type="search" id="q" placeholder="Filter results… (e.g. derby, wings, band name)"
+         style="margin-bottom:10px">
+
+  <div id="results"><div class="empty">Set your location and tap <b>Search</b> to find events near you.</div></div>
+</main>
+
+<!-- Settings modal -->
+<div class="modal-wrap" id="modalWrap">
+  <div class="modal">
+    <button class="close" id="btnClose">Done</button>
+    <h2>API keys (free)</h2>
+    <div class="field">
+      <label>Ticketmaster API key</label>
+      <input type="text" id="tmKey" placeholder="Paste Consumer Key here" autocapitalize="off" autocorrect="off">
+    </div>
+    <div class="field">
+      <label>SeatGeek client ID (optional — adds resale &amp; more listings)</label>
+      <input type="text" id="sgKey" placeholder="Paste Client ID here" autocapitalize="off" autocorrect="off">
+    </div>
+    <details>
+      <summary>How to get the free keys</summary>
+      <p><b>Ticketmaster</b> (concerts, sports, motorsports, comedy):<br>
+      1. Go to <a href="https://developer.ticketmaster.com" target="_blank" rel="noopener">developer.ticketmaster.com</a> and create a free account.<br>
+      2. It creates an app for you automatically — open "My Apps" and copy the <b>Consumer Key</b>.<br>
+      3. Paste it above. That's it — the free tier allows 5,000 searches a day.</p>
+      <p><b>SeatGeek</b> (includes resale tickets, similar to StubHub):<br>
+      1. Go to <a href="https://seatgeek.com/account/develop" target="_blank" rel="noopener">seatgeek.com/account/develop</a>, sign up, register an app.<br>
+      2. Copy the <b>Client ID</b> and paste it above.</p>
+    </details>
+
+    <h2>My tracked pages (race tracks, wing nights…)</h2>
+    <div class="hint" style="margin:0 0 8px">
+      Add the public <b>website</b> of any race track, racing org, fair, or restaurant.
+      Event Scout scans each page for dates in the next 30 days and for your keywords
+      (demolition derby, hit to pass, wing night…). These show up as orange
+      "unconfirmed" cards — always tap through to double-check.
+    </div>
+    <div id="srcList"></div>
+    <div class="addsrc">
+      <input type="text" id="newSrcName" placeholder="Name (e.g. Thunder Valley Raceway)">
+      <select id="newSrcType">
+        <option value="racing">🏁 Racing org / track</option>
+        <option value="deals">🍗 Restaurant / deals</option>
+        <option value="other">✨ Other</option>
+      </select>
+      <input type="url" id="newSrcUrl" placeholder="https://… (their website schedule page)">
+      <button id="btnAddSrc">＋ Add page</button>
+    </div>
+
+    <h2>Watch keywords</h2>
+    <div class="hint" style="margin:0 0 8px">
+      Events matching these get highlighted, and tracked pages are scanned for them.
+      One per line.
+    </div>
+    <textarea id="keywords" rows="6"></textarea>
+
+    <details>
+      <summary>Why can't it search Facebook or Instagram?</summary>
+      <p>Facebook shut off public event search for apps in 2018, and Instagram has no
+      event data API at all — there is no legitimate way for any third-party app to
+      search them without you being logged in. That's why racing events "hide" on
+      Facebook pages.</p>
+      <p><b>The workaround that works:</b> almost every racing org that posts on
+      Facebook also has a plain website or a page on
+      <a href="https://www.myracepass.com" target="_blank" rel="noopener">MyRacePass</a>
+      (search your track name there). Add that link under "My tracked pages" above and
+      Event Scout will watch it for you — no Facebook account needed.</p>
+    </details>
+
+    <h2>Data</h2>
+    <button class="btn-danger" id="btnClearCache">Clear cached results</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ================= state & settings ================= */
+var LS_KEY = 'eventscout.v1';
+var DEFAULT_KEYWORDS = [
+  'demolition derby', 'hit to pass', 'hit-to-pass', 'enduro', 'figure 8', 'figure eight',
+  'sprint car', 'late model', 'stock car', 'dirt track', 'motocross', 'supercross',
+  'drag racing', 'monster truck', 'tractor pull', 'truck pull', 'bump to pass',
+  'wing night', 'wing special', 'wing wednesday', 'chicken wing'
+];
+var RACING_WORDS = ['demolition derby','hit to pass','hit-to-pass','bump to pass','enduro',
+  'figure 8','figure eight','sprint car','late model','stock car','dirt track','speedway',
+  'raceway','motocross','supercross','drag rac','monster truck','tractor pull','truck pull',
+  'nascar','motorsport','racing','race night','micro sprint','midget car','modifieds','kart'];
+var WING_WORDS = ['wing night','wing special','wing wednesday','chicken wing','wings',
+  'happy hour','trivia night','all you can eat'];
+
+var settings = load() || {
+  tmKey: '', sgKey: '', radius: 50,
+  loc: null,               // {lat, lon, label}
+  keywords: DEFAULT_KEYWORDS.slice(),
+  sources: []              // {name, url, type}
+};
+var events = [];           // merged results
+var selDay = 'all';        // 'all' or 'YYYY-MM-DD'
+var selCat = 'all';
+var searching = false;
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) { return null; }
+}
+function save() { localStorage.setItem(LS_KEY, JSON.stringify(settings)); }
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+/* ================= dates ================= */
+function today0() { var d = new Date(); d.setHours(0,0,0,0); return d; }
+function addDays(d, n) { var x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function ymd(d) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' +
+         String(d.getDate()).padStart(2,'0');
+}
+function fmtDay(d) {
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function fmtTime(dt) {
+  return dt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+var WINDOW_DAYS = 30;
+
+/* ================= distance ================= */
+function haversineMi(lat1, lon1, lat2, lon2) {
+  var R = 3958.8, toR = Math.PI / 180;
+  var dLat = (lat2-lat1)*toR, dLon = (lon2-lon1)*toR;
+  var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+          Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLon/2)*Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+/* ================= location ================= */
+function setLoc(lat, lon, label) {
+  settings.loc = { lat: lat, lon: lon, label: label };
+  save();
+  var el = $('locStatus');
+  el.textContent = '📍 ' + label;
+  el.className = 'ok';
+}
+$('btnGPS').addEventListener('click', function () {
+  var el = $('locStatus');
+  if (!navigator.geolocation) { el.textContent = 'GPS not available on this device.'; return; }
+  el.className = ''; el.textContent = 'Getting your location…';
+  navigator.geolocation.getCurrentPosition(function (pos) {
+    var lat = pos.coords.latitude, lon = pos.coords.longitude;
+    setLoc(lat, lon, lat.toFixed(3) + ', ' + lon.toFixed(3));
+    // reverse geocode for a friendly name (best effort)
+    fetch('https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=' + lat + '&lon=' + lon)
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var a = j.address || {};
+        var name = a.city || a.town || a.village || a.county || j.display_name || '';
+        if (name) setLoc(lat, lon, name + (a.state ? ', ' + a.state : ''));
+      }).catch(function () {});
+  }, function (err) {
+    el.textContent = 'Could not get GPS (' + err.message + '). Type your city or ZIP instead.';
+  }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 });
+});
+$('cityInput').addEventListener('change', function () {
+  var q = this.value.trim();
+  if (!q) return;
+  var el = $('locStatus');
+  el.className = ''; el.textContent = 'Looking up "' + q + '"…';
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us,ca&q=' +
+        encodeURIComponent(q))
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j.length) { el.textContent = 'Could not find "' + q + '". Try "City, State".'; return; }
+      setLoc(parseFloat(j[0].lat), parseFloat(j[0].lon), j[0].display_name.split(',').slice(0,2).join(','));
+    })
+    .catch(function () { el.textContent = 'Lookup failed — check your connection.'; });
+});
+
+/* ================= radius ================= */
+$('radius').value = settings.radius;
+$('radiusVal').textContent = settings.radius + ' mi';
+$('radius').addEventListener('input', function () {
+  settings.radius = parseInt(this.value, 10);
+  $('radiusVal').textContent = settings.radius + ' mi';
+  save();
+});
+
+/* ================= categorization ================= */
+function matchAny(text, words) {
+  var t = (text || '').toLowerCase();
+  for (var i = 0; i < words.length; i++) if (t.indexOf(words[i]) !== -1) return words[i];
+  return null;
+}
+function categorize(ev) {
+  var blob = (ev.title + ' ' + (ev.genre || '') + ' ' + (ev.segment || '') + ' ' + (ev.desc || ''));
+  if (matchAny(blob, RACING_WORDS)) return 'racing';
+  if (matchAny(blob, WING_WORDS) && !ev.venueLat) return 'deals';
+  var seg = (ev.segment || '').toLowerCase(), gen = (ev.genre || '').toLowerCase();
+  if (gen.indexOf('comedy') !== -1 || seg === 'comedy') return 'comedy';
+  if (seg.indexOf('music') !== -1 || seg === 'concert' || seg === 'concerts') return 'music';
+  if (seg.indexOf('sport') !== -1) return 'sports';
+  if (seg.indexOf('art') !== -1 || seg.indexOf('theat') !== -1) return 'arts';
+  if (seg.indexOf('food') !== -1 || seg.indexOf('drink') !== -1) return 'deals';
+  return 'other';
+}
+var CATS = [
+  ['all', 'All'], ['racing', '🏁 Racing'], ['music', '🎵 Music'], ['comedy', '🎤 Comedy'],
+  ['sports', '🏟 Sports'], ['arts', '🎭 Arts'], ['deals', '🍗 Deals'], ['other', '✨ Other']
+];
+var CAT_LABEL = { racing:'Racing', music:'Music', comedy:'Comedy', sports:'Sports',
+                  arts:'Arts', deals:'Deals', other:'Event' };
+
+/* ================= source: Ticketmaster ================= */
+function fetchTicketmaster(loc, radius, start, end) {
+  if (!settings.tmKey) return Promise.resolve({ name: 'Ticketmaster', skipped: true, events: [] });
+  var iso = function (d) { return d.toISOString().replace(/\.\d{3}Z$/, 'Z'); };
+  var base = 'https://app.ticketmaster.com/discovery/v2/events.json?apikey=' +
+    encodeURIComponent(settings.tmKey) +
+    '&latlong=' + loc.lat + ',' + loc.lon +
+    '&radius=' + Math.min(radius, 500) + '&unit=miles' +
+    '&startDateTime=' + iso(start) + '&endDateTime=' + iso(end) +
+    '&size=200&sort=date,asc';
+  function onePage(page) {
+    return fetch(base + '&page=' + page).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 401 ? ' — check your API key' : ''));
+      return r.json();
+    });
+  }
+  return onePage(0).then(function (j) {
+    var list = (j._embedded && j._embedded.events) || [];
+    var totalPages = (j.page && j.page.totalPages) || 1;
+    var more = totalPages > 1 ? onePage(1).then(function (j2) {
+      return (j2._embedded && j2._embedded.events) || [];
+    }).catch(function () { return []; }) : Promise.resolve([]);
+    return more.then(function (extra) {
+      var out = list.concat(extra).map(function (e) {
+        var v = (e._embedded && e._embedded.venues && e._embedded.venues[0]) || {};
+        var vl = v.location || {};
+        var cls = (e.classifications && e.classifications[0]) || {};
+        var pr = (e.priceRanges && e.priceRanges[0]) || null;
+        var dt = null;
+        if (e.dates && e.dates.start) {
+          if (e.dates.start.dateTime) dt = new Date(e.dates.start.dateTime);
+          else if (e.dates.start.localDate) dt = new Date(e.dates.start.localDate + 'T19:00:00');
+        }
+        return {
+          id: 'tm:' + e.id, source: 'Ticketmaster', title: e.name, url: e.url,
+          dt: dt, hasTime: !!(e.dates && e.dates.start && e.dates.start.dateTime),
+          venue: v.name || '', venueCity: (v.city && v.city.name) || '',
+          venueLat: vl.latitude ? parseFloat(vl.latitude) : null,
+          venueLon: vl.longitude ? parseFloat(vl.longitude) : null,
+          priceMin: pr ? pr.min : null, priceMax: pr ? pr.max : null,
+          segment: (cls.segment && cls.segment.name) || '',
+          genre: (cls.genre && cls.genre.name) || '',
+          desc: e.info || e.pleaseNote || '',
+          confirmed: true
+        };
+      });
+      return { name: 'Ticketmaster', events: out };
+    });
+  }).catch(function (e) { return { name: 'Ticketmaster', error: e.message, events: [] }; });
+}
+
+/* ================= source: SeatGeek ================= */
+function fetchSeatGeek(loc, radius, start, end) {
+  if (!settings.sgKey) return Promise.resolve({ name: 'SeatGeek', skipped: true, events: [] });
+  var url = 'https://api.seatgeek.com/2/events?client_id=' + encodeURIComponent(settings.sgKey) +
+    '&lat=' + loc.lat + '&lon=' + loc.lon + '&range=' + Math.min(radius, 500) + 'mi' +
+    '&datetime_local.gte=' + ymd(start) + '&datetime_local.lte=' + ymd(end) +
+    '&per_page=100&sort=datetime_local.asc';
+  return fetch(url).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 403 ? ' — check your Client ID' : ''));
+    return r.json();
+  }).then(function (j) {
+    var out = (j.events || []).map(function (e) {
+      var v = e.venue || {}, st = e.stats || {};
+      var tax = (e.taxonomies && e.taxonomies[0] && e.taxonomies[0].name) || e.type || '';
+      return {
+        id: 'sg:' + e.id, source: 'SeatGeek', title: e.title, url: e.url,
+        dt: e.datetime_local ? new Date(e.datetime_local) : null,
+        hasTime: !e.datetime_tbd,
+        venue: v.name || '', venueCity: v.city || '',
+        venueLat: (v.location && v.location.lat) || null,
+        venueLon: (v.location && v.location.lon) || null,
+        priceMin: st.lowest_price || null, priceMax: st.highest_price || null,
+        segment: tax.replace(/_/g, ' '), genre: (e.type || '').replace(/_/g, ' '),
+        desc: '', confirmed: true
+      };
+    });
+    return { name: 'SeatGeek', events: out };
+  }).catch(function (e) { return { name: 'SeatGeek', error: e.message, events: [] }; });
+}
+
+/* ================= source: tracked pages (racing orgs, wing nights) ================= */
+var MONTHS = ['january','february','march','april','may','june','july','august',
+              'september','october','november','december'];
+function scanPageText(text, src, start, end) {
+  // collapse whitespace; keep it reasonable
+  var t = text.replace(/\s+/g, ' ').slice(0, 200000);
+  var found = [], seen = {};
+  function consider(dt, idx, matchLen) {
+    if (!dt || dt < start || dt > end) return;
+    var ctx = t.slice(Math.max(0, idx - 120), Math.min(t.length, idx + matchLen + 160)).trim();
+    var kw = matchAny(ctx, settings.keywords.map(function (k) { return k.toLowerCase(); }));
+    var key = ymd(dt) + '|' + ctx.slice(0, 60);
+    if (seen[key]) return;
+    seen[key] = 1;
+    found.push({
+      id: 'src:' + src.url + '|' + key, source: src.name, title: (kw ? kw : 'Possible event') +
+        ' — ' + src.name,
+      url: src.url, dt: dt, hasTime: false, venue: src.name, venueCity: '',
+      venueLat: null, venueLon: null, priceMin: null, priceMax: null,
+      segment: src.type, genre: '', desc: '…' + ctx + '…', confirmed: false,
+      forcedCat: src.type === 'racing' ? 'racing' : (src.type === 'deals' ? 'deals' : null),
+      kwHit: kw
+    });
+  }
+  var year = start.getFullYear(), m;
+  // "August 9", "Aug 9th", "Aug. 9"
+  var re1 = new RegExp('\\b(' + MONTHS.map(function (mo) { return mo.slice(0,3); }).join('|') +
+    ')[a-z]*\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b', 'gi');
+  while ((m = re1.exec(t)) !== null && found.length < 12) {
+    var mi = MONTHS.findIndex(function (mo) { return mo.indexOf(m[1].toLowerCase()) === 0; });
+    if (mi < 0) continue;
+    var day = parseInt(m[2], 10);
+    if (day < 1 || day > 31) continue;
+    var dt = new Date(year, mi, day);
+    if (dt < start) dt = new Date(year + 1, mi, day);   // e.g. January dates seen in December
+    consider(dt, m.index, m[0].length);
+  }
+  // "8/9" or "8/9/2026"
+  var re2 = /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/g;
+  while ((m = re2.exec(t)) !== null && found.length < 12) {
+    var mo = parseInt(m[1], 10), da = parseInt(m[2], 10);
+    if (mo < 1 || mo > 12 || da < 1 || da > 31) continue;
+    var yr = m[3] ? parseInt(m[3].length === 2 ? '20' + m[3] : m[3], 10) : year;
+    var dt2 = new Date(yr, mo - 1, da);
+    if (!m[3] && dt2 < start) dt2 = new Date(yr + 1, mo - 1, da);
+    consider(dt2, m.index, m[0].length);
+  }
+  return found;
+}
+function fetchTrackedPage(src, start, end) {
+  var prox = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(src.url);
+  return fetch(prox).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text();
+  }).then(function (html) {
+    // strip scripts/styles/tags to plain text
+    var text = html.replace(/<script[\s\S]*?<\/script>/gi, ' ')
+                   .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+                   .replace(/<[^>]+>/g, ' ')
+                   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+    return { name: src.name, events: scanPageText(text, src, start, end) };
+  }).catch(function (e) { return { name: src.name, error: 'could not read page (' + e.message + ')', events: [] }; });
+}
+
+/* ================= search ================= */
+function dedupe(list) {
+  var seen = {}, out = [];
+  list.forEach(function (e) {
+    if (!e.dt) return;
+    var key = e.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40) + '|' + ymd(e.dt);
+    if (seen[key]) return;
+    seen[key] = 1;
+    out.push(e);
+  });
+  return out;
+}
+function runSearch() {
+  if (searching) return;
+  if (!settings.loc) { $('locStatus').textContent = '⚠️ Set your location first (GPS button or type your city/ZIP).'; return; }
+  searching = true;
+  var btn = $('btnSearch');
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Searching…';
+  var start = today0(), end = addDays(start, WINDOW_DAYS);
+  end.setHours(23,59,59,0);
+  var jobs = [
+    fetchTicketmaster(settings.loc, settings.radius, new Date(), end),
+    fetchSeatGeek(settings.loc, settings.radius, start, end)
+  ];
+  settings.sources.forEach(function (s) { jobs.push(fetchTrackedPage(s, start, end)); });
+  Promise.all(jobs).then(function (results) {
+    var all = [];
+    var statusBits = [];
+    results.forEach(function (r) {
+      if (r.skipped) { statusBits.push(esc(r.name) + ': no key (see Settings)'); return; }
+      if (r.error) { statusBits.push('<span class="err">' + esc(r.name) + ': ' + esc(r.error) + '</span>'); return; }
+      statusBits.push(esc(r.name) + ': ' + r.events.length);
+      all = all.concat(r.events);
+    });
+    // distance + category
+    all.forEach(function (e) {
+      e.dist = (e.venueLat != null && e.venueLon != null)
+        ? haversineMi(settings.loc.lat, settings.loc.lon, e.venueLat, e.venueLon) : null;
+      e.cat = e.forcedCat || categorize(e);
+      e.kwHit = e.kwHit || matchAny(e.title + ' ' + (e.desc || ''),
+        settings.keywords.map(function (k) { return k.toLowerCase(); }));
+    });
+    // keep inside radius when we know the distance
+    all = all.filter(function (e) { return e.dist == null || e.dist <= settings.radius + 2; });
+    all = dedupe(all);
+    all.sort(function (a, b) { return a.dt - b.dt || (a.dist || 9e9) - (b.dist || 9e9); });
+    events = all;
+    $('srcStatus').innerHTML = 'Found <b>' + all.length + '</b> events · ' + statusBits.join(' · ');
+    buildDayStrip();
+    render();
+  }).finally(function () {
+    searching = false;
+    btn.disabled = false; btn.textContent = 'Search next 30 days';
+  });
+}
+$('btnSearch').addEventListener('click', runSearch);
+
+/* ================= day strip ================= */
+function buildDayStrip() {
+  var strip = $('dayStrip');
+  var counts = {};
+  events.forEach(function (e) { var k = ymd(e.dt); counts[k] = (counts[k] || 0) + 1; });
+  var html = '<button class="daychip' + (selDay === 'all' ? ' sel' : '') + '" data-day="all">' +
+    '<span class="dow">All</span><span class="dnum">30</span><span class="cnt">days</span></button>';
+  var t = today0();
+  for (var i = 0; i <= WINDOW_DAYS; i++) {
+    var d = addDays(t, i), k = ymd(d);
+    var lbl = i === 0 ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' });
+    html += '<button class="daychip' + (selDay === k ? ' sel' : '') + '" data-day="' + k + '">' +
+      '<span class="dow">' + lbl + '</span>' +
+      '<span class="dnum">' + (d.getMonth()+1) + '/' + d.getDate() + '</span>' +
+      '<span class="cnt">' + (counts[k] ? counts[k] + ' ev' : '') + '</span></button>';
+  }
+  strip.innerHTML = html;
+  strip.querySelectorAll('.daychip').forEach(function (b) {
+    b.addEventListener('click', function () {
+      selDay = this.getAttribute('data-day');
+      buildDayStrip(); render();
+    });
+  });
+}
+
+/* ================= category chips ================= */
+function buildChips() {
+  var el = $('catChips');
+  el.innerHTML = CATS.map(function (c) {
+    return '<button class="chip' + (selCat === c[0] ? ' sel' : '') + '" data-cat="' + c[0] + '">' +
+      c[1] + '</button>';
+  }).join('');
+  el.querySelectorAll('.chip').forEach(function (b) {
+    b.addEventListener('click', function () {
+      selCat = this.getAttribute('data-cat');
+      buildChips(); render();
+    });
+  });
+}
+
+/* ================= render ================= */
+function fmtPrice(e) {
+  if (e.priceMin == null && e.priceMax == null) return 'See site';
+  if (e.priceMin != null && e.priceMax != null && e.priceMin !== e.priceMax)
+    return '$' + Math.round(e.priceMin) + '–$' + Math.round(e.priceMax);
+  return '$' + Math.round(e.priceMin != null ? e.priceMin : e.priceMax);
+}
+function highlight(text, kw) {
+  var out = esc(text);
+  if (kw) {
+    var i = out.toLowerCase().indexOf(kw.toLowerCase());
+    if (i !== -1) out = out.slice(0, i) + '<span class="kwhit">' +
+      out.slice(i, i + kw.length) + '</span>' + out.slice(i + kw.length);
+  }
+  return out;
+}
+function render() {
+  var q = $('q').value.trim().toLowerCase();
+  var list = events.filter(function (e) {
+    if (selDay !== 'all' && ymd(e.dt) !== selDay) return false;
+    if (selCat !== 'all' && e.cat !== selCat) return false;
+    if (q && (e.title + ' ' + e.venue + ' ' + (e.desc || '')).toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+  var res = $('results');
+  if (!list.length) {
+    res.innerHTML = '<div class="empty">' + (events.length
+      ? 'Nothing matches these filters — try another day or category.'
+      : 'Set your location and tap <b>Search</b> to find events near you.') + '</div>';
+    return;
+  }
+  res.innerHTML = list.map(function (e) {
+    var when = fmtDay(e.dt) + (e.hasTime ? ' · ' + fmtTime(e.dt) : '');
+    var distStr = e.dist != null ? e.dist.toFixed(0) + ' mi away' : 'distance unknown';
+    var venue = e.venue ? esc(e.venue) + (e.venueCity ? ', ' + esc(e.venueCity) : '') : '';
+    return '<div class="ev' + (e.confirmed ? '' : ' lead') + '">' +
+      '<div class="toprow"><h3>' + highlight(e.title, e.kwHit) + '</h3>' +
+      '<span class="badge b-' + e.cat + '">' + CAT_LABEL[e.cat] + '</span></div>' +
+      (e.confirmed ? '' : '<div class="unconf">⚠ Unconfirmed — found on a tracked page, tap through to verify</div>') +
+      '<div class="meta"><b>' + when + '</b> · ' + fmtPrice(e) +
+      (venue ? '<br>' + venue + ' · ' : '<br>') + distStr + '</div>' +
+      (e.desc ? '<div class="desc">' + highlight(String(e.desc).slice(0, 260), e.kwHit) + '</div>' : '') +
+      '<div class="foot"><span class="srcTag">via ' + esc(e.source) + '</span>' +
+      '<a href="' + esc(e.url) + '" target="_blank" rel="noopener">View event ↗</a></div>' +
+      '</div>';
+  }).join('');
+}
+$('q').addEventListener('input', render);
+
+/* ================= settings modal ================= */
+function openSettings() {
+  $('tmKey').value = settings.tmKey;
+  $('sgKey').value = settings.sgKey;
+  $('keywords').value = settings.keywords.join('\n');
+  renderSrcList();
+  $('modalWrap').classList.add('open');
+}
+function closeSettings() {
+  settings.tmKey = $('tmKey').value.trim();
+  settings.sgKey = $('sgKey').value.trim();
+  settings.keywords = $('keywords').value.split('\n')
+    .map(function (s) { return s.trim(); }).filter(Boolean);
+  save();
+  $('modalWrap').classList.remove('open');
+  updateBanner();
+}
+function renderSrcList() {
+  var el = $('srcList');
+  if (!settings.sources.length) {
+    el.innerHTML = '<div class="hint" style="margin-bottom:8px">No pages yet. Example: your local ' +
+      'speedway\'s schedule page, or its MyRacePass page.</div>';
+    return;
+  }
+  el.innerHTML = settings.sources.map(function (s, i) {
+    var icon = s.type === 'racing' ? '🏁' : (s.type === 'deals' ? '🍗' : '✨');
+    return '<div class="srcItem"><span class="tp">' + icon + '</span>' +
+      '<span class="nm"><b>' + esc(s.name) + '</b><br><span style="color:var(--muted);font-size:11.5px">' +
+      esc(s.url) + '</span></span>' +
+      '<button data-i="' + i + '">Remove</button></div>';
+  }).join('');
+  el.querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      settings.sources.splice(parseInt(this.getAttribute('data-i'), 10), 1);
+      save(); renderSrcList();
+    });
+  });
+}
+$('btnAddSrc').addEventListener('click', function () {
+  var name = $('newSrcName').value.trim();
+  var url = $('newSrcUrl').value.trim();
+  var type = $('newSrcType').value;
+  if (!url) { $('newSrcUrl').focus(); return; }
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  if (!name) name = url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0];
+  settings.sources.push({ name: name, url: url, type: type });
+  save();
+  $('newSrcName').value = ''; $('newSrcUrl').value = '';
+  renderSrcList();
+});
+$('btnSettings').addEventListener('click', openSettings);
+$('btnOpenSettings2').addEventListener('click', openSettings);
+$('btnClose').addEventListener('click', closeSettings);
+$('modalWrap').addEventListener('click', function (e) { if (e.target === this) closeSettings(); });
+$('btnClearCache').addEventListener('click', function () {
+  events = []; buildDayStrip(); render();
+  $('srcStatus').textContent = '';
+});
+
+/* ================= sample data ================= */
+$('btnSample').addEventListener('click', function () {
+  var t = today0();
+  function mk(off, title, cat, seg, price, venue, dist, desc, confirmed) {
+    var d = addDays(t, off); d.setHours(19, 0, 0, 0);
+    return { id: 'demo:' + title, source: 'Sample', title: title, url: '#',
+      dt: d, hasTime: true, venue: venue, venueCity: '', venueLat: null, venueLon: null,
+      priceMin: price, priceMax: price ? price + 15 : null, segment: seg, genre: '',
+      desc: desc, confirmed: confirmed !== false, dist: dist, cat: cat,
+      kwHit: null };
+  }
+  events = [
+    mk(1, 'Demolition Derby & Hit to Pass Night', 'racing', 'Motorsports', 15, 'County Speedway', 12,
+       'Full contact! Demolition derby mains plus hit to pass heats. Pit gates 4pm.'),
+    mk(2, 'Live Country Night — The Rustlers', 'music', 'Music', 22, 'Riverside Amphitheater', 8,
+       'Outdoor show, gates at 6.'),
+    mk(3, 'Wing Wednesday — 50¢ wings', 'deals', 'Food & Drink', null, "Duke's Roadhouse", 4,
+       'Every Wednesday: 50¢ wings 5–9pm, 12 sauces.', false),
+    mk(5, 'Sprint Car Series Round 7', 'racing', 'Motorsports', 20, 'Thunder Valley Raceway', 26,
+       '360 sprints, late models, and hornets.'),
+    mk(6, 'Comedy Night: Open Mic + Headliner', 'comedy', 'Comedy', 10, 'Brick Lane Comedy Club', 6,
+       '18+ show, two drink minimum.'),
+    mk(9, 'Minor League Baseball vs. Rivertown', 'sports', 'Sports', 12, 'Memorial Ballpark', 10,
+       'Fireworks after the game.')
+  ];
+  events.forEach(function (e) { if (!e.kwHit) e.kwHit = matchAny(e.title + ' ' + e.desc,
+    settings.keywords.map(function (k) { return k.toLowerCase(); })); });
+  $('srcStatus').innerHTML = 'Showing <b>sample data</b> — add your free API keys in Settings for real events.';
+  buildDayStrip(); render();
+});
+
+/* ================= boot ================= */
+function updateBanner() {
+  $('setupBanner').style.display = (settings.tmKey || settings.sgKey) ? 'none' : '';
+}
+if (settings.loc) {
+  var el = $('locStatus');
+  el.textContent = '📍 ' + settings.loc.label;
+  el.className = 'ok';
+}
+updateBanner();
+buildChips();
+buildDayStrip();
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
+</script>
+</body>
+</html>
