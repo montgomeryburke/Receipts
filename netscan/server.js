@@ -28,7 +28,9 @@ const camera = require('./lib/camera');
 const net = require('./lib/net');
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8137;
-const HOST = process.env.HOST || '127.0.0.1';
+// Bind to all interfaces by default so phones/tablets on the same Wi-Fi can
+// reach the UI. Set HOST=127.0.0.1 to restrict to this computer only.
+const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const registry = new Registry();
@@ -160,13 +162,21 @@ function nowMs() { return Date.now(); }
 
 server.listen(PORT, HOST, () => {
   const ifaces = net.ipv4Interfaces();
-  console.log(`\n  netscan running →  http://${HOST}:${PORT}\n`);
-  console.log('  Local network interfaces detected:');
-  if (ifaces.length === 0) console.log('    (none found — are you connected to a network?)');
-  for (const i of ifaces) console.log(`    ${i.name.padEnd(12)} ${i.address}/${maskBits(i.netmask)}  broadcast ${i.broadcast}`);
-  console.log('\n  Open the URL above, then click "Scan network".\n');
+  const lanIp = ifaces.length ? ifaces[0].address : null;
+  const bar = '  ' + '='.repeat(52);
+  console.log('\n' + bar);
+  console.log('   netscan is running.  Leave this window open.');
+  console.log(bar + '\n');
+  console.log('   On THIS computer, open:');
+  console.log(`       http://localhost:${PORT}\n`);
+  if (lanIp && HOST !== '127.0.0.1') {
+    console.log('   On your iPad / Android phone (same Wi-Fi), open:');
+    console.log(`       http://${lanIp}:${PORT}\n`);
+    console.log('   (Any device on this Wi-Fi can open that address.)');
+  } else if (HOST === '127.0.0.1') {
+    console.log('   (Localhost only. Restart with HOST=0.0.0.0 to allow');
+    console.log('    phones/tablets on your Wi-Fi to connect.)');
+  }
+  if (ifaces.length === 0) console.log('   No network detected — are you connected to Wi-Fi?');
+  console.log('\n   To stop netscan: press  Ctrl + C\n' + bar + '\n');
 });
-
-function maskBits(mask) {
-  return mask.split('.').reduce((acc, o) => acc + ((parseInt(o, 10).toString(2).match(/1/g) || []).length), 0);
-}

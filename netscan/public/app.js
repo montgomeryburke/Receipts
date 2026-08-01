@@ -40,6 +40,9 @@ async function scan() {
 }
 
 function render() {
+  // Tear down any live streams from a previous render so orphaned timers
+  // don't keep firing against detached <img> elements.
+  for (const id of Array.from(streamTimers.keys())) stopStream(id);
   for (const kind of ['camera', 'switch', 'light', 'other']) {
     const list = devices.filter((d) => d.kind === kind);
     $('#count-' + kind).textContent = list.length;
@@ -122,61 +125,82 @@ function cameraCard(dev) {
   card.appendChild(header(dev));
 
   const view = el('div', 'cam-view');
-  const ph = el('div', 'placeholder', 'Click "Live view". Most cameras need a username/password — set them via ⚙.');
-  view.appendChild(ph);
+  const img = document.createElement('img');
+  img.alt = dev.name || 'camera';
+  img.style.display = 'none';
+  const overlay = el('div', 'cam-overlay');
+  const ph = el('div', 'placeholder');
+  view.append(img, overlay, ph);
   card.appendChild(view);
+
+  let live = false;
+  const setLive = (on) => {
+    live = on;
+    overlay.textContent = on ? '● LIVE  ·  tap to pause' : '▶ tap for live view';
+    overlay.classList.toggle('live', on);
+  };
+
+  // Load a single snapshot into the thumbnail. Resolves true on success.
+  const loadThumb = () =>
+    new Promise((resolve) => {
+      img.onload = () => { img.style.display = 'block'; overlay.style.display = 'block'; ph.textContent = ''; resolve(true); };
+      img.onerror = () => {
+        img.style.display = 'none'; overlay.style.display = 'none';
+        ph.textContent = 'No preview. Most cameras need a login — tap ⚙ to add one. (RTSP-only cameras can\'t preview in a browser.)';
+        resolve(false);
+      };
+      img.src = `/api/camera/${dev.id}/snapshot?t=` + Date.now();
+    });
+
+  const startStream = () => {
+    stopStream(dev.id);
+    setLive(true);
+    const refresh = () => { img.src = `/api/camera/${dev.id}/snapshot?t=` + Date.now(); };
+    refresh();
+    // Poll JPEG snapshots ~2fps: works everywhere incl. iOS/Android Safari,
+    // which cannot render multipart MJPEG streams.
+    streamTimers.set(dev.id, setInterval(refresh, 500));
+  };
+  const toggleLive = () => {
+    if (live) { stopStream(dev.id); setLive(false); loadThumb(); }
+    else startStream();
+  };
+  view.addEventListener('click', () => { if (img.style.display !== 'none') toggleLive(); });
 
   const actions = el('div', 'cam-actions');
   const liveBtn = document.createElement('button');
   liveBtn.textContent = 'Live view';
-  const snapBtn = document.createElement('button');
-  snapBtn.textContent = 'Snapshot';
+  liveBtn.addEventListener('click', () => (live ? toggleLive() : startStream()));
+  const refreshBtn = document.createElement('button');
+  refreshBtn.textContent = 'Refresh';
+  refreshBtn.addEventListener('click', () => { stopStream(dev.id); setLive(false); loadThumb(); });
   const gear = document.createElement('button');
   gear.textContent = '⚙';
-  gear.title = 'Camera credentials & stream path';
-  actions.append(liveBtn, snapBtn, gear);
+  gear.title = 'Camera login & stream path';
+  actions.append(liveBtn, refreshBtn, gear);
   card.appendChild(actions);
 
   const creds = el('div', 'creds');
   const userIn = credInput('Username', 'text');
   const passIn = credInput('Password', 'password');
-  const pathIn = credInput('Stream/snapshot path (optional, e.g. /snapshot.jpg)', 'text');
+  const pathIn = credInput('Snapshot path (optional, e.g. /snapshot.jpg)', 'text');
   const saveBtn = document.createElement('button');
-  saveBtn.textContent = 'Save';
+  saveBtn.textContent = 'Save & load';
   saveBtn.addEventListener('click', async () => {
     await api(`/api/camera/${dev.id}/creds`, jsonBody({ user: userIn.value, pass: passIn.value, path: pathIn.value }));
-    setStatus('Saved credentials for ' + (dev.name || dev.ip));
+    setStatus('Saved login for ' + (dev.name || dev.ip));
     creds.classList.remove('open');
+    loadThumb();
   });
-  const hint = el('div', 'hint', 'Stored in server memory only. Common paths are auto-tried if left blank. Cameras that only speak RTSP can\'t render directly in a browser — see the README.');
+  const hint = el('div', 'hint', 'Stored in server memory only. Common paths are auto-tried if blank.');
   creds.append(userIn, passIn, pathIn, saveBtn, hint);
   card.appendChild(creds);
-
   gear.addEventListener('click', () => creds.classList.toggle('open'));
 
-  const startStream = () => {
-    stopStream(dev.id);
-    view.innerHTML = '';
-    const img = document.createElement('img');
-    img.alt = 'camera stream';
-    img.onerror = () => { view.innerHTML = ''; view.appendChild(el('div', 'placeholder', 'Could not load stream. Check credentials / path (⚙), or the camera may be RTSP-only.')); stopStream(dev.id); };
-    view.appendChild(img);
-    // Poll snapshots ~2fps for broad compatibility (works even without MJPEG).
-    const refresh = () => { img.src = `/api/camera/${dev.id}/snapshot?t=` + Date.now(); };
-    refresh();
-    streamTimers.set(dev.id, setInterval(refresh, 500));
-  };
-
-  liveBtn.addEventListener('click', startStream);
-  snapBtn.addEventListener('click', () => {
-    stopStream(dev.id);
-    view.innerHTML = '';
-    const img = document.createElement('img');
-    img.onerror = () => { view.innerHTML = ''; view.appendChild(el('div', 'placeholder', 'Snapshot failed. Set credentials / path via ⚙.')); };
-    img.src = `/api/camera/${dev.id}/snapshot?t=` + Date.now();
-    view.appendChild(img);
-  });
-
+  setLive(false);
+  overlay.style.display = 'none';
+  ph.textContent = 'Loading preview…';
+  loadThumb(); // auto-load thumbnail as soon as the card appears
   return card;
 }
 
@@ -221,4 +245,10 @@ function rgbToHex(rgb) {
 }
 
 $('#scanBtn').addEventListener('click', scan);
-loadInterfaces();
+
+// Load interface info, then kick off a first scan automatically so the user
+// just opens the page and sees their devices. The button re-scans any time.
+(async () => {
+  await loadInterfaces();
+  scan();
+})();

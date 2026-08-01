@@ -4,17 +4,52 @@ Find the **webcams**, **smart switches/plugs**, and **smart lights** on whatever
 Wi-Fi/LAN you're connected to, then **view** the cameras and **control** the
 switches and lights — all from a web page served by a small local app.
 
-It re-scans automatically for the current network every time you press **Scan
-network**, so it works on any network you join.
+It scans automatically when the page opens (and any time you press **Scan
+network**), so it works on whatever network you're joined to. Camera thumbnails
+load on their own after a scan — tap a thumbnail for live view.
+
+## Easiest way to start it
+
+Run the app on a **computer** that's on the same Wi-Fi as your devices, then use
+it from that computer *or* from your iPad / Android phone.
+
+- **Mac:** double-click **`Start netscan (Mac).command`**
+- **Windows:** double-click **`Start netscan (Windows).bat`**
+- **Linux / Android (Termux):** run `./start-linux.sh`
+
+The window that opens prints two addresses, e.g.:
+
+```
+On THIS computer, open:            http://localhost:8137
+On your iPad / Android (same Wi-Fi): http://192.168.1.24:8137
+```
+
+On the computer the browser opens by itself. On your **iPad or Android**, open
+that second address in Safari/Chrome — you get the same buttons and live
+camera thumbnails. Leave the window open while you use it; press **Ctrl+C** (or
+close it) to stop.
+
+> First launch on Mac: if it's blocked, right-click the file → **Open** once.
+
+### Or from a terminal
 
 ```
 cd netscan
-npm start            # or: node server.js
-# then open http://127.0.0.1:8137
+node server.js       # localhost + LAN; open the address it prints
 ```
 
 No `npm install` is needed — the app has **zero runtime dependencies** and uses
 only the Node.js standard library. Requires Node 18+ (developed on Node 22).
+
+### Running directly on Android (Termux)
+
+You can run the whole app on the phone via [Termux](https://f-droid.org/packages/com.termux/)
+(install from F-Droid, not Google Play): `pkg install nodejs git`, clone the
+repo, `cd Receipts/netscan`, `./start-linux.sh`, then open `http://localhost:8137`
+in Chrome. Note: Android limits multicast reception, so **mDNS discovery may
+find little** on-device — Kasa, WiZ, SSDP, ONVIF and Shelly (use *Deep scan*)
+still work because their replies are unicast. Running on a computer (above) is
+the more complete option.
 
 ---
 
