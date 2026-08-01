@@ -1,0 +1,14 @@
+{
+  "name": "netscan",
+  "version": "1.0.0",
+  "description": "Discover and control cameras, smart switches and smart lights on your local network. Zero runtime dependencies.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "private": true
+}

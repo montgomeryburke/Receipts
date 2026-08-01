@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>netscan — LAN cameras &amp; smart devices</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>netscan</h1>
+      <span class="tag">local network devices</span>
+    </div>
+    <div class="controls">
+      <label class="check"><input type="checkbox" id="deep" /> Deep scan (probe subnet)</label>
+      <button id="scanBtn" class="primary">Scan network</button>
+    </div>
+  </header>
+
+  <div id="ifaces" class="ifaces"></div>
+  <div id="status" class="status"></div>
+
+  <main>
+    <section class="group" data-kind="camera">
+      <h2>Cameras <span class="count" id="count-camera">0</span></h2>
+      <div class="grid" id="grid-camera"></div>
+    </section>
+    <section class="group" data-kind="switch">
+      <h2>Smart switches &amp; plugs <span class="count" id="count-switch">0</span></h2>
+      <div class="grid" id="grid-switch"></div>
+    </section>
+    <section class="group" data-kind="light">
+      <h2>Smart lights <span class="count" id="count-light">0</span></h2>
+      <div class="grid" id="grid-light"></div>
+    </section>
+    <section class="group" data-kind="other">
+      <h2>Other devices <span class="count" id="count-other">0</span></h2>
+      <div class="grid" id="grid-other"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Discovery: mDNS · SSDP/UPnP · ONVIF · TP-Link Kasa · WiZ · Shelly. Runs entirely on your machine.</p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
