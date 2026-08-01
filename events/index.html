@@ -625,25 +625,40 @@ function extractServerData(html) {
   }
   return null;
 }
+function ebSlugVariants(loc) {
+  var city = loc.city.toLowerCase().replace(/^(city|town|township|village) of /, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  var v = [];
+  if (loc.st) v.push(loc.st + '--' + city);
+  v.push((loc.country === 'ca' ? 'canada' : 'united-states') + '--' + city);
+  return v;
+}
 function fetchEventbrite(loc, radius, start, end) {
-  if (!loc || !loc.city || !loc.st)
+  if (!loc || !loc.city)
     return Promise.resolve({ name: 'Eventbrite', error: 'need a city — tap GPS or type your city', events: [] });
-  var slug = loc.st + '--' + loc.city.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  var pageUrl = function (n) {
-    return 'https://www.eventbrite.com/d/' + slug + '/all-events/?page=' + n;
-  };
-  function grab(n) {
-    return proxyFetch(pageUrl(n)).then(function (html) {
-      var data = extractServerData(html);
-      var res = data && data.search_data && data.search_data.events &&
-                data.search_data.events.results || [];
-      return res;
+  var variants = ebSlugVariants(loc);
+  function grab(slug, n) {
+    return proxyFetch('https://www.eventbrite.com/d/' + slug + '/all-events/?page=' + n)
+      .then(function (html) {
+        var data = extractServerData(html);
+        return data && data.search_data && data.search_data.events &&
+               data.search_data.events.results || [];
+      });
+  }
+  // try each city-slug spelling until one returns listings
+  function firstWorking(i) {
+    if (i >= variants.length) return Promise.reject(new Error('no listings page for "' + loc.city + '"'));
+    return grab(variants[i], 1).then(function (r1) {
+      if (!r1.length && i + 1 < variants.length) return firstWorking(i + 1);
+      var more = r1.length >= 20 ? grab(variants[i], 2).catch(function () { return []; })
+                                 : Promise.resolve([]);
+      return more.then(function (r2) { return r1.concat(r2); });
+    }).catch(function (e) {
+      if (i + 1 < variants.length) return firstWorking(i + 1);
+      throw e;
     });
   }
-  return grab(1).then(function (r1) {
-    var more = r1.length >= 20 ? grab(2).catch(function () { return []; }) : Promise.resolve([]);
-    return more.then(function (r2) { return r1.concat(r2); });
-  }).then(function (raw) {
+  return firstWorking(0).then(function (raw) {
     var out = [];
     raw.forEach(function (e) {
       if (!e || !e.name || !e.url) return;
@@ -674,7 +689,8 @@ function fetchEventbrite(loc, radius, start, end) {
 
 /* ================= source: race tracks near you (OpenStreetMap, no key) ================= */
 var OVERPASS = ['https://overpass-api.de/api/interpreter',
-                'https://overpass.kumi.systems/api/interpreter'];
+                'https://overpass.kumi.systems/api/interpreter',
+                'https://overpass.private.coffee/api/interpreter'];
 function fetchNearbyTracks(loc, radiusMi) {
   var r = Math.round(Math.min(radiusMi, 300) * 1609);
   var around = '(around:' + r + ',' + loc.lat + ',' + loc.lon + ')';
@@ -683,18 +699,21 @@ function fetchNearbyTracks(loc, radiusMi) {
     'nwr["highway"="raceway"]' + around + ';' +
     'nwr["sport"="motocross"]' + around + ';' +
     ');out center tags 80;';
-  function attempt(i) {
-    if (i >= OVERPASS.length) return Promise.reject(new Error('unreachable'));
-    return fetch(OVERPASS[i], {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(q)
-    }).then(function (res) {
+  var urls = OVERPASS.map(function (base) { return base + '?data=' + encodeURIComponent(q); });
+  // try each mirror directly, then each again through the CORS proxies
+  function direct(i) {
+    if (i >= urls.length) return proxied(0);
+    return fetch(urls[i]).then(function (res) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.json();
-    }).catch(function () { return attempt(i + 1); });
+    }).catch(function () { return direct(i + 1); });
   }
-  return attempt(0).then(function (j) {
+  function proxied(i) {
+    if (i >= urls.length) return Promise.reject(new Error('unreachable'));
+    return proxyFetch(urls[i]).then(function (t) { return JSON.parse(t); })
+      .catch(function () { return proxied(i + 1); });
+  }
+  return direct(0).then(function (j) {
     var seen = {}, tracks = [];
     (j.elements || []).forEach(function (el) {
       var t = el.tags || {};
@@ -747,29 +766,94 @@ function parseFirstDate(text, start, end) {
   }
   return null;
 }
+function cleanResultUrl(href) {
+  href = href.replace(/&amp;/g, '&');
+  var um = href.match(/uddg=([^&]+)/);
+  if (um) { try { href = decodeURIComponent(um[1]); } catch (e) {} }
+  if (href.indexOf('//') === 0) href = 'https:' + href;
+  return href;
+}
+function resultOk(href) {
+  return href.indexOf('http') === 0 &&
+         href.indexOf('duckduckgo.com') === -1 &&
+         href.indexOf('bing.com') === -1 &&
+         href.indexOf('microsoft.com') === -1 &&
+         href.indexOf('google.com') === -1 &&
+         href.indexOf('gstatic.com') === -1;
+}
+function stripTags(s) { return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
 function parseDdg(html, max) {
   var out = [], m;
   var re = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|div|td)>/g;
   while ((m = re.exec(html)) !== null && out.length < max) {
-    var href = m[1].replace(/&amp;/g, '&');
-    var um = href.match(/uddg=([^&]+)/);
-    if (um) { try { href = decodeURIComponent(um[1]); } catch (e) {} }
-    if (href.indexOf('duckduckgo.com') !== -1 || href.indexOf('http') !== 0) continue;
-    out.push({
-      url: href,
-      title: m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(),
-      snippet: m[3].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-    });
+    var href = cleanResultUrl(m[1]);
+    if (!resultOk(href)) continue;
+    out.push({ url: href, title: stripTags(m[2]), snippet: stripTags(m[3]) });
   }
   return out;
+}
+function parseDdgLite(html, max) {
+  var out = [], m;
+  var re = /href="([^"]+)"[^>]*class="result-link"[^>]*>([\s\S]*?)<\/a>[\s\S]*?class="result-snippet"[^>]*>([\s\S]*?)<\/td>/g;
+  while ((m = re.exec(html)) !== null && out.length < max) {
+    var href = cleanResultUrl(m[1]);
+    if (!resultOk(href)) continue;
+    out.push({ url: href, title: stripTags(m[2]), snippet: stripTags(m[3]) });
+  }
+  return out;
+}
+function parseBing(html, max) {
+  var out = [], m;
+  var re = /<li class="b_algo"[\s\S]*?<h2[^>]*><a href="([^"]+)"[^>]*>([\s\S]*?)<\/a><\/h2>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/g;
+  while ((m = re.exec(html)) !== null && out.length < max) {
+    var href = cleanResultUrl(m[1]);
+    if (!resultOk(href)) continue;
+    out.push({ url: href, title: stripTags(m[2]), snippet: stripTags(m[3]) });
+  }
+  return out;
+}
+function parseGoogle(html, max) {
+  // Google's basic-HTML mode (gbv=1): results are /url?q= links
+  var out = [], m;
+  var re = /href="\/url\?q=([^&"]+)[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+  while ((m = re.exec(html)) !== null && out.length < max) {
+    var href;
+    try { href = cleanResultUrl(decodeURIComponent(m[1])); } catch (e) { continue; }
+    if (!resultOk(href)) continue;
+    var title = stripTags(m[2]);
+    if (!title) continue;
+    var tail = stripTags(html.slice(re.lastIndex, re.lastIndex + 600));
+    out.push({ url: href, title: title, snippet: tail.slice(0, 180) });
+  }
+  return out;
+}
+// try several engines until one returns readable results.
+// Google goes first, but it often refuses automated searches (CAPTCHA page,
+// which parses to 0 results) — the DuckDuckGo/Bing fallbacks keep it working.
+var WEB_ENGINES = [
+  { url: function (q) { return 'https://www.google.com/search?q=' + encodeURIComponent(q) + '&gbv=1&num=20&hl=en'; }, parse: parseGoogle },
+  { url: function (q) { return 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q); }, parse: parseDdg },
+  { url: function (q) { return 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(q); }, parse: parseDdgLite },
+  { url: function (q) { return 'https://www.bing.com/search?q=' + encodeURIComponent(q); }, parse: parseBing }
+];
+function webSearch(q, max) {
+  function attempt(i) {
+    if (i >= WEB_ENGINES.length) return Promise.resolve([]);
+    return proxyFetch(WEB_ENGINES[i].url(q)).then(function (html) {
+      var res = WEB_ENGINES[i].parse(html, max);
+      return res.length ? res : attempt(i + 1);
+    }).catch(function () { return attempt(i + 1); });
+  }
+  return attempt(0);
 }
 function sweepQueries(loc, start) {
   var city = ((loc && loc.city) || (loc && loc.label) || '').split(',')[0];
   var mon = MONTHS[start.getMonth()];
   return [
     { q: '"demolition derby" OR "hit to pass" OR "enduro" ' + city + ' ' + start.getFullYear(), cat: 'racing' },
+    { q: '"demolition derby" OR "hit to pass" OR speedway ' + city + ' site:facebook.com', cat: 'racing' },
     { q: '"wing night" OR "wing special" ' + city, cat: 'deals' },
-    { q: 'events near ' + city + ' ' + mon + ' site:facebook.com', cat: null },
+    { q: 'events ' + city + ' ' + mon + ' site:facebook.com/events', cat: null },
     { q: city + ' live music OR comedy ' + mon + ' ' + start.getFullYear(), cat: null }
   ];
 }
@@ -778,9 +862,9 @@ function fetchWebSweep(loc, start, end) {
     return Promise.resolve({ name: 'Web', error: 'need a location first', events: [] });
   var queries = sweepQueries(loc, start);
   var jobs = queries.map(function (sq) {
-    return proxyFetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(sq.q))
-      .then(function (html) {
-        return parseDdg(html, 5).map(function (r) {
+    return webSearch(sq.q, 5)
+      .then(function (results) {
+        return results.map(function (r) {
           var dt = parseFirstDate(r.title + ' ' + r.snippet, start, end);
           var isFb = r.url.indexOf('facebook.com') !== -1;
           return {
