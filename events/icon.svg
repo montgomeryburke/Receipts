@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1d3f6e"/>
+  <!-- location pin -->
+  <path d="M256 96c-62 0-112 50-112 112 0 84 112 208 112 208s112-124 112-208c0-62-50-112-112-112z"
+        fill="#ffffff"/>
+  <!-- checkered flag circle inside pin -->
+  <circle cx="256" cy="208" r="64" fill="#1d3f6e"/>
+  <g fill="#ffffff">
+    <rect x="224" y="176" width="32" height="32"/>
+    <rect x="256" y="208" width="32" height="32"/>
+    <rect x="224" y="240" width="32" height="0"/>
+    <rect x="192" y="208" width="32" height="32"/>
+    <rect x="256" y="144" width="32" height="32" rx="6"/>
+  </g>
+</svg>
