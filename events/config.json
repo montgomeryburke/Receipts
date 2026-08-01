@@ -1,0 +1,4 @@
+{
+  "unset": true,
+  "_instructions": "Set your home area here and the nightly scanner will pre-search events for it. Example: {\"lat\": 43.615, \"lon\": -116.202, \"city\": \"Boise\", \"st\": \"id\", \"country\": \"us\", \"radiusMiles\": 50}"
+}

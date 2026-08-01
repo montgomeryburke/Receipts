@@ -1,0 +1,31 @@
+name: Event Scout nightly scan
+
+on:
+  schedule:
+    - cron: '0 12 * * *'   # daily, morning in North America
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run scanner
+        run: node events/scan.js
+      - name: Commit results
+        run: |
+          git config user.name "event-scout-bot"
+          git config user.email "actions@github.com"
+          git add events/data.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update event scan results"
+            git push
+          else
+            echo "No changes."
+          fi

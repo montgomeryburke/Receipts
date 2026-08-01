@@ -887,6 +887,26 @@ function fetchWebSweep(loc, start, end) {
   });
 }
 
+/* ================= source: nightly scan (pre-searched by GitHub's servers) ================= */
+function fetchPrebuilt(start, end) {
+  return fetch('data.json?v=' + Date.now()).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(function (d) {
+    if (d.unset) return { name: 'Nightly scan', skipped: true,
+      skippedNote: 'not set up yet', events: [] };
+    var evs = (d.events || []).map(function (e) {
+      var c = {};
+      for (var k in e) c[k] = e[k];
+      c.dt = e.dt ? new Date(e.dt) : null;
+      return c;
+    }).filter(function (e) { return !e.dt || (e.dt >= start && e.dt <= end); });
+    var age = d.generated ? Math.max(0, Math.round((Date.now() - new Date(d.generated).getTime()) / 36e5)) : null;
+    return { name: 'Nightly scan' + (age != null ? ' (' + age + 'h ago)' : ''),
+             events: evs, tracks: d.tracks };
+  }).catch(function (e) { return { name: 'Nightly scan', error: e.message, events: [] }; });
+}
+
 /* ================= search ================= */
 function dedupe(list) {
   var seen = {}, out = [];
@@ -930,6 +950,7 @@ function runSearch() {
   end.setHours(23,59,59,0);
   ensurePlace().then(function (loc) {
     var jobs = [
+      fetchPrebuilt(start, end),
       fetchEventbrite(loc, settings.radius, start, end),
       fetchTracksAndScan(loc, settings.radius, start, end),
       fetchWebSweep(loc, start, end),
@@ -942,8 +963,9 @@ function runSearch() {
     var all = [];
     var statusBits = [];
     results.forEach(function (r) {
-      if (r.skipped) { statusBits.push(esc(r.name) + ': off (optional key in Settings)'); return; }
-      if (r.tracks) renderTracksCard(r.tracks);
+      if (r.skipped) { statusBits.push(esc(r.name) + ': ' +
+        esc(r.skippedNote || 'off (optional key in Settings)')); return; }
+      if (r.tracks && r.tracks.length) renderTracksCard(r.tracks);
       if (r.error) { statusBits.push('<span class="err">' + esc(r.name) + ': ' + esc(r.error) + '</span>'); return; }
       statusBits.push(esc(r.name) + ': ' + r.events.length +
         (r.tracks ? ' (' + r.tracks.length + ' tracks)' : ''));
@@ -1139,6 +1161,14 @@ if (settings.loc) {
   var el = $('locStatus');
   el.textContent = '📍 ' + settings.loc.label;
   el.className = 'ok';
+} else {
+  // fall back to the home area configured for the nightly scan
+  fetch('config.json').then(function (r) { return r.json(); }).then(function (c) {
+    if (!c.unset && c.lat != null && !settings.loc) {
+      setLoc(c.lat, c.lon, c.city + (c.st ? ', ' + c.st.toUpperCase() : ''),
+             { city: c.city, st: c.st, country: c.country });
+    }
+  }).catch(function () {});
 }
 updateBanner();
 buildChips();
