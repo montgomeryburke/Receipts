@@ -149,6 +149,11 @@
   details { background: #fff; border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 12px; margin-top: 10px; font-size: 13.5px; line-height: 1.55; }
   details summary { font-weight: 600; cursor: pointer; }
+  .trackrow { display: flex; justify-content: space-between; align-items: center;
+    gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .trackrow:last-of-type { border-bottom: none; }
+  .trackrow .muted { color: var(--muted); font-size: 12.5px; }
+  .trackrow a { color: var(--brand); font-weight: 600; text-decoration: none; white-space: nowrap; }
   .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff;
     border-top-color: transparent; border-radius: 50%; animation: sp 0.8s linear infinite;
     vertical-align: -2px; margin-right: 6px; }
@@ -163,13 +168,12 @@
 
 <main>
   <div id="setupBanner" class="banner" style="display:none">
-    <b>One-time setup needed:</b> to search real events, add a free
-    <b>Ticketmaster API key</b> (and optionally a SeatGeek key) in Settings.
-    It takes about 2 minutes and instructions are in there.
-    You can also add your local race tracks' websites so demolition derby /
-    hit-to-pass events show up.
+    <b>Tip:</b> Event Scout searches Eventbrite, nearby race tracks, and the web
+    automatically — no setup needed. Adding a free <b>Ticketmaster API key</b> in
+    Settings (2 minutes) also brings in the big official concert / sports /
+    motorsports listings.
     <button class="btn-secondary" id="btnOpenSettings2">Open Settings</button>
-    <button class="btn-secondary" id="btnSample">Try sample data</button>
+    <button class="btn-secondary" id="btnDismissBanner">Got it</button>
   </div>
 
   <div class="card">
@@ -193,6 +197,8 @@
   <input type="search" id="q" placeholder="Filter results… (e.g. derby, wings, band name)"
          style="margin-bottom:10px">
 
+  <div id="tracksCard" class="card" style="display:none"></div>
+
   <div id="results"><div class="empty">Set your location and tap <b>Search</b> to find events near you.</div></div>
 </main>
 
@@ -200,7 +206,12 @@
 <div class="modal-wrap" id="modalWrap">
   <div class="modal">
     <button class="close" id="btnClose">Done</button>
-    <h2>API keys (free)</h2>
+    <h2>Optional: free API keys for more results</h2>
+    <div class="hint" style="margin:0 0 8px">
+      No setup is required — Event Scout automatically searches Eventbrite, race
+      tracks near you (from OpenStreetMap), and the web. Add these free keys to
+      also get the big official ticket listings.
+    </div>
     <div class="field">
       <label>Ticketmaster API key</label>
       <input type="text" id="tmKey" placeholder="Paste Consumer Key here" autocapitalize="off" autocorrect="off">
@@ -220,11 +231,12 @@
       2. Copy the <b>Client ID</b> and paste it above.</p>
     </details>
 
-    <h2>My tracked pages (race tracks, wing nights…)</h2>
+    <h2>Extra tracked pages (optional)</h2>
     <div class="hint" style="margin:0 0 8px">
-      Add the public <b>website</b> of any race track, racing org, fair, or restaurant.
-      Event Scout scans each page for dates in the next 30 days and for your keywords
-      (demolition derby, hit to pass, wing night…). These show up as orange
+      Race tracks near you are found and scanned <b>automatically</b>. If a favorite
+      page is missed (a racing org, fair, or restaurant), add its public website here
+      and it will be scanned too — for dates in the next 30 days and your keywords
+      (demolition derby, hit to pass, wing night…). Matches show as orange
       "unconfirmed" cards — always tap through to double-check.
     </div>
     <div id="srcList"></div>
@@ -247,16 +259,18 @@
     <textarea id="keywords" rows="6"></textarea>
 
     <details>
-      <summary>Why can't it search Facebook or Instagram?</summary>
+      <summary>What about Facebook and Instagram?</summary>
       <p>Facebook shut off public event search for apps in 2018, and Instagram has no
-      event data API at all — there is no legitimate way for any third-party app to
-      search them without you being logged in. That's why racing events "hide" on
-      Facebook pages.</p>
-      <p><b>The workaround that works:</b> almost every racing org that posts on
-      Facebook also has a plain website or a page on
+      event data API at all — no third-party app can search inside them without you
+      being logged in. That's why racing events "hide" on Facebook pages.</p>
+      <p><b>What Event Scout does instead:</b> its web sweep specifically searches for
+      <b>publicly indexed facebook.com event pages</b> near your city (those usually
+      open fine without an account), and it automatically finds race tracks near you
+      from OpenStreetMap and scans their websites. Many orgs also post on
       <a href="https://www.myracepass.com" target="_blank" rel="noopener">MyRacePass</a>
-      (search your track name there). Add that link under "My tracked pages" above and
-      Event Scout will watch it for you — no Facebook account needed.</p>
+      (search your track name there) — add that link under "Extra tracked pages" and it
+      gets watched too. Private group posts are out of reach for every app, not just
+      this one.</p>
     </details>
 
     <h2>Data</h2>
@@ -325,12 +339,37 @@ function haversineMi(lat1, lon1, lat2, lon2) {
 }
 
 /* ================= location ================= */
-function setLoc(lat, lon, label) {
-  settings.loc = { lat: lat, lon: lon, label: label };
+function setLoc(lat, lon, label, place) {
+  var loc = { lat: lat, lon: lon, label: label };
+  if (place) { loc.city = place.city || ''; loc.st = place.st || ''; loc.country = place.country || ''; }
+  settings.loc = loc;
   save();
   var el = $('locStatus');
   el.textContent = '📍 ' + label;
   el.className = 'ok';
+}
+function placeFromAddress(a) {
+  var iso = a['ISO3166-2-lvl4'] || '';
+  return {
+    city: a.city || a.town || a.village || a.hamlet || a.county || '',
+    st: iso.indexOf('-') !== -1 ? iso.split('-')[1].toLowerCase() : '',
+    country: (a.country_code || '').toLowerCase()
+  };
+}
+// make sure we know the city/state name for the saved spot (Eventbrite + web search need it)
+function ensurePlace() {
+  var loc = settings.loc;
+  if (!loc) return Promise.resolve(null);
+  if (loc.city) return Promise.resolve(loc);
+  return fetch('https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&addressdetails=1&lat=' +
+               loc.lat + '&lon=' + loc.lon)
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      var p = placeFromAddress(j.address || {});
+      loc.city = p.city; loc.st = p.st; loc.country = p.country;
+      save();
+      return loc;
+    }).catch(function () { return loc; });
 }
 $('btnGPS').addEventListener('click', function () {
   var el = $('locStatus');
@@ -339,13 +378,13 @@ $('btnGPS').addEventListener('click', function () {
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     setLoc(lat, lon, lat.toFixed(3) + ', ' + lon.toFixed(3));
-    // reverse geocode for a friendly name (best effort)
-    fetch('https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=' + lat + '&lon=' + lon)
+    // reverse geocode for a friendly name + city/state (best effort)
+    fetch('https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&addressdetails=1&lat=' + lat + '&lon=' + lon)
       .then(function (r) { return r.json(); })
       .then(function (j) {
         var a = j.address || {};
-        var name = a.city || a.town || a.village || a.county || j.display_name || '';
-        if (name) setLoc(lat, lon, name + (a.state ? ', ' + a.state : ''));
+        var p = placeFromAddress(a);
+        if (p.city) setLoc(lat, lon, p.city + (a.state ? ', ' + a.state : ''), p);
       }).catch(function () {});
   }, function (err) {
     el.textContent = 'Could not get GPS (' + err.message + '). Type your city or ZIP instead.';
@@ -356,12 +395,14 @@ $('cityInput').addEventListener('change', function () {
   if (!q) return;
   var el = $('locStatus');
   el.className = ''; el.textContent = 'Looking up "' + q + '"…';
-  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us,ca&q=' +
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&countrycodes=us,ca&q=' +
         encodeURIComponent(q))
     .then(function (r) { return r.json(); })
     .then(function (j) {
       if (!j.length) { el.textContent = 'Could not find "' + q + '". Try "City, State".'; return; }
-      setLoc(parseFloat(j[0].lat), parseFloat(j[0].lon), j[0].display_name.split(',').slice(0,2).join(','));
+      setLoc(parseFloat(j[0].lat), parseFloat(j[0].lon),
+             j[0].display_name.split(',').slice(0,2).join(','),
+             placeFromAddress(j[0].address || {}));
     })
     .catch(function () { el.textContent = 'Lookup failed — check your connection.'; });
 });
@@ -481,6 +522,24 @@ function fetchSeatGeek(loc, radius, start, end) {
   }).catch(function (e) { return { name: 'SeatGeek', error: e.message, events: [] }; });
 }
 
+/* ================= CORS proxies (for reading public pages from the browser) ================= */
+var PROXIES = [
+  function (u) { return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); },
+  function (u) { return 'https://corsproxy.io/?url=' + encodeURIComponent(u); }
+];
+function proxyFetch(url) {
+  var i = 0;
+  function attempt(lastErr) {
+    if (i >= PROXIES.length) return Promise.reject(lastErr || new Error('unreachable'));
+    var p = PROXIES[i++](url);
+    return fetch(p).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).catch(function (e) { return attempt(e); });
+  }
+  return attempt();
+}
+
 /* ================= source: tracked pages (racing orgs, wing nights) ================= */
 var MONTHS = ['january','february','march','april','may','june','july','august',
               'september','october','november','december'];
@@ -499,7 +558,8 @@ function scanPageText(text, src, start, end) {
       id: 'src:' + src.url + '|' + key, source: src.name, title: (kw ? kw : 'Possible event') +
         ' — ' + src.name,
       url: src.url, dt: dt, hasTime: false, venue: src.name, venueCity: '',
-      venueLat: null, venueLon: null, priceMin: null, priceMax: null,
+      venueLat: src.lat != null ? src.lat : null, venueLon: src.lon != null ? src.lon : null,
+      priceMin: null, priceMax: null,
       segment: src.type, genre: '', desc: '…' + ctx + '…', confirmed: false,
       forcedCat: src.type === 'racing' ? 'racing' : (src.type === 'deals' ? 'deals' : null),
       kwHit: kw
@@ -531,11 +591,7 @@ function scanPageText(text, src, start, end) {
   return found;
 }
 function fetchTrackedPage(src, start, end) {
-  var prox = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(src.url);
-  return fetch(prox).then(function (r) {
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.text();
-  }).then(function (html) {
+  return proxyFetch(src.url).then(function (html) {
     // strip scripts/styles/tags to plain text
     var text = html.replace(/<script[\s\S]*?<\/script>/gi, ' ')
                    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -545,17 +601,240 @@ function fetchTrackedPage(src, start, end) {
   }).catch(function (e) { return { name: src.name, error: 'could not read page (' + e.message + ')', events: [] }; });
 }
 
+/* ================= source: Eventbrite (no key — reads their public nearby pages) ================= */
+function extractServerData(html) {
+  var i = html.indexOf('window.__SERVER_DATA__');
+  if (i === -1) return null;
+  i = html.indexOf('{', i);
+  if (i === -1) return null;
+  var depth = 0, inStr = false, escp = false;
+  for (var j = i; j < html.length; j++) {
+    var c = html[j];
+    if (inStr) {
+      if (escp) escp = false;
+      else if (c === '\\') escp = true;
+      else if (c === '"') inStr = false;
+    } else {
+      if (c === '"') inStr = true;
+      else if (c === '{') depth++;
+      else if (c === '}') {
+        depth--;
+        if (!depth) { try { return JSON.parse(html.slice(i, j + 1)); } catch (e) { return null; } }
+      }
+    }
+  }
+  return null;
+}
+function fetchEventbrite(loc, radius, start, end) {
+  if (!loc || !loc.city || !loc.st)
+    return Promise.resolve({ name: 'Eventbrite', error: 'need a city — tap GPS or type your city', events: [] });
+  var slug = loc.st + '--' + loc.city.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  var pageUrl = function (n) {
+    return 'https://www.eventbrite.com/d/' + slug + '/all-events/?page=' + n;
+  };
+  function grab(n) {
+    return proxyFetch(pageUrl(n)).then(function (html) {
+      var data = extractServerData(html);
+      var res = data && data.search_data && data.search_data.events &&
+                data.search_data.events.results || [];
+      return res;
+    });
+  }
+  return grab(1).then(function (r1) {
+    var more = r1.length >= 20 ? grab(2).catch(function () { return []; }) : Promise.resolve([]);
+    return more.then(function (r2) { return r1.concat(r2); });
+  }).then(function (raw) {
+    var out = [];
+    raw.forEach(function (e) {
+      if (!e || !e.name || !e.url) return;
+      var v = e.primary_venue || {}, ad = v.address || {};
+      var dt = e.start_date ? new Date(e.start_date + 'T' + (e.start_time || '19:00')) : null;
+      if (!dt || dt < start || dt > end) return;
+      var ta = e.ticket_availability || {};
+      var price = null;
+      if (ta.is_free) price = 0;
+      else if (ta.minimum_ticket_price && ta.minimum_ticket_price.major_value != null)
+        price = parseFloat(ta.minimum_ticket_price.major_value);
+      out.push({
+        id: 'eb:' + (e.id || e.url), source: 'Eventbrite', title: e.name, url: e.url,
+        dt: dt, hasTime: !!e.start_time,
+        venue: v.name || '', venueCity: ad.city || '',
+        venueLat: ad.latitude != null ? parseFloat(ad.latitude) : null,
+        venueLon: ad.longitude != null ? parseFloat(ad.longitude) : null,
+        priceMin: price, priceMax: null,
+        segment: (e.tags || []).map(function (t) { return t.display_name || ''; }).join(' '),
+        genre: '', desc: e.summary || '', confirmed: true
+      });
+    });
+    return { name: 'Eventbrite', events: out };
+  }).catch(function (e) {
+    return { name: 'Eventbrite', error: 'could not read listings (' + e.message + ')', events: [] };
+  });
+}
+
+/* ================= source: race tracks near you (OpenStreetMap, no key) ================= */
+var OVERPASS = ['https://overpass-api.de/api/interpreter',
+                'https://overpass.kumi.systems/api/interpreter'];
+function fetchNearbyTracks(loc, radiusMi) {
+  var r = Math.round(Math.min(radiusMi, 300) * 1609);
+  var around = '(around:' + r + ',' + loc.lat + ',' + loc.lon + ')';
+  var q = '[out:json][timeout:25];(' +
+    'nwr["sport"="motor"]' + around + ';' +
+    'nwr["highway"="raceway"]' + around + ';' +
+    'nwr["sport"="motocross"]' + around + ';' +
+    ');out center tags 80;';
+  function attempt(i) {
+    if (i >= OVERPASS.length) return Promise.reject(new Error('unreachable'));
+    return fetch(OVERPASS[i], {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(q)
+    }).then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }).catch(function () { return attempt(i + 1); });
+  }
+  return attempt(0).then(function (j) {
+    var seen = {}, tracks = [];
+    (j.elements || []).forEach(function (el) {
+      var t = el.tags || {};
+      var name = t.name;
+      if (!name || seen[name.toLowerCase()]) return;
+      seen[name.toLowerCase()] = 1;
+      var lat = el.lat != null ? el.lat : (el.center && el.center.lat);
+      var lon = el.lon != null ? el.lon : (el.center && el.center.lon);
+      tracks.push({
+        name: name,
+        lat: lat, lon: lon,
+        website: t.website || t['contact:website'] || '',
+        dist: (lat != null && lon != null) ? haversineMi(loc.lat, loc.lon, lat, lon) : null
+      });
+    });
+    tracks.sort(function (a, b) { return (a.dist || 9e9) - (b.dist || 9e9); });
+    return tracks.slice(0, 30);
+  });
+}
+function fetchTracksAndScan(loc, radiusMi, start, end) {
+  return fetchNearbyTracks(loc, radiusMi).then(function (tracks) {
+    var withSite = tracks.filter(function (t) { return t.website; }).slice(0, 6);
+    var scans = withSite.map(function (t) {
+      return fetchTrackedPage({ name: t.name, url: t.website, type: 'racing',
+                                lat: t.lat, lon: t.lon }, start, end);
+    });
+    return Promise.all(scans).then(function (rs) {
+      var evs = [];
+      rs.forEach(function (r) { evs = evs.concat(r.events || []); });
+      return { name: 'Race tracks', events: evs, tracks: tracks };
+    });
+  }).catch(function (e) {
+    return { name: 'Race tracks', error: 'lookup failed (' + e.message + ')', events: [], tracks: [] };
+  });
+}
+
+/* ================= source: web sweep (DuckDuckGo, no key) ================= */
+function parseFirstDate(text, start, end) {
+  var t = (text || '').toLowerCase(), m;
+  var re = new RegExp('\\b(' + MONTHS.map(function (mo) { return mo.slice(0, 3); }).join('|') +
+    ')[a-z]*\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b', 'i');
+  if ((m = re.exec(t)) !== null) {
+    var mi = MONTHS.findIndex(function (mo) { return mo.indexOf(m[1].toLowerCase()) === 0; });
+    var day = parseInt(m[2], 10);
+    if (mi >= 0 && day >= 1 && day <= 31) {
+      var dt = new Date(start.getFullYear(), mi, day);
+      if (dt < start) dt = new Date(start.getFullYear() + 1, mi, day);
+      if (dt >= start && dt <= end) return dt;
+    }
+  }
+  return null;
+}
+function parseDdg(html, max) {
+  var out = [], m;
+  var re = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|div|td)>/g;
+  while ((m = re.exec(html)) !== null && out.length < max) {
+    var href = m[1].replace(/&amp;/g, '&');
+    var um = href.match(/uddg=([^&]+)/);
+    if (um) { try { href = decodeURIComponent(um[1]); } catch (e) {} }
+    if (href.indexOf('duckduckgo.com') !== -1 || href.indexOf('http') !== 0) continue;
+    out.push({
+      url: href,
+      title: m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(),
+      snippet: m[3].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    });
+  }
+  return out;
+}
+function sweepQueries(loc, start) {
+  var city = ((loc && loc.city) || (loc && loc.label) || '').split(',')[0];
+  var mon = MONTHS[start.getMonth()];
+  return [
+    { q: '"demolition derby" OR "hit to pass" OR "enduro" ' + city + ' ' + start.getFullYear(), cat: 'racing' },
+    { q: '"wing night" OR "wing special" ' + city, cat: 'deals' },
+    { q: 'events near ' + city + ' ' + mon + ' site:facebook.com', cat: null },
+    { q: city + ' live music OR comedy ' + mon + ' ' + start.getFullYear(), cat: null }
+  ];
+}
+function fetchWebSweep(loc, start, end) {
+  if (!loc || (!loc.city && !loc.label))
+    return Promise.resolve({ name: 'Web', error: 'need a location first', events: [] });
+  var queries = sweepQueries(loc, start);
+  var jobs = queries.map(function (sq) {
+    return proxyFetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(sq.q))
+      .then(function (html) {
+        return parseDdg(html, 5).map(function (r) {
+          var dt = parseFirstDate(r.title + ' ' + r.snippet, start, end);
+          var isFb = r.url.indexOf('facebook.com') !== -1;
+          return {
+            id: 'web:' + r.url, source: isFb ? 'Facebook (public)' : 'Web search',
+            title: r.title || r.url, url: r.url,
+            dt: dt, hasTime: false, venue: '', venueCity: '',
+            venueLat: null, venueLon: null, priceMin: null, priceMax: null,
+            segment: '', genre: '', desc: r.snippet, confirmed: false,
+            fallbackCat: sq.cat, kwHit: null
+          };
+        });
+      }).catch(function () { return []; });
+  });
+  return Promise.all(jobs).then(function (lists) {
+    var seen = {}, out = [];
+    lists.forEach(function (l) { l.forEach(function (e) {
+      if (seen[e.url]) return; seen[e.url] = 1; out.push(e);
+    }); });
+    return { name: 'Web', events: out };
+  });
+}
+
 /* ================= search ================= */
 function dedupe(list) {
   var seen = {}, out = [];
   list.forEach(function (e) {
-    if (!e.dt) return;
-    var key = e.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40) + '|' + ymd(e.dt);
+    var key = e.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40) + '|' +
+              (e.dt ? ymd(e.dt) : 'nodate');
     if (seen[key]) return;
     seen[key] = 1;
     out.push(e);
   });
   return out;
+}
+function renderTracksCard(tracks) {
+  var el = $('tracksCard');
+  if (!tracks || !tracks.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = '<h2>🏁 Race tracks &amp; speedways near you</h2>' +
+    tracks.slice(0, 10).map(function (t) {
+      var link = t.website ||
+        ('https://duckduckgo.com/?q=' + encodeURIComponent(t.name + ' schedule'));
+      return '<div class="trackrow"><span>' + esc(t.name) +
+        (t.dist != null ? ' <span class="muted">· ' + t.dist.toFixed(0) + ' mi</span>' : '') +
+        '</span><a href="' + esc(link) + '" target="_blank" rel="noopener">Schedule ↗</a></div>';
+    }).join('') +
+    '<div class="hint">Found automatically from OpenStreetMap. Tracks with websites are ' +
+    'scanned for your keywords (demolition derby, hit to pass…) — matches appear below.</div>';
+}
+function googleSweepLink() {
+  if (!settings.loc) return '';
+  var qs = sweepQueries(settings.loc, today0());
+  return ' · <a href="https://www.google.com/search?q=' + encodeURIComponent(qs[0].q) +
+    '" target="_blank" rel="noopener">see on Google ↗</a>';
 }
 function runSearch() {
   if (searching) return;
@@ -565,18 +844,25 @@ function runSearch() {
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Searching…';
   var start = today0(), end = addDays(start, WINDOW_DAYS);
   end.setHours(23,59,59,0);
-  var jobs = [
-    fetchTicketmaster(settings.loc, settings.radius, new Date(), end),
-    fetchSeatGeek(settings.loc, settings.radius, start, end)
-  ];
-  settings.sources.forEach(function (s) { jobs.push(fetchTrackedPage(s, start, end)); });
-  Promise.all(jobs).then(function (results) {
+  ensurePlace().then(function (loc) {
+    var jobs = [
+      fetchEventbrite(loc, settings.radius, start, end),
+      fetchTracksAndScan(loc, settings.radius, start, end),
+      fetchWebSweep(loc, start, end),
+      fetchTicketmaster(loc, settings.radius, new Date(), end),
+      fetchSeatGeek(loc, settings.radius, start, end)
+    ];
+    settings.sources.forEach(function (s) { jobs.push(fetchTrackedPage(s, start, end)); });
+    return Promise.all(jobs);
+  }).then(function (results) {
     var all = [];
     var statusBits = [];
     results.forEach(function (r) {
-      if (r.skipped) { statusBits.push(esc(r.name) + ': no key (see Settings)'); return; }
+      if (r.skipped) { statusBits.push(esc(r.name) + ': off (optional key in Settings)'); return; }
+      if (r.tracks) renderTracksCard(r.tracks);
       if (r.error) { statusBits.push('<span class="err">' + esc(r.name) + ': ' + esc(r.error) + '</span>'); return; }
-      statusBits.push(esc(r.name) + ': ' + r.events.length);
+      statusBits.push(esc(r.name) + ': ' + r.events.length +
+        (r.tracks ? ' (' + r.tracks.length + ' tracks)' : ''));
       all = all.concat(r.events);
     });
     // distance + category
@@ -584,15 +870,20 @@ function runSearch() {
       e.dist = (e.venueLat != null && e.venueLon != null)
         ? haversineMi(settings.loc.lat, settings.loc.lon, e.venueLat, e.venueLon) : null;
       e.cat = e.forcedCat || categorize(e);
+      if (e.cat === 'other' && e.fallbackCat) e.cat = e.fallbackCat;
       e.kwHit = e.kwHit || matchAny(e.title + ' ' + (e.desc || ''),
         settings.keywords.map(function (k) { return k.toLowerCase(); }));
     });
     // keep inside radius when we know the distance
     all = all.filter(function (e) { return e.dist == null || e.dist <= settings.radius + 2; });
     all = dedupe(all);
-    all.sort(function (a, b) { return a.dt - b.dt || (a.dist || 9e9) - (b.dist || 9e9); });
+    all.sort(function (a, b) {
+      var ta = a.dt ? a.dt.getTime() : Infinity, tb = b.dt ? b.dt.getTime() : Infinity;
+      return ta - tb || (a.dist || 9e9) - (b.dist || 9e9);
+    });
     events = all;
-    $('srcStatus').innerHTML = 'Found <b>' + all.length + '</b> events · ' + statusBits.join(' · ');
+    $('srcStatus').innerHTML = 'Found <b>' + all.length + '</b> results · ' +
+      statusBits.join(' · ') + googleSweepLink();
     buildDayStrip();
     render();
   }).finally(function () {
@@ -606,7 +897,7 @@ $('btnSearch').addEventListener('click', runSearch);
 function buildDayStrip() {
   var strip = $('dayStrip');
   var counts = {};
-  events.forEach(function (e) { var k = ymd(e.dt); counts[k] = (counts[k] || 0) + 1; });
+  events.forEach(function (e) { if (!e.dt) return; var k = ymd(e.dt); counts[k] = (counts[k] || 0) + 1; });
   var html = '<button class="daychip' + (selDay === 'all' ? ' sel' : '') + '" data-day="all">' +
     '<span class="dow">All</span><span class="dnum">30</span><span class="cnt">days</span></button>';
   var t = today0();
@@ -644,6 +935,7 @@ function buildChips() {
 
 /* ================= render ================= */
 function fmtPrice(e) {
+  if (e.priceMin === 0 && !e.priceMax) return 'Free';
   if (e.priceMin == null && e.priceMax == null) return 'See site';
   if (e.priceMin != null && e.priceMax != null && e.priceMin !== e.priceMax)
     return '$' + Math.round(e.priceMin) + '–$' + Math.round(e.priceMax);
@@ -661,7 +953,7 @@ function highlight(text, kw) {
 function render() {
   var q = $('q').value.trim().toLowerCase();
   var list = events.filter(function (e) {
-    if (selDay !== 'all' && ymd(e.dt) !== selDay) return false;
+    if (selDay !== 'all' && (!e.dt || ymd(e.dt) !== selDay)) return false;
     if (selCat !== 'all' && e.cat !== selCat) return false;
     if (q && (e.title + ' ' + e.venue + ' ' + (e.desc || '')).toLowerCase().indexOf(q) === -1) return false;
     return true;
@@ -674,7 +966,8 @@ function render() {
     return;
   }
   res.innerHTML = list.map(function (e) {
-    var when = fmtDay(e.dt) + (e.hasTime ? ' · ' + fmtTime(e.dt) : '');
+    var when = e.dt ? (fmtDay(e.dt) + (e.hasTime ? ' · ' + fmtTime(e.dt) : ''))
+                    : 'Date not listed — open link';
     var distStr = e.dist != null ? e.dist.toFixed(0) + ' mi away' : 'distance unknown';
     var venue = e.venue ? esc(e.venue) + (e.venueCity ? ', ' + esc(e.venueCity) : '') : '';
     return '<div class="ev' + (e.confirmed ? '' : ' lead') + '">' +
@@ -750,41 +1043,14 @@ $('btnClearCache').addEventListener('click', function () {
   $('srcStatus').textContent = '';
 });
 
-/* ================= sample data ================= */
-$('btnSample').addEventListener('click', function () {
-  var t = today0();
-  function mk(off, title, cat, seg, price, venue, dist, desc, confirmed) {
-    var d = addDays(t, off); d.setHours(19, 0, 0, 0);
-    return { id: 'demo:' + title, source: 'Sample', title: title, url: '#',
-      dt: d, hasTime: true, venue: venue, venueCity: '', venueLat: null, venueLon: null,
-      priceMin: price, priceMax: price ? price + 15 : null, segment: seg, genre: '',
-      desc: desc, confirmed: confirmed !== false, dist: dist, cat: cat,
-      kwHit: null };
-  }
-  events = [
-    mk(1, 'Demolition Derby & Hit to Pass Night', 'racing', 'Motorsports', 15, 'County Speedway', 12,
-       'Full contact! Demolition derby mains plus hit to pass heats. Pit gates 4pm.'),
-    mk(2, 'Live Country Night — The Rustlers', 'music', 'Music', 22, 'Riverside Amphitheater', 8,
-       'Outdoor show, gates at 6.'),
-    mk(3, 'Wing Wednesday — 50¢ wings', 'deals', 'Food & Drink', null, "Duke's Roadhouse", 4,
-       'Every Wednesday: 50¢ wings 5–9pm, 12 sauces.', false),
-    mk(5, 'Sprint Car Series Round 7', 'racing', 'Motorsports', 20, 'Thunder Valley Raceway', 26,
-       '360 sprints, late models, and hornets.'),
-    mk(6, 'Comedy Night: Open Mic + Headliner', 'comedy', 'Comedy', 10, 'Brick Lane Comedy Club', 6,
-       '18+ show, two drink minimum.'),
-    mk(9, 'Minor League Baseball vs. Rivertown', 'sports', 'Sports', 12, 'Memorial Ballpark', 10,
-       'Fireworks after the game.')
-  ];
-  events.forEach(function (e) { if (!e.kwHit) e.kwHit = matchAny(e.title + ' ' + e.desc,
-    settings.keywords.map(function (k) { return k.toLowerCase(); })); });
-  $('srcStatus').innerHTML = 'Showing <b>sample data</b> — add your free API keys in Settings for real events.';
-  buildDayStrip(); render();
-});
-
 /* ================= boot ================= */
 function updateBanner() {
-  $('setupBanner').style.display = (settings.tmKey || settings.sgKey) ? 'none' : '';
+  $('setupBanner').style.display =
+    (settings.tmKey || settings.sgKey || settings.bannerHide) ? 'none' : '';
 }
+$('btnDismissBanner').addEventListener('click', function () {
+  settings.bannerHide = true; save(); updateBanner();
+});
 if (settings.loc) {
   var el = $('locStatus');
   el.textContent = '📍 ' + settings.loc.label;
