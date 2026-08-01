@@ -1,5 +1,5 @@
-// Offline cache for Receipt Keeper (web version, flat layout).
-var CACHE = 'receipt-keeper-v3';
+// Offline cache for Receipt Keeper (web version).
+var CACHE = 'receipt-keeper-v5';
 var FILES = [
   './',
   'index.html',

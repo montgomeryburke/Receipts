@@ -96,6 +96,15 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 14px 0; }
+  .photogrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .photogrid img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover;
+                   border-radius: 8px; background: #e3e8e6; cursor: pointer; }
+  #photoOverlay { position: fixed; inset: 0; background: rgba(10,14,13,.94); z-index: 60;
+                  display: flex; align-items: center; justify-content: center; }
+  #photoOverlay img { max-width: 96%; max-height: 88%; border-radius: 6px; }
+  #photoOverlay .closex { position: absolute; right: 16px; color: #fff; font-size: 26px;
+                          top: calc(12px + env(safe-area-inset-top));
+                          background: none; padding: 8px; }
   .webonly { }
 </style>
 </head>
@@ -129,10 +138,27 @@
         <span class="total" id="sumTotal"></span>
       </div>
       <div id="entriesWrap"></div>
-      <div class="btn-row webonly hidden" id="webExportRow">
-        <button class="btn-secondary" id="btnExportXlsx">Save spreadsheet</button>
-        <button class="btn-secondary" id="btnExportZip">Export year (zip)</button>
+      <div class="webonly hidden" id="webExportRow">
+        <div class="btn-row">
+          <button class="btn-secondary" id="btnOpenSheet">&#128202; Open spreadsheet</button>
+          <button class="btn-secondary" id="btnPhotos">&#128247; View photos</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn-secondary" id="btnExportZip">&#128230; Export year (photos + spreadsheet)</button>
+        </div>
       </div>
+    </div>
+  </div>
+
+  <!-- PHOTOS VIEW -->
+  <div id="viewPhotos" class="hidden">
+    <div class="card">
+      <div class="btn-row" style="margin:0 0 12px">
+        <button class="btn-secondary" id="btnPhotosBack" style="flex:0 0 auto">&#8592; Back</button>
+      </div>
+      <h2 id="photosTitle">Receipt photos</h2>
+      <div id="photoGrid" class="photogrid"></div>
+      <div class="hint" id="photosHint"></div>
     </div>
   </div>
 
@@ -282,12 +308,81 @@ function idbDel(key) {
   }).catch(function () {});
 }
 
-/* Year directory in whichever storage is active (chosen folder, else private) */
-function activeYearDir(year, create) {
-  if (chosenDir) return chosenDir.getDirectoryHandle(year, { create: !!create });
-  return opfsDir(year, create);
-}
 function hasFileStorage() { return !!chosenDir || opfsOk; }
+
+/* Best directory to VIEW files for a year: the chosen folder when accessible,
+   otherwise the app's private mirror. Never triggers a permission prompt. */
+function yearSourceDir(year) {
+  var p = chosenDir
+    ? chosenDir.getDirectoryHandle(year)
+    : Promise.reject(new Error('no folder'));
+  return p.catch(function () { return opfsDir(year, false); });
+}
+
+function opfsReadFile(year, name) {
+  return opfsDir(year, false)
+    .then(function (dir) { return dir.getFileHandle(name); })
+    .then(function (fh) { return fh.getFile(); })
+    .then(function (f) { return f.arrayBuffer(); })
+    .then(function (ab) { return new Uint8Array(ab); });
+}
+function opfsWriteFile(year, name, data) {
+  return opfsDir(year, true)
+    .then(function (dir) { return dir.getFileHandle(name, { create: true }); })
+    .then(function (fh) { return fh.createWritable(); })
+    .then(function (w) { return w.write(data).then(function () { return w.close(); }); });
+}
+function folderWriteFile(year, name, data) {
+  return chosenDir.getDirectoryHandle(year, { create: true })
+    .then(function (dir) { return dir.getFileHandle(name, { create: true }); })
+    .then(function (fh) { return fh.createWritable(); })
+    .then(function (w) { return w.write(data).then(function () { return w.close(); }); });
+}
+
+/* Files written to the mirror while the folder was unreachable are queued and
+   copied over automatically the next time the folder is accessible. */
+function addPendingSync(year, name) {
+  return idbGet('pending:' + year).then(function (list) {
+    list = list || [];
+    if (list.indexOf(name) < 0) list.push(name);
+    return idbSet('pending:' + year, list);
+  }).catch(function () {});
+}
+function flushPendingSync(year) {
+  if (!chosenDir) return Promise.resolve();
+  return idbGet('pending:' + year).then(function (list) {
+    if (!list || !list.length) return;
+    var remaining = list.slice();
+    var chain = Promise.resolve();
+    list.forEach(function (name) {
+      chain = chain.then(function () {
+        return opfsReadFile(year, name)
+          .then(function (u8) { return folderWriteFile(year, name, u8); })
+          .then(function () {
+            remaining = remaining.filter(function (n) { return n !== name; });
+          })
+          .catch(function () {});
+      });
+    });
+    return chain.then(function () { return idbSet('pending:' + year, remaining); });
+  }).catch(function () {});
+}
+
+/* Save a file to the app mirror (always works, no prompts) AND to the chosen
+   folder when accessible; queue it for later sync otherwise. */
+function saveFileEverywhere(year, name, data) {
+  var mirror = opfsOk
+    ? opfsWriteFile(year, name, data).catch(function () {})
+    : Promise.resolve();
+  return mirror.then(function () {
+    if (chosenDir) {
+      return folderWriteFile(year, name, data)
+        .then(function () { return flushPendingSync(year); })
+        .catch(function () { return addPendingSync(year, name); });
+    }
+    if (pendingDirHandle) return addPendingSync(year, name);
+  });
+}
 
 function opfsDir(year, create) {
   return navigator.storage.getDirectory().then(function (root) {
@@ -297,20 +392,35 @@ function opfsDir(year, create) {
   });
 }
 
+function xlsxName(year) { return 'Receipts-' + year + '.xlsx'; }
+
+/* Read the spreadsheet from the user's chosen folder only (null if not
+   accessible right now — never prompts). */
+function readFolderXlsx(year) {
+  if (!chosenDir) return Promise.resolve(null);
+  return chosenDir.getDirectoryHandle(year)
+    .then(function (d) { return d.getFileHandle(xlsxName(year)); })
+    .then(function (fh) { return fh.getFile(); })
+    .then(function (f) { return f.arrayBuffer(); })
+    .then(function (ab) { return new Uint8Array(ab); })
+    .catch(function () { return null; });
+}
+function readMirrorXlsx(year) {
+  if (!opfsOk) return Promise.resolve(null);
+  return opfsReadFile(year, xlsxName(year)).catch(function () { return null; });
+}
+
 function readXlsx(year) {
   if (IS_ANDROID) {
     var b64 = AndroidBridge.readSpreadsheet(year);
     return Promise.resolve(b64 ? b64ToU8(b64) : null);
   }
-  if (!hasFileStorage()) {
-    return Promise.resolve(state._memXlsx && state._memXlsx[year] || null);
-  }
-  return activeYearDir(year, false).then(function (dir) {
-    return dir.getFileHandle('Receipts-' + year + '.xlsx');
-  }).then(function (fh) { return fh.getFile(); })
-    .then(function (f) { return f.arrayBuffer(); })
-    .then(function (ab) { return new Uint8Array(ab); })
-    .catch(function () { return null; });
+  return readFolderXlsx(year).then(function (u8) {
+    if (u8) return u8;
+    return readMirrorXlsx(year).then(function (m) {
+      return m || (state._memXlsx && state._memXlsx[year]) || null;
+    });
+  });
 }
 
 function writeXlsx(year, u8) {
@@ -323,22 +433,12 @@ function writeXlsx(year, u8) {
     state._memXlsx[year] = u8;
     return Promise.resolve();
   }
-  return activeYearDir(year, true).then(function (dir) {
-    return dir.getFileHandle('Receipts-' + year + '.xlsx', { create: true });
-  }).then(function (fh) { return fh.createWritable(); })
-    .then(function (w) {
-      return w.write(u8).then(function () { return w.close(); });
-    });
+  return saveFileEverywhere(year, xlsxName(year), u8);
 }
 
 function savePhotoWeb(year, blob, name) {
   if (!hasFileStorage()) return Promise.resolve(false);
-  return activeYearDir(year, true).then(function (dir) {
-    return dir.getFileHandle(name, { create: true });
-  }).then(function (fh) { return fh.createWritable(); })
-    .then(function (w) {
-      return w.write(blob).then(function () { return w.close(); });
-    }).then(function () { return true; });
+  return saveFileEverywhere(year, name, blob).then(function () { return true; });
 }
 
 function deleteCapturedPhoto() {
@@ -347,32 +447,123 @@ function deleteCapturedPhoto() {
   }
 }
 
-/* ================= Spreadsheet logic ================= */
-function loadRows(year) {
-  return readXlsx(year).then(function (u8) {
-    if (!u8) return [];
-    try {
-      var wb = XLSX.read(u8, { type: 'array' });
-      var ws = wb.Sheets[wb.SheetNames[0]];
-      var rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-      if (rows.length && String(rows[0][0]).toLowerCase() === 'date') rows.shift();
-      return rows;
-    } catch (e) {
-      return [];
-    }
+/* ================= Spreadsheet logic =================
+   The app keeps its own permanent ledger of entries in the browser database
+   (IndexedDB). The Excel file is rebuilt from the FULL ledger on every save,
+   so it is always cumulative — even if the file on disk can't be read back
+   (flaky folder access, first run, fallback mode, etc.). When the file on
+   disk IS readable, it wins, so edits you make to it in Excel are kept. */
+
+function parseRows(u8) {
+  try {
+    var wb = XLSX.read(u8, { type: 'array' });
+    var ws = wb.Sheets[wb.SheetNames[0]];
+    var rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    if (rows.length && String(rows[0][0]).toLowerCase() === 'date') rows.shift();
+    rows = rows.filter(function (r) { return r && r.length; });
+    // Normalise dates the user reformatted in Excel (serial numbers → text).
+    rows.forEach(function (r) {
+      if (typeof r[0] === 'number') {
+        try { r[0] = XLSX.SSF.format('yyyy-mm-dd', r[0]); } catch (e) {}
+      }
+    });
+    return rows;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ---- Sync engine: ledger (app database) + mirror + chosen folder ----
+   Rows are merged by identity, so the app, the mirror, and the spreadsheet in
+   your folder always end up showing the SAME receipts. On a clash for the
+   same receipt, the folder spreadsheet wins (your Excel edits are kept). */
+
+function rowKey(r) {
+  return r[4] ? 'p:' + r[4]
+    : 'd:' + r[0] + '|' + (r[1] || '') + '|' + r[2] + '|' + (r[3] || '');
+}
+
+function mergeRows(base, over) {
+  var map = {}, order = [];
+  function addAll(list, wins) {
+    (list || []).forEach(function (r) {
+      var k = rowKey(r);
+      if (!(k in map)) order.push(k);
+      if (wins || !(k in map)) map[k] = r;
+    });
+  }
+  addAll(base, false);
+  addAll(over, true);
+  return order.map(function (k) { return map[k]; });
+}
+
+function sortRows(rows) {
+  rows.sort(function (a, b) {
+    var d = String(a[0]).localeCompare(String(b[0]));
+    if (d !== 0) return d;
+    return String(a[4] || '').localeCompare(String(b[4] || ''));
+  });
+  return rows;
+}
+
+function persistRows(year, rows) {
+  return idbSet('entries:' + year, rows).catch(function () {}).then(function () {
+    return writeXlsx(year, buildXlsx(rows));
   });
 }
 
+function syncYear(year) {
+  if (IS_ANDROID) {
+    return readXlsx(year).then(function (u8) {
+      var rows = u8 ? (parseRows(u8) || []) : [];
+      return idbGet('entries:' + year).then(function (ledger) {
+        var merged = sortRows(mergeRows(ledger || [], rows));
+        idbSet('entries:' + year, merged).catch(function () {});
+        return merged;
+      });
+    });
+  }
+  return Promise.all([
+    idbGet('entries:' + year),
+    readMirrorXlsx(year),
+    readFolderXlsx(year)
+  ]).then(function (res) {
+    var ledger = res[0] || [];
+    var mirror = res[1] ? (parseRows(res[1]) || []) : [];
+    var folder = res[2] ? (parseRows(res[2]) || []) : [];
+    var merged = sortRows(mergeRows(mergeRows(ledger, mirror), folder));
+    var s = JSON.stringify(merged);
+    var jobs = [idbSet('entries:' + year, merged).catch(function () {})];
+    if (opfsOk && s !== JSON.stringify(mirror)) {
+      jobs.push(opfsWriteFile(year, xlsxName(year), buildXlsx(merged))
+        .catch(function () {}));
+    }
+    if (chosenDir && s !== JSON.stringify(folder)) {
+      jobs.push(folderWriteFile(year, xlsxName(year), buildXlsx(merged))
+        .catch(function () { return addPendingSync(year, xlsxName(year)); }));
+    }
+    return Promise.all(jobs).then(function () { return merged; });
+  });
+}
+
+function loadRows(year) {
+  return syncYear(year);
+}
+
+function buildXlsx(rows) {
+  var data = [HEADERS].concat(rows);
+  var ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [{ wch: 11 }, { wch: 28 }, { wch: 16 }, { wch: 10 }, { wch: 30 }];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME);
+  return new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }));
+}
+
 function appendRow(year, row) {
-  return loadRows(year).then(function (rows) {
+  // Sync first so the new row is added on top of the complete picture.
+  return syncYear(year).then(function (rows) {
     rows.push(row);
-    var data = [HEADERS].concat(rows);
-    var ws = XLSX.utils.aoa_to_sheet(data);
-    ws['!cols'] = [{ wch: 11 }, { wch: 28 }, { wch: 16 }, { wch: 10 }, { wch: 30 }];
-    var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, SHEET_NAME);
-    var out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    return writeXlsx(year, new Uint8Array(out));
+    return persistRows(year, rows);
   });
 }
 
@@ -468,6 +659,7 @@ function extractAmounts(text) {
 /* ================= Views ================= */
 function showHome() {
   $('viewReview').classList.add('hidden');
+  $('viewPhotos').classList.add('hidden');
   $('viewHome').classList.remove('hidden');
   refreshEntries();
 }
@@ -517,14 +709,40 @@ function esc(s) {
 }
 
 /* ================= Scan flow ================= */
+
+/* Make sure we still have permission on the chosen folder. Called from user
+   taps (scan/save), so the browser is allowed to show its one-tap Allow
+   prompt instead of forcing the user to re-pick the folder. */
+function ensureDirPermission() {
+  var h = chosenDir || pendingDirHandle;
+  if (!h || typeof h.queryPermission !== 'function') return Promise.resolve();
+  return h.queryPermission({ mode: 'readwrite' }).then(function (p) {
+    if (p === 'granted') {
+      chosenDir = h; pendingDirHandle = null;
+      return;
+    }
+    return h.requestPermission({ mode: 'readwrite' }).then(function (p2) {
+      if (p2 === 'granted') {
+        chosenDir = h; pendingDirHandle = null;
+        flushPendingSync(state.year);
+      } else {
+        pendingDirHandle = h; chosenDir = null;
+        toast('Folder access not allowed — saving to app storage instead');
+      }
+    });
+  }).catch(function () {}).then(function () { refreshStorageUI(); });
+}
+
 function startScan() {
   if (state.busy) return;
-  if (IS_ANDROID) {
-    AndroidBridge.takePhoto(state.year);
-  } else {
-    $('webCamInput').value = '';
-    $('webCamInput').click();
-  }
+  ensureDirPermission().then(function () {
+    if (IS_ANDROID) {
+      AndroidBridge.takePhoto(state.year);
+    } else {
+      $('webCamInput').value = '';
+      $('webCamInput').click();
+    }
+  });
 }
 
 /* Android calls this after the camera returns */
@@ -630,9 +848,11 @@ function saveCurrent() {
   var btn = $('btnSave');
   btn.disabled = true;
 
-  var photoStep = (!IS_ANDROID && state.photoBlob)
-    ? savePhotoWeb(state.year, state.photoBlob, state.photoName)
-    : Promise.resolve(true);
+  var photoStep = ensureDirPermission().then(function () {
+    return (!IS_ANDROID && state.photoBlob)
+      ? savePhotoWeb(state.year, state.photoBlob, state.photoName)
+      : true;
+  });
 
   photoStep.then(function () {
     return appendRow(state.year, row);
@@ -642,8 +862,9 @@ function saveCurrent() {
       ? 'Documents › Receipts › ' + state.year
       : (chosenDir ? chosenDir.name + ' › ' + state.year : 'the ' + state.year + ' folder');
     toast('Saved to ' + loc);
+    var photoCopy = state.photoBlob, photoNameCopy = state.photoName;
     cleanupPhotoUrl();
-    if (!IS_ANDROID && !hasFileStorage()) offerWebDownloads(row);
+    if (!IS_ANDROID && !hasFileStorage()) offerWebDownloads(photoCopy, photoNameCopy);
     showHome();
   }).catch(function (e) {
     btn.disabled = false;
@@ -677,31 +898,42 @@ function downloadBlob(blob, name) {
   }, 4000);
 }
 
-function offerWebDownloads(row) {
-  // No persistent storage available: hand the user the updated spreadsheet now.
-  readXlsx(state.year).then(function (u8) {
-    if (u8) {
-      downloadBlob(new Blob([u8], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      }), 'Receipts-' + state.year + '.xlsx');
-    }
+function offerWebDownloads(photoBlob, photoName) {
+  // No file storage available: hand the user the cumulative spreadsheet
+  // (rebuilt from the app's ledger, so it contains ALL rows so far) plus
+  // the receipt photo, so nothing is lost.
+  loadRows(state.year).then(function (rows) {
+    downloadBlob(new Blob([buildXlsx(rows)], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }), 'Receipts-' + state.year + '.xlsx');
+    if (photoBlob) downloadBlob(photoBlob, photoName || 'receipt.jpg');
   });
 }
 
-function exportXlsx() {
-  readXlsx(state.year).then(function (u8) {
-    if (!u8) { toast('No spreadsheet yet for ' + state.year); return; }
-    var f = new File([u8], 'Receipts-' + state.year + '.xlsx', {
+function currentSheetFile() {
+  return loadRows(state.year).then(function (rows) {
+    if (!rows.length) return null;
+    return new File([buildXlsx(rows)], 'Receipts-' + state.year + '.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
+  });
+}
+
+/* "Open spreadsheet": hands the up-to-date Excel file to the phone —
+   pick Excel / Sheets in the menu to open it, or it saves to Downloads. */
+function openSpreadsheet() {
+  currentSheetFile().then(function (f) {
+    if (!f) { toast('No receipts yet for ' + state.year); return; }
     shareOrDownload([f]);
+  }).catch(function (e) {
+    toast('Could not build the spreadsheet: ' + (e && e.message ? e.message : 'error'));
   });
 }
 
 function exportZip() {
-  if (!hasFileStorage()) { exportXlsx(); return; }
+  if (!hasFileStorage()) { openSpreadsheet(); return; }
   var entries = [];
-  activeYearDir(state.year, false).then(function (dir) {
+  yearSourceDir(state.year).then(function (dir) {
     var it = dir.values();
     function next() {
       return it.next().then(function (r) {
@@ -717,22 +949,100 @@ function exportZip() {
       });
     }
     return next();
-  }).then(function (list) {
-    if (!list || !list.length) { toast('Nothing saved yet for ' + state.year); return; }
-    var zip = makeZip(list);
-    var f = new File([zip], 'Receipts-' + state.year + '.zip', { type: 'application/zip' });
-    shareOrDownload([f]);
-  }).catch(function () {
-    toast('Nothing saved yet for ' + state.year);
-  });
+  }).catch(function () { return []; })
+    .then(function (list) {
+      if (!list || !list.length) { openSpreadsheet(); return; }
+      var zip = makeZip(list);
+      var f = new File([zip], 'Receipts-' + state.year + '.zip', { type: 'application/zip' });
+      shareOrDownload([f]);
+    });
 }
 
 function shareOrDownload(files) {
-  if (navigator.canShare && navigator.canShare({ files: files })) {
-    navigator.share({ files: files }).catch(function () {});
+  var can = false;
+  try { can = !!(navigator.canShare && navigator.canShare({ files: files })); } catch (e) {}
+  if (can) {
+    navigator.share({ files: files }).catch(function (err) {
+      // User closing the share sheet is fine; anything else → download instead.
+      if (!err || err.name !== 'AbortError') downloadAll(files);
+    });
   } else {
-    for (var i = 0; i < files.length; i++) downloadBlob(files[i], files[i].name);
+    downloadAll(files);
   }
+}
+function downloadAll(files) {
+  for (var i = 0; i < files.length; i++) downloadBlob(files[i], files[i].name);
+  toast('Saved to your Downloads');
+}
+
+/* ================= Photo gallery ================= */
+var photoUrls = [];
+
+function listPhotoFiles(year) {
+  return yearSourceDir(year).then(function (dir) {
+    var out = [], it = dir.values();
+    function next() {
+      return it.next().then(function (r) {
+        if (r.done) return out;
+        var h = r.value;
+        if (h.kind === 'file' && /\.(jpe?g|png|webp)$/i.test(h.name)) {
+          return h.getFile().then(function (f) { out.push(f); return next(); });
+        }
+        return next();
+      });
+    }
+    return next();
+  }).catch(function () { return []; });
+}
+
+function showPhotos() {
+  $('viewHome').classList.add('hidden');
+  $('viewPhotos').classList.remove('hidden');
+  $('photosTitle').textContent = 'Receipt photos — ' + state.year;
+  var grid = $('photoGrid');
+  grid.innerHTML = '<div class="empty">Loading&hellip;</div>';
+  listPhotoFiles(state.year).then(function (files) {
+    files.sort(function (a, b) { return a.name < b.name ? 1 : -1; });
+    photoUrls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
+    photoUrls = [];
+    grid.innerHTML = '';
+    if (!files.length) {
+      grid.innerHTML = '<div class="empty">No photos yet for ' + state.year + '.</div>';
+      $('photosHint').textContent = '';
+      return;
+    }
+    files.forEach(function (f) {
+      var url = URL.createObjectURL(f);
+      photoUrls.push(url);
+      var img = document.createElement('img');
+      img.src = url; img.alt = f.name; img.loading = 'lazy';
+      img.addEventListener('click', function () { openPhotoOverlay(url, f.name); });
+      grid.appendChild(img);
+    });
+    $('photosHint').textContent = chosenDir
+      ? 'These photos live in the “' + chosenDir.name + ' › ' + state.year +
+        '” folder on this device — you can also browse them with your Files app.'
+      : 'These photos live in this app’s storage. Use “Export year” to copy ' +
+        'them into your Files app.';
+  });
+}
+
+function closePhotos() {
+  $('viewPhotos').classList.add('hidden');
+  $('viewHome').classList.remove('hidden');
+}
+
+function openPhotoOverlay(url, name) {
+  var ov = document.createElement('div');
+  ov.id = 'photoOverlay';
+  var img = document.createElement('img');
+  img.src = url; img.alt = name;
+  var x = document.createElement('button');
+  x.className = 'closex'; x.innerHTML = '&#10005;';
+  function close() { try { document.body.removeChild(ov); } catch (e) {} }
+  ov.addEventListener('click', close);
+  ov.appendChild(img); ov.appendChild(x);
+  document.body.appendChild(ov);
 }
 
 /* Store-only ZIP builder */
@@ -799,8 +1109,19 @@ function init() {
   $('btnScan').addEventListener('click', startScan);
   $('btnSave').addEventListener('click', saveCurrent);
   $('btnDiscard').addEventListener('click', discardCurrent);
-  $('btnExportXlsx').addEventListener('click', exportXlsx);
+  $('btnOpenSheet').addEventListener('click', openSpreadsheet);
+  $('btnPhotos').addEventListener('click', showPhotos);
+  $('btnPhotosBack').addEventListener('click', closePhotos);
   $('btnExportZip').addEventListener('click', exportZip);
+
+  // Re-sync whenever the app comes back to the foreground, so the list always
+  // matches the spreadsheet even if it was edited elsewhere.
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && !state.busy &&
+        $('viewHome') && !$('viewHome').classList.contains('hidden')) {
+      refreshEntries();
+    }
+  });
 
   $('btnChooseDir').addEventListener('click', chooseDir);
   $('btnForgetDir').addEventListener('click', forgetDir);
@@ -821,8 +1142,12 @@ function init() {
   restore.then(function (h) {
     if (!h || typeof h.queryPermission !== 'function') return;
     return h.queryPermission({ mode: 'readwrite' }).then(function (p) {
-      if (p === 'granted') chosenDir = h;
-      else if (p === 'prompt') pendingDirHandle = h;
+      if (p === 'granted') {
+        chosenDir = h;
+        flushPendingSync(state.year); // push anything saved while disconnected
+      } else if (p === 'prompt') {
+        pendingDirHandle = h;
+      }
     }).catch(function () {});
   }).then(function () {
     refreshStorageUI();
@@ -848,7 +1173,9 @@ function refreshStorageUI() {
   } else if (chosenDir) {
     $('storageHint').innerHTML =
       'Saving to the <b>' + esc(chosenDir.name) + '</b> folder on this device — ' +
-      'a subfolder is created for each tax year with the photos and spreadsheet together.';
+      'a subfolder is created for each tax year with the photos and spreadsheet together. ' +
+      'If Chrome asks about folder access again, choose <b>“Allow on every visit”</b> ' +
+      'and it will stop asking.';
   } else if (dirSupport) {
     $('storageHint').innerHTML =
       'Receipts are currently kept in this app’s private storage. ' +
@@ -860,8 +1187,15 @@ function refreshStorageUI() {
       'to save the photos and spreadsheet to your Files app.';
   } else {
     $('storageHint').innerHTML =
-      'This browser can’t keep files between visits — after each save, the updated ' +
-      'spreadsheet is downloaded so you can keep it in your Files app.';
+      'This browser can’t write files directly. Your receipt records are kept safely in ' +
+      'the app’s own database, and after each save the <b>complete, up-to-date spreadsheet</b> ' +
+      'and the photo are downloaded for your Files app.';
+  }
+  if (location.protocol === 'file:') {
+    $('storageHint').innerHTML =
+      '<b>Heads up:</b> you’ve opened the app as a local file. Open it from your hosted ' +
+      'web link instead to get folder saving, the home-screen icon, and offline support.<br><br>' +
+      $('storageHint').innerHTML;
   }
 }
 
