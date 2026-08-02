@@ -341,7 +341,8 @@ function haversineMi(lat1, lon1, lat2, lon2) {
 /* ================= location ================= */
 function setLoc(lat, lon, label, place) {
   var loc = { lat: lat, lon: lon, label: label };
-  if (place) { loc.city = place.city || ''; loc.st = place.st || ''; loc.country = place.country || ''; }
+  if (place) { loc.city = place.city || ''; loc.st = place.st || '';
+               loc.stateName = place.stateName || ''; loc.country = place.country || ''; }
   settings.loc = loc;
   save();
   var el = $('locStatus');
@@ -353,6 +354,7 @@ function placeFromAddress(a) {
   return {
     city: a.city || a.town || a.village || a.hamlet || a.county || '',
     st: iso.indexOf('-') !== -1 ? iso.split('-')[1].toLowerCase() : '',
+    stateName: a.state || '',
     country: (a.country_code || '').toLowerCase()
   };
 }
@@ -360,13 +362,14 @@ function placeFromAddress(a) {
 function ensurePlace() {
   var loc = settings.loc;
   if (!loc) return Promise.resolve(null);
-  if (loc.city) return Promise.resolve(loc);
+  if (loc.city && loc.stateName) return Promise.resolve(loc);
   return fetch('https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&addressdetails=1&lat=' +
                loc.lat + '&lon=' + loc.lon)
     .then(function (r) { return r.json(); })
     .then(function (j) {
       var p = placeFromAddress(j.address || {});
-      loc.city = p.city; loc.st = p.st; loc.country = p.country;
+      loc.city = loc.city || p.city; loc.st = loc.st || p.st;
+      loc.stateName = p.stateName; loc.country = loc.country || p.country;
       save();
       return loc;
     }).catch(function () { return loc; });
@@ -628,17 +631,19 @@ function extractServerData(html) {
 function ebSlugVariants(loc) {
   var city = loc.city.toLowerCase().replace(/^(city|town|township|village) of /, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  var country = loc.country === 'ca' ? 'canada' : 'united-states';
   var v = [];
-  if (loc.st) v.push(loc.st + '--' + city);
-  v.push((loc.country === 'ca' ? 'canada' : 'united-states') + '--' + city);
+  if (loc.st) v.push('https://www.eventbrite.com/d/' + loc.st + '--' + city);
+  v.push('https://www.eventbrite.com/d/' + country + '--' + city);
+  if (loc.country === 'ca') v.push('https://www.eventbrite.ca/d/canada--' + city);
   return v;
 }
 function fetchEventbrite(loc, radius, start, end) {
   if (!loc || !loc.city)
     return Promise.resolve({ name: 'Eventbrite', error: 'need a city — tap GPS or type your city', events: [] });
   var variants = ebSlugVariants(loc);
-  function grab(slug, n) {
-    return proxyFetch('https://www.eventbrite.com/d/' + slug + '/all-events/?page=' + n)
+  function grab(base, n) {
+    return proxyFetch(base + '/all-events/?page=' + n)
       .then(function (html) {
         var data = extractServerData(html);
         return data && data.search_data && data.search_data.events &&
@@ -687,18 +692,22 @@ function fetchEventbrite(loc, radius, start, end) {
   });
 }
 
-/* ================= source: race tracks near you (OpenStreetMap, no key) ================= */
+/* ================= source: local venues near you (OpenStreetMap, no key) ================= */
 var OVERPASS = ['https://overpass-api.de/api/interpreter',
                 'https://overpass.kumi.systems/api/interpreter',
                 'https://overpass.private.coffee/api/interpreter'];
-function fetchNearbyTracks(loc, radiusMi) {
+function fetchNearbyPlaces(loc, radiusMi) {
   var r = Math.round(Math.min(radiusMi, 300) * 1609);
   var around = '(around:' + r + ',' + loc.lat + ',' + loc.lon + ')';
-  var q = '[out:json][timeout:25];(' +
+  var q = '[out:json][timeout:30];(' +
     'nwr["sport"="motor"]' + around + ';' +
     'nwr["highway"="raceway"]' + around + ';' +
     'nwr["sport"="motocross"]' + around + ';' +
-    ');out center tags 80;';
+    'nwr["amenity"="theatre"]' + around + ';' +
+    'nwr["amenity"="arts_centre"]' + around + ';' +
+    'nwr["amenity"="community_centre"]' + around + ';' +
+    'node["place"~"^(city|town|village)$"]' + around + ';' +
+    ');out center tags 300;';
   var urls = OVERPASS.map(function (base) { return base + '?data=' + encodeURIComponent(q); });
   // try each mirror directly, then each again through the CORS proxies
   function direct(i) {
@@ -714,7 +723,7 @@ function fetchNearbyTracks(loc, radiusMi) {
       .catch(function () { return proxied(i + 1); });
   }
   return direct(0).then(function (j) {
-    var seen = {}, tracks = [];
+    var seen = {}, tracks = [], venues = [], towns = [];
     (j.elements || []).forEach(function (el) {
       var t = el.tags || {};
       var name = t.name;
@@ -722,31 +731,44 @@ function fetchNearbyTracks(loc, radiusMi) {
       seen[name.toLowerCase()] = 1;
       var lat = el.lat != null ? el.lat : (el.center && el.center.lat);
       var lon = el.lon != null ? el.lon : (el.center && el.center.lon);
-      tracks.push({
+      var item = {
         name: name,
         lat: lat, lon: lon,
         website: t.website || t['contact:website'] || '',
         dist: (lat != null && lon != null) ? haversineMi(loc.lat, loc.lon, lat, lon) : null
-      });
+      };
+      if (t.place) towns.push(item);
+      else if (t.amenity) venues.push(item);
+      else tracks.push(item);
     });
-    tracks.sort(function (a, b) { return (a.dist || 9e9) - (b.dist || 9e9); });
-    return tracks.slice(0, 30);
+    var byDist = function (a, b) { return (a.dist || 9e9) - (b.dist || 9e9); };
+    tracks.sort(byDist); venues.sort(byDist); towns.sort(byDist);
+    return { tracks: tracks.slice(0, 30), venues: venues.slice(0, 20), towns: towns.slice(0, 15) };
   });
 }
-function fetchTracksAndScan(loc, radiusMi, start, end) {
-  return fetchNearbyTracks(loc, radiusMi).then(function (tracks) {
-    var withSite = tracks.filter(function (t) { return t.website; }).slice(0, 6);
-    var scans = withSite.map(function (t) {
-      return fetchTrackedPage({ name: t.name, url: t.website, type: 'racing',
-                                lat: t.lat, lon: t.lon }, start, end);
+function fetchPlacesAndScan(loc, radiusMi, start, end) {
+  return fetchNearbyPlaces(loc, radiusMi).then(function (p) {
+    var jobs = [];
+    p.tracks.filter(function (t) { return t.website; }).slice(0, 6).forEach(function (t) {
+      jobs.push(fetchTrackedPage({ name: t.name, url: t.website, type: 'racing',
+                                   lat: t.lat, lon: t.lon }, start, end));
     });
-    return Promise.all(scans).then(function (rs) {
+    p.venues.filter(function (v) { return v.website; }).slice(0, 5).forEach(function (v) {
+      jobs.push(fetchTrackedPage({ name: v.name, url: v.website, type: 'arts',
+                                   lat: v.lat, lon: v.lon }, start, end));
+    });
+    p.towns.filter(function (t) { return t.website; }).slice(0, 5).forEach(function (t) {
+      jobs.push(fetchTrackedPage({ name: t.name, url: t.website, type: 'town',
+                                   lat: t.lat, lon: t.lon }, start, end));
+    });
+    return Promise.all(jobs).then(function (rs) {
       var evs = [];
       rs.forEach(function (r) { evs = evs.concat(r.events || []); });
-      return { name: 'Race tracks', events: evs, tracks: tracks };
+      return { name: 'Local venues', events: evs,
+               tracks: p.tracks, venues: p.venues, towns: p.towns };
     });
   }).catch(function (e) {
-    return { name: 'Race tracks', error: 'lookup failed (' + e.message + ')', events: [], tracks: [] };
+    return { name: 'Local venues', error: 'lookup failed (' + e.message + ')', events: [] };
   });
 }
 
@@ -822,8 +844,10 @@ function parseGoogle(html, max) {
     if (!resultOk(href)) continue;
     var title = stripTags(m[2]);
     if (!title) continue;
-    var tail = stripTags(html.slice(re.lastIndex, re.lastIndex + 600));
-    out.push({ url: href, title: title, snippet: tail.slice(0, 180) });
+    // snippet: only the text up to the NEXT result, so results don't bleed together
+    var next = html.indexOf('/url?q=', re.lastIndex);
+    var stop = next === -1 ? re.lastIndex + 600 : Math.min(next, re.lastIndex + 600);
+    out.push({ url: href, title: title, snippet: stripTags(html.slice(re.lastIndex, stop)).slice(0, 180) });
   }
   return out;
 }
@@ -848,23 +872,31 @@ function webSearch(q, max) {
 }
 function sweepQueries(loc, start) {
   var city = ((loc && loc.city) || (loc && loc.label) || '').split(',')[0];
+  var region = (loc && loc.stateName) || '';
   var mon = MONTHS[start.getMonth()];
   return [
-    { q: '"demolition derby" OR "hit to pass" OR "enduro" ' + city + ' ' + start.getFullYear(), cat: 'racing' },
-    { q: '"demolition derby" OR "hit to pass" OR speedway ' + city + ' site:facebook.com', cat: 'racing' },
-    { q: '"wing night" OR "wing special" ' + city, cat: 'deals' },
-    { q: 'events ' + city + ' ' + mon + ' site:facebook.com/events', cat: null },
-    { q: city + ' live music OR comedy ' + mon + ' ' + start.getFullYear(), cat: null }
+    { q: '"demolition derby" OR "hit to pass" OR "enduro" ' + city + ' ' + region, cat: 'racing' },
+    { q: '"demolition derby" OR "hit to pass" OR speedway ' + (region || city) + ' site:facebook.com', cat: 'racing' },
+    { q: '"wing night" OR "wing special" ' + city + ' ' + region, cat: 'deals' },
+    { q: 'events ' + city + ' ' + region + ' ' + mon + ' site:facebook.com/events', cat: null },
+    { q: city + ' ' + region + ' theatre OR concert OR festival ' + mon + ' ' + start.getFullYear(), cat: null }
   ];
 }
 function fetchWebSweep(loc, start, end) {
   if (!loc || (!loc.city && !loc.label))
     return Promise.resolve({ name: 'Web', error: 'need a location first', events: [] });
   var queries = sweepQueries(loc, start);
+  // a no-coordinate web result must mention somewhere local (or a watched
+  // keyword) or it's dropped — keeps far-away results out of the radius
+  var localNames = [loc.city, loc.stateName].filter(Boolean)
+    .map(function (s) { return s.toLowerCase(); });
   var jobs = queries.map(function (sq) {
     return webSearch(sq.q, 5)
       .then(function (results) {
-        return results.map(function (r) {
+        return results.filter(function (r) {
+          var blob = (r.title + ' ' + r.snippet + ' ' + r.url).toLowerCase();
+          return localNames.some(function (n) { return blob.indexOf(n) !== -1; });
+        }).map(function (r) {
           var dt = parseFirstDate(r.title + ' ' + r.snippet, start, end);
           var isFb = r.url.indexOf('facebook.com') !== -1;
           return {
@@ -903,7 +935,7 @@ function fetchPrebuilt(start, end) {
     }).filter(function (e) { return !e.dt || (e.dt >= start && e.dt <= end); });
     var age = d.generated ? Math.max(0, Math.round((Date.now() - new Date(d.generated).getTime()) / 36e5)) : null;
     return { name: 'Nightly scan' + (age != null ? ' (' + age + 'h ago)' : ''),
-             events: evs, tracks: d.tracks };
+             events: evs, tracks: d.tracks, venues: d.venues };
   }).catch(function (e) { return { name: 'Nightly scan', error: e.message, events: [] }; });
 }
 
@@ -919,20 +951,27 @@ function dedupe(list) {
   });
   return out;
 }
-function renderTracksCard(tracks) {
+function venueRows(list, linkLabel) {
+  return list.slice(0, 8).map(function (t) {
+    var link = t.website ||
+      ('https://duckduckgo.com/?q=' + encodeURIComponent(t.name + ' events schedule'));
+    return '<div class="trackrow"><span>' + esc(t.name) +
+      (t.dist != null ? ' <span class="muted">· ' + t.dist.toFixed(0) + ' mi</span>' : '') +
+      '</span><a href="' + esc(link) + '" target="_blank" rel="noopener">' + linkLabel + ' ↗</a></div>';
+  }).join('');
+}
+function renderTracksCard(tracks, venues) {
   var el = $('tracksCard');
-  if (!tracks || !tracks.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  var hasT = tracks && tracks.length, hasV = venues && venues.length;
+  if (!hasT && !hasV) { el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = '';
-  el.innerHTML = '<h2>🏁 Race tracks &amp; speedways near you</h2>' +
-    tracks.slice(0, 10).map(function (t) {
-      var link = t.website ||
-        ('https://duckduckgo.com/?q=' + encodeURIComponent(t.name + ' schedule'));
-      return '<div class="trackrow"><span>' + esc(t.name) +
-        (t.dist != null ? ' <span class="muted">· ' + t.dist.toFixed(0) + ' mi</span>' : '') +
-        '</span><a href="' + esc(link) + '" target="_blank" rel="noopener">Schedule ↗</a></div>';
-    }).join('') +
-    '<div class="hint">Found automatically from OpenStreetMap. Tracks with websites are ' +
-    'scanned for your keywords (demolition derby, hit to pass…) — matches appear below.</div>';
+  var html = '';
+  if (hasT) html += '<h2>🏁 Race tracks &amp; speedways near you</h2>' + venueRows(tracks, 'Schedule');
+  if (hasV) html += '<h2 style="margin-top:' + (hasT ? '14px' : '0') + '">🎭 Theatres &amp; venues near you</h2>' +
+    venueRows(venues, 'Events');
+  html += '<div class="hint">Found automatically from OpenStreetMap. Venues with websites are ' +
+    'scanned for upcoming dates — matches appear below.</div>';
+  el.innerHTML = html;
 }
 function googleSweepLink() {
   if (!settings.loc) return '';
@@ -952,7 +991,7 @@ function runSearch() {
     var jobs = [
       fetchPrebuilt(start, end),
       fetchEventbrite(loc, settings.radius, start, end),
-      fetchTracksAndScan(loc, settings.radius, start, end),
+      fetchPlacesAndScan(loc, settings.radius, start, end),
       fetchWebSweep(loc, start, end),
       fetchTicketmaster(loc, settings.radius, new Date(), end),
       fetchSeatGeek(loc, settings.radius, start, end)
@@ -965,7 +1004,8 @@ function runSearch() {
     results.forEach(function (r) {
       if (r.skipped) { statusBits.push(esc(r.name) + ': ' +
         esc(r.skippedNote || 'off (optional key in Settings)')); return; }
-      if (r.tracks && r.tracks.length) renderTracksCard(r.tracks);
+      if ((r.tracks && r.tracks.length) || (r.venues && r.venues.length))
+        renderTracksCard(r.tracks || [], r.venues || []);
       if (r.error) { statusBits.push('<span class="err">' + esc(r.name) + ': ' + esc(r.error) + '</span>'); return; }
       statusBits.push(esc(r.name) + ': ' + r.events.length +
         (r.tracks ? ' (' + r.tracks.length + ' tracks)' : ''));
