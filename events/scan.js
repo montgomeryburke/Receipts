@@ -308,25 +308,63 @@ function parseSearx(jsonText, max) {
     .filter(r => r.url && resultOk(r.url))
     .map(r => ({ url: r.url, title: (r.title || '').trim(), snippet: (r.content || '').trim() }));
 }
+// last-resort parser for ANY engine: every outbound link with real anchor
+// text. Noisy, but the strict locality filter downstream cuts the noise.
+function parseGeneric(html, max) {
+  const out = [], seen = {}; let m;
+  const re = /<a[^>]+href="(https?:\/\/[^"]+|\/\/[^"]+|\/url\?q=[^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  while ((m = re.exec(html)) !== null && out.length < max) {
+    let href = m[1];
+    if (href.startsWith('/url?q=')) {
+      try { href = decodeURIComponent(href.slice(7).split('&')[0]); } catch (e) { continue; }
+    }
+    href = cleanResultUrl(href);
+    if (!resultOk(href) || seen[href.split('#')[0]]) continue;
+    const title = stripTags(m[2]);
+    if (title.length < 12 || /^(sign in|settings|images|videos|news|maps|more|next|about|privacy|terms|feedback|help)/i.test(title)) continue;
+    seen[href.split('#')[0]] = 1;
+    const next = html.indexOf('<a ', re.lastIndex);
+    const stop = next === -1 ? re.lastIndex + 400 : Math.min(next, re.lastIndex + 400);
+    out.push({ url: href, title, snippet: stripTags(html.slice(re.lastIndex, stop)).slice(0, 180) });
+  }
+  return out;
+}
 const ENGINES = [
+  { name: 'google', url: q => 'https://www.google.com/search?q=' + encodeURIComponent(q) + '&gbv=1&num=20&hl=en', parse: parseGoogle },
+  { name: 'ddg', url: q => 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), parse: parseDdg },
+  { name: 'ddg-lite', url: q => 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(q), parse: parseDdgLite },
+  { name: 'bing', url: q => 'https://www.bing.com/search?q=' + encodeURIComponent(q), parse: parseBing },
   ...SEARX.map((base, i) => ({
     name: 'searx' + (i + 1),
     url: q => base + '/search?format=json&q=' + encodeURIComponent(q),
     parse: parseSearx
-  })),
-  { name: 'google', url: q => 'https://www.google.com/search?q=' + encodeURIComponent(q) + '&gbv=1&num=20&hl=en', parse: parseGoogle },
-  { name: 'ddg', url: q => 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), parse: parseDdg },
-  { name: 'ddg-lite', url: q => 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(q), parse: parseDdgLite },
-  { name: 'bing', url: q => 'https://www.bing.com/search?q=' + encodeURIComponent(q), parse: parseBing }
+  }))
 ];
+function debugSlice(body, q) {
+  // show the markup around the first query word so parsers can be fixed
+  const word = q.replace(/"/g, '').split(' ')[0];
+  let i = body.indexOf(word, 15000);
+  if (i === -1) i = body.indexOf(word);
+  if (i === -1) return '(query terms not found in body)';
+  return body.slice(Math.max(0, i - 400), i + 500).replace(/\s+/g, ' ');
+}
 async function webSearch(q, max) {
+  let debugged = false;
   for (const eng of ENGINES) {
     try {
       const body = await fetchText(eng.url(q));
-      const res = eng.parse(body, max);
-      if (res.length) { log('web [' + eng.name + '] "' + q + '": ' + res.length); return res; }
-      log('web [' + eng.name + '] parsed 0 results (body ' + body.length + ' chars: ' +
-          body.replace(/\s+/g, ' ').slice(0, 80) + '…)');
+      let res = eng.parse(body, max);
+      let via = eng.name;
+      if (!res.length && !eng.name.startsWith('searx')) {
+        res = parseGeneric(body, max);
+        via = eng.name + '+generic';
+      }
+      if (res.length) { log('web [' + via + '] "' + q + '": ' + res.length); return res; }
+      if (!debugged && body.length > 5000) {
+        debugged = true;
+        log('web [' + eng.name + '] 0 results; body[' + body.length + '] near query: ' +
+            debugSlice(body, q));
+      }
     } catch (e) { log('web [' + eng.name + '] failed: ' + e.message); }
   }
   log('web: all engines empty for "' + q + '"');
@@ -367,6 +405,7 @@ async function scanWeb(loc, start, end, towns, keywords) {
   const seen = {}, out = [];
   let dropped = 0;
   for (const sq of queries) {
+    await new Promise(r => setTimeout(r, 800));   // be gentle with the engines
     const results = await webSearch(sq.q, 6);
     for (const r of results) {
       if (seen[r.url]) continue;

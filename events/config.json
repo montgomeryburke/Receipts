@@ -5,5 +5,14 @@
   "st": "nl",
   "stateName": "Newfoundland and Labrador",
   "country": "ca",
-  "radiusMiles": 50
+  "radiusMiles": 50,
+  "extraPages": [
+    {
+      "name": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+      "url": "https://www.theatrenewfoundland.com",
+      "type": "arts",
+      "lat": 49.9127,
+      "lon": -57.8028
+    }
+  ]
 }
