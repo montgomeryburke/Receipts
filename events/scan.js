@@ -96,15 +96,16 @@ function extractServerData(html) {
 async function scanEventbrite(loc, start, end) {
   const city = loc.city.toLowerCase().replace(/^(city|town|township|village) of /, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const country = loc.country === 'ca' ? 'canada' : 'united-states';
   const variants = [];
-  if (loc.st) variants.push(loc.st + '--' + city);
-  variants.push((loc.country === 'ca' ? 'canada' : 'united-states') + '--' + city);
-  for (const slug of variants) {
+  if (loc.st) variants.push('https://www.eventbrite.com/d/' + loc.st + '--' + city);
+  variants.push('https://www.eventbrite.com/d/' + country + '--' + city);
+  if (loc.country === 'ca') variants.push('https://www.eventbrite.ca/d/canada--' + city);
+  for (const base of variants) {
     try {
       const events = [];
       for (let page = 1; page <= 3; page++) {
-        const html = await fetchText('https://www.eventbrite.com/d/' + slug +
-          '/all-events/?page=' + page);
+        const html = await fetchText(base + '/all-events/?page=' + page);
         const data = extractServerData(html);
         const res = (data && data.search_data && data.search_data.events &&
                      data.search_data.events.results) || [];
@@ -131,44 +132,52 @@ async function scanEventbrite(loc, start, end) {
         }
         if (res.length < 20) break;
       }
-      if (events.length) { log('Eventbrite (' + slug + '): ' + events.length); return events; }
-    } catch (e) { log('Eventbrite ' + slug + ' failed: ' + e.message); }
+      if (events.length) { log('Eventbrite (' + base + '): ' + events.length); return events; }
+    } catch (e) { log('Eventbrite ' + base + ' failed: ' + e.message); }
   }
   return [];
 }
 
-/* ---------- OpenStreetMap race tracks ---------- */
+/* ---------- OpenStreetMap: race tracks, theatres, towns ---------- */
 const OVERPASS = ['https://overpass-api.de/api/interpreter',
                   'https://overpass.kumi.systems/api/interpreter',
                   'https://overpass.private.coffee/api/interpreter'];
-async function scanTracks(loc, radiusMi) {
+async function scanPlaces(loc, radiusMi) {
   const r = Math.round(Math.min(radiusMi, 300) * 1609);
   const around = `(around:${r},${loc.lat},${loc.lon})`;
-  const q = `[out:json][timeout:25];(nwr["sport"="motor"]${around};` +
-    `nwr["highway"="raceway"]${around};nwr["sport"="motocross"]${around};);out center tags 80;`;
+  const q = `[out:json][timeout:30];(nwr["sport"="motor"]${around};` +
+    `nwr["highway"="raceway"]${around};nwr["sport"="motocross"]${around};` +
+    `nwr["amenity"="theatre"]${around};nwr["amenity"="arts_centre"]${around};` +
+    `nwr["amenity"="community_centre"]${around};` +
+    `node["place"~"^(city|town|village)$"]${around};);out center tags 300;`;
   for (const base of OVERPASS) {
     try {
-      const txt = await fetchText(base + '?data=' + encodeURIComponent(q), 30000);
+      const txt = await fetchText(base + '?data=' + encodeURIComponent(q), 40000);
       const j = JSON.parse(txt);
-      const seen = {}, tracks = [];
+      const seen = {}, tracks = [], venues = [], towns = [];
       for (const el of j.elements || []) {
         const t = el.tags || {};
         if (!t.name || seen[t.name.toLowerCase()]) continue;
         seen[t.name.toLowerCase()] = 1;
         const lat = el.lat != null ? el.lat : (el.center && el.center.lat);
         const lon = el.lon != null ? el.lon : (el.center && el.center.lon);
-        tracks.push({
+        const item = {
           name: t.name, lat, lon,
           website: t.website || t['contact:website'] || '',
           dist: (lat != null && lon != null) ? haversineMi(loc.lat, loc.lon, lat, lon) : null
-        });
+        };
+        if (t.place) towns.push(item);
+        else if (t.amenity) venues.push(item);
+        else tracks.push(item);
       }
-      tracks.sort((a, b) => (a.dist || 9e9) - (b.dist || 9e9));
-      log('Overpass (' + base + '): ' + tracks.length + ' tracks');
-      return tracks.slice(0, 30);
+      const byDist = (a, b) => (a.dist || 9e9) - (b.dist || 9e9);
+      tracks.sort(byDist); venues.sort(byDist); towns.sort(byDist);
+      log('Overpass (' + base + '): ' + tracks.length + ' tracks, ' +
+        venues.length + ' venues, ' + towns.length + ' towns');
+      return { tracks: tracks.slice(0, 30), venues: venues.slice(0, 20), towns: towns.slice(0, 15) };
     } catch (e) { log('Overpass ' + base + ' failed: ' + e.message); }
   }
-  return [];
+  return { tracks: [], venues: [], towns: [] };
 }
 
 /* ---------- page scanning (track sites, extra sources) ---------- */
@@ -239,7 +248,10 @@ function parseGoogle(html, max) {
     if (!resultOk(href)) continue;
     const title = stripTags(m[2]);
     if (!title) continue;
-    out.push({ url: href, title, snippet: stripTags(html.slice(re.lastIndex, re.lastIndex + 600)).slice(0, 180) });
+    // snippet: only the text up to the NEXT result, so results don't bleed together
+    const next = html.indexOf('/url?q=', re.lastIndex);
+    const stop = next === -1 ? re.lastIndex + 600 : Math.min(next, re.lastIndex + 600);
+    out.push({ url: href, title, snippet: stripTags(html.slice(re.lastIndex, stop)).slice(0, 180) });
   }
   return out;
 }
@@ -302,21 +314,35 @@ function parseFirstDate(text, start, end) {
   if (dt < start) dt = new Date(start.getFullYear() + 1, mi, day);
   return (dt >= start && dt <= end) ? dt : null;
 }
-async function scanWeb(loc, start, end) {
+async function scanWeb(loc, start, end, towns, keywords) {
   const city = loc.city, mon = MONTHS[start.getMonth()];
+  const region = loc.stateName || '';
   const queries = [
-    { q: `"demolition derby" OR "hit to pass" OR "enduro" ${city} ${start.getFullYear()}`, cat: 'racing' },
-    { q: `"demolition derby" OR "hit to pass" OR speedway ${city} site:facebook.com`, cat: 'racing' },
-    { q: `"wing night" OR "wing special" ${city}`, cat: 'deals' },
-    { q: `events ${city} ${mon} site:facebook.com/events`, cat: null },
-    { q: `${city} live music OR comedy ${mon} ${start.getFullYear()}`, cat: null }
+    { q: `"demolition derby" OR "hit to pass" OR "enduro" ${city} ${region}`, cat: 'racing' },
+    { q: `"demolition derby" OR "hit to pass" OR speedway ${region || city} site:facebook.com`, cat: 'racing' },
+    { q: `"wing night" OR "wing special" ${city} ${region}`, cat: 'deals' },
+    { q: `events ${city} ${region} ${mon} site:facebook.com/events`, cat: null },
+    { q: `${city} ${region} theatre OR concert OR festival ${mon} ${start.getFullYear()}`, cat: null }
   ];
+  // ask about the nearest towns too (municipality events pages, festivals)
+  for (const t of (towns || []).slice(0, 4)) {
+    if (t.name.toLowerCase() === city.toLowerCase()) continue;
+    queries.push({ q: `"${t.name}" ${region} events ${mon} ${start.getFullYear()}`, cat: null });
+  }
+  // a no-coordinate web result must mention somewhere local (or a watched
+  // keyword) or it gets dropped — keeps far-away results out of the radius
+  const localNames = [city, region].concat((towns || []).map(t => t.name))
+    .filter(Boolean).map(s => s.toLowerCase());
   const seen = {}, out = [];
+  let dropped = 0;
   for (const sq of queries) {
     const results = await webSearch(sq.q, 6);
     for (const r of results) {
       if (seen[r.url]) continue;
       seen[r.url] = 1;
+      const blob = (r.title + ' ' + r.snippet + ' ' + r.url).toLowerCase();
+      const kw = matchAny(blob, keywords);
+      if (!localNames.some(n => blob.includes(n))) { dropped++; continue; }
       const dt = parseFirstDate(r.title + ' ' + r.snippet, start, end);
       const isFb = r.url.includes('facebook.com');
       out.push({
@@ -325,10 +351,11 @@ async function scanWeb(loc, start, end) {
         dt: dt ? dt.toISOString() : null, hasTime: false,
         venue: '', venueCity: '', venueLat: null, venueLon: null,
         priceMin: null, priceMax: null, segment: '', genre: '',
-        desc: r.snippet, confirmed: false, fallbackCat: sq.cat, kwHit: null
+        desc: r.snippet, confirmed: false, fallbackCat: sq.cat, kwHit: kw
       });
     }
   }
+  if (dropped) log('web: dropped ' + dropped + ' results that did not look local');
   return out;
 }
 
@@ -340,7 +367,8 @@ async function scanWeb(loc, start, end) {
     return;
   }
   const loc = { lat: CONFIG.lat, lon: CONFIG.lon, city: CONFIG.city,
-                st: (CONFIG.st || '').toLowerCase(), country: (CONFIG.country || 'us').toLowerCase() };
+                st: (CONFIG.st || '').toLowerCase(), country: (CONFIG.country || 'us').toLowerCase(),
+                stateName: CONFIG.stateName || '' };
   const radius = CONFIG.radiusMiles || 50;
   const keywords = (CONFIG.keywords || DEFAULT_KEYWORDS).map(k => k.toLowerCase());
   const start = new Date(); start.setHours(0, 0, 0, 0);
@@ -348,21 +376,31 @@ async function scanWeb(loc, start, end) {
 
   const events = [];
   events.push(...await scanEventbrite(loc, start, end));
-  const tracks = await scanTracks(loc, radius);
-  for (const t of tracks.filter(t => t.website).slice(0, 8)) {
+  const places = await scanPlaces(loc, radius);
+  for (const t of places.tracks.filter(t => t.website).slice(0, 8)) {
     events.push(...await scanPage({ name: t.name, url: t.website, type: 'racing',
+      lat: t.lat, lon: t.lon }, start, end, keywords));
+  }
+  for (const v of places.venues.filter(v => v.website).slice(0, 8)) {
+    events.push(...await scanPage({ name: v.name, url: v.website, type: 'arts',
+      lat: v.lat, lon: v.lon }, start, end, keywords));
+  }
+  for (const t of places.towns.filter(t => t.website).slice(0, 8)) {
+    events.push(...await scanPage({ name: t.name, url: t.website, type: 'town',
       lat: t.lat, lon: t.lon }, start, end, keywords));
   }
   for (const s of CONFIG.extraPages || []) {
     events.push(...await scanPage(s, start, end, keywords));
   }
-  events.push(...await scanWeb(loc, start, end));
+  events.push(...await scanWeb(loc, start, end, places.towns, keywords));
 
   const data = {
     generated: new Date().toISOString(),
     loc, radiusMiles: radius,
-    tracks, events
+    tracks: places.tracks, venues: places.venues, towns: places.towns,
+    events
   };
   fs.writeFileSync(OUT, JSON.stringify(data, null, 1) + '\n');
-  log('wrote data.json: ' + events.length + ' events, ' + tracks.length + ' tracks');
+  log('wrote data.json: ' + events.length + ' events, ' + places.tracks.length +
+    ' tracks, ' + places.venues.length + ' venues, ' + places.towns.length + ' towns');
 })().catch(e => { console.error(e); process.exit(1); });
