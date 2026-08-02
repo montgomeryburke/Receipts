@@ -707,7 +707,7 @@ function fetchNearbyPlaces(loc, radiusMi) {
     'nwr["amenity"="arts_centre"]' + around + ';' +
     'nwr["amenity"="community_centre"]' + around + ';' +
     'node["place"~"^(city|town|village)$"]' + around + ';' +
-    ');out center tags 300;';
+    ');out center 300;';
   var urls = OVERPASS.map(function (base) { return base + '?data=' + encodeURIComponent(q); });
   // try each mirror directly, then each again through the CORS proxies
   function direct(i) {
@@ -888,7 +888,9 @@ function fetchWebSweep(loc, start, end) {
   var queries = sweepQueries(loc, start);
   // a no-coordinate web result must mention somewhere local (or a watched
   // keyword) or it's dropped — keeps far-away results out of the radius
-  var localNames = [loc.city, loc.stateName].filter(Boolean)
+  var localNames = [loc.city, loc.stateName]
+    .concat((loc.stateName || '').split(/\s+and\s+/i))
+    .filter(function (s) { return s && s.length > 3; })
     .map(function (s) { return s.toLowerCase(); });
   var jobs = queries.map(function (sq) {
     return webSearch(sq.q, 5)
