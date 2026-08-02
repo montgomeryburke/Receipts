@@ -1,1 +1,16 @@
-{"unset":true}
+{
+ "generated": "2026-08-02T18:35:43.928Z",
+ "loc": {
+  "lat": 49.9127,
+  "lon": -57.8028,
+  "city": "Cow Head",
+  "st": "nl",
+  "country": "ca",
+  "stateName": "Newfoundland and Labrador"
+ },
+ "radiusMiles": 50,
+ "tracks": [],
+ "venues": [],
+ "towns": [],
+ "events": []
+}
