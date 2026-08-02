@@ -1,5 +1,5 @@
 {
- "generated": "2026-08-02T18:35:43.928Z",
+ "generated": "2026-08-02T18:45:24.826Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -10,7 +10,149 @@
  },
  "radiusMiles": 50,
  "tracks": [],
- "venues": [],
- "towns": [],
+ "venues": [
+  {
+   "name": "Out Door Theater",
+   "lat": 49.9194324,
+   "lon": -57.8146109,
+   "website": "",
+   "dist": 0.7017846640181956
+  },
+  {
+   "name": "Woody Point Heritage Theatre",
+   "lat": 49.5027439,
+   "lon": -57.9167293,
+   "website": "",
+   "dist": 28.779338738002842
+  },
+  {
+   "name": "Royal Canadian Legion Branch 45",
+   "lat": 49.5010139,
+   "lon": -57.9134713,
+   "website": "",
+   "dist": 28.871720574630036
+  },
+  {
+   "name": "Gros Mourne Summer Music Theater",
+   "lat": 49.4998776,
+   "lon": -57.9196674,
+   "website": "",
+   "dist": 28.997661941087788
+  },
+  {
+   "name": "SAPP Rec Center",
+   "lat": 49.7607185,
+   "lon": -56.907797,
+   "website": "",
+   "dist": 41.24339845629454
+  },
+  {
+   "name": "Cormack Community Centre",
+   "lat": 49.3014589,
+   "lon": -57.3949883,
+   "website": "https://www.facebook.com/townofcormack/",
+   "dist": 46.011274958674214
+  },
+  {
+   "name": "Hampden Community Center",
+   "lat": 49.5383415,
+   "lon": -56.8613909,
+   "website": "",
+   "dist": 49.366984782593924
+  },
+  {
+   "name": "Beaches Recreational Center",
+   "lat": 49.5772433,
+   "lon": -56.8261983,
+   "website": "",
+   "dist": 49.38031374669497
+  }
+ ],
+ "towns": [
+  {
+   "name": "Cow Head",
+   "lat": 49.9208018,
+   "lon": -57.8057057,
+   "website": "",
+   "dist": 0.5745194929806098
+  },
+  {
+   "name": "Sally's Cove",
+   "lat": 49.7318259,
+   "lon": -57.9323688,
+   "website": "",
+   "dist": 13.76744704708042
+  },
+  {
+   "name": "Portland Creek",
+   "lat": 50.1659347,
+   "lon": -57.6135513,
+   "website": "",
+   "dist": 19.40811202362241
+  },
+  {
+   "name": "Rocky Harbour",
+   "lat": 49.5885139,
+   "lon": -57.9196203,
+   "website": "https://www.rockyharbour.ca/",
+   "dist": 22.998443936180173
+  },
+  {
+   "name": "Norris Point",
+   "lat": 49.5271835,
+   "lon": -57.8808231,
+   "website": "",
+   "dist": 26.863967114776944
+  },
+  {
+   "name": "Woody Point",
+   "lat": 49.4958892,
+   "lon": -57.9205885,
+   "website": "",
+   "dist": 29.276183408160097
+  },
+  {
+   "name": "Trout River",
+   "lat": 49.4799143,
+   "lon": -58.1297164,
+   "website": "",
+   "dist": 33.28145537818548
+  },
+  {
+   "name": "Pollards Point",
+   "lat": 49.7497648,
+   "lon": -56.9209827,
+   "website": "",
+   "dist": 40.881648080945446
+  },
+  {
+   "name": "Jackson Arm",
+   "lat": 49.8641249,
+   "lon": -56.8160005,
+   "website": "",
+   "dist": 44.05589962981258
+  },
+  {
+   "name": "Jackson's Arm",
+   "lat": 49.8668773,
+   "lon": -56.7771904,
+   "website": "",
+   "dist": 45.76384527466577
+  },
+  {
+   "name": "Cormack",
+   "lat": 49.3020209,
+   "lon": -57.3951172,
+   "website": "",
+   "dist": 45.97330196291361
+  },
+  {
+   "name": "Hampden",
+   "lat": 49.533333,
+   "lon": -56.866667,
+   "website": "",
+   "dist": 49.35117519362655
+  }
+ ],
  "events": []
 }
