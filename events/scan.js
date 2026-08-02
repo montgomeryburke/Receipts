@@ -25,15 +25,25 @@ const WINDOW_DAYS = 30;
 
 function log(msg) { console.log('[scan] ' + msg); }
 
-async function fetchText(url, ms) {
+async function fetchText(url, ms, opts) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms || 20000);
   try {
     const r = await fetch(url, {
       signal: ctrl.signal,
-      headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }
+      method: (opts && opts.method) || 'GET',
+      body: (opts && opts.body) || undefined,
+      headers: Object.assign({
+        'User-Agent': UA,
+        'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }, (opts && opts.headers) || {})
     });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (!r.ok) {
+      let body = '';
+      try { body = (await r.text()).replace(/\s+/g, ' ').slice(0, 160); } catch (e) {}
+      throw new Error('HTTP ' + r.status + (body ? ' | ' + body : ''));
+    }
     return await r.text();
   } finally { clearTimeout(t); }
 }
@@ -141,18 +151,23 @@ async function scanEventbrite(loc, start, end) {
 /* ---------- OpenStreetMap: race tracks, theatres, towns ---------- */
 const OVERPASS = ['https://overpass-api.de/api/interpreter',
                   'https://overpass.kumi.systems/api/interpreter',
-                  'https://overpass.private.coffee/api/interpreter'];
+                  'https://overpass.private.coffee/api/interpreter',
+                  'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 async function scanPlaces(loc, radiusMi) {
   const r = Math.round(Math.min(radiusMi, 300) * 1609);
   const around = `(around:${r},${loc.lat},${loc.lon})`;
-  const q = `[out:json][timeout:30];(nwr["sport"="motor"]${around};` +
+  const q = `[out:json][timeout:60];(nwr["sport"="motor"]${around};` +
     `nwr["highway"="raceway"]${around};nwr["sport"="motocross"]${around};` +
     `nwr["amenity"="theatre"]${around};nwr["amenity"="arts_centre"]${around};` +
     `nwr["amenity"="community_centre"]${around};` +
-    `node["place"~"^(city|town|village)$"]${around};);out center tags 300;`;
+    `node["place"~"^(city|town|village)$"]${around};);out center 300;`;
   for (const base of OVERPASS) {
     try {
-      const txt = await fetchText(base + '?data=' + encodeURIComponent(q), 40000);
+      const txt = await fetchText(base, 70000, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'data=' + encodeURIComponent(q)
+      });
       const j = JSON.parse(txt);
       const seen = {}, tracks = [], venues = [], towns = [];
       for (const el of j.elements || []) {
@@ -285,7 +300,20 @@ function parseBing(html, max) {
   }
   return out;
 }
+// SearXNG public instances offer a clean JSON API and tolerate server requests
+const SEARX = ['https://searx.be', 'https://searx.tiekoetter.com', 'https://opnxng.com'];
+function parseSearx(jsonText, max) {
+  const j = JSON.parse(jsonText);
+  return (j.results || []).slice(0, max)
+    .filter(r => r.url && resultOk(r.url))
+    .map(r => ({ url: r.url, title: (r.title || '').trim(), snippet: (r.content || '').trim() }));
+}
 const ENGINES = [
+  ...SEARX.map((base, i) => ({
+    name: 'searx' + (i + 1),
+    url: q => base + '/search?format=json&q=' + encodeURIComponent(q),
+    parse: parseSearx
+  })),
   { name: 'google', url: q => 'https://www.google.com/search?q=' + encodeURIComponent(q) + '&gbv=1&num=20&hl=en', parse: parseGoogle },
   { name: 'ddg', url: q => 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), parse: parseDdg },
   { name: 'ddg-lite', url: q => 'https://lite.duckduckgo.com/lite/?q=' + encodeURIComponent(q), parse: parseDdgLite },
@@ -294,9 +322,11 @@ const ENGINES = [
 async function webSearch(q, max) {
   for (const eng of ENGINES) {
     try {
-      const html = await fetchText(eng.url(q));
-      const res = eng.parse(html, max);
+      const body = await fetchText(eng.url(q));
+      const res = eng.parse(body, max);
       if (res.length) { log('web [' + eng.name + '] "' + q + '": ' + res.length); return res; }
+      log('web [' + eng.name + '] parsed 0 results (body ' + body.length + ' chars: ' +
+          body.replace(/\s+/g, ' ').slice(0, 80) + '…)');
     } catch (e) { log('web [' + eng.name + '] failed: ' + e.message); }
   }
   log('web: all engines empty for "' + q + '"');
@@ -331,8 +361,9 @@ async function scanWeb(loc, start, end, towns, keywords) {
   }
   // a no-coordinate web result must mention somewhere local (or a watched
   // keyword) or it gets dropped — keeps far-away results out of the radius
-  const localNames = [city, region].concat((towns || []).map(t => t.name))
-    .filter(Boolean).map(s => s.toLowerCase());
+  const localNames = [city, region].concat(region.split(/\s+and\s+/i))
+    .concat((towns || []).map(t => t.name))
+    .filter(s => s && s.length > 3).map(s => s.toLowerCase());
   const seen = {}, out = [];
   let dropped = 0;
   for (const sq of queries) {
