@@ -1,5 +1,5 @@
 {
- "generated": "2026-08-18T14:07:02.168Z",
+ "generated": "2026-08-19T14:08:18.859Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -170,13 +170,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…ic on Main Schedule Donate Rentals Contact Curated by Allison Crowe Connect with our culture Neddy Norris Night June 4– September 13, 2026 BOOK NOW DISCOVER By Robert Chafe Wet days and warm hearts One Foot Wet July 10th - August 15th, 2026 One Foot Wet BOOK NOW DISCOVER Musical Director, Al…",
+   "desc": "…ic on Main Schedule Donate Rentals Contact Curated by Allison Crowe Connect with our culture Neddy Norris Night June 4– September 13, 2026 BOOK NOW DISCOVER By Daniel Payne Havin' a time with Daniel Payne June 22nd - August 24th, 2026 BOOK NOW DISCOVER By Megan Gail Coles August 22nd - Augus…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-24|ugust 15th, 2026 Stars in the Sky Morning BOOK NOW DISCOVER ",
+   "id": "src:https://www.theatrenewfoundland.com|2026-08-24|y Norris Night June 4– September 13, 2026 BOOK NOW DISCOVER ",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -190,7 +190,7 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…ugust 15th, 2026 Stars in the Sky Morning BOOK NOW DISCOVER By Daniel Payne Havin' a time with Daniel Payne June 22nd - August 24th, 2026 BOOK NOW DISCOVER By Megan Gail Coles August 22nd - August 30th, 2026 Building Houses BOOK NOW DISCOVER Get your tickets for the 2026 season Buy tickets…",
+   "desc": "…y Norris Night June 4– September 13, 2026 BOOK NOW DISCOVER By Daniel Payne Havin' a time with Daniel Payne June 22nd - August 24th, 2026 BOOK NOW DISCOVER By Megan Gail Coles August 22nd - August 30th, 2026 Building Houses BOOK NOW DISCOVER Get your tickets for the 2026 season Buy tickets…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
@@ -296,6 +296,26 @@
    "kwHit": null
   },
   {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-18|hanneyganock presented by Gros Morne Fall Fest Mainstage Rea",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-18T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…hanneyganock presented by Gros Morne Fall Fest Mainstage Read More September 19, 2026 Rugged Shores Mainstage Read More September 18, 2026 One Foot Wet Studio Read More From July 10th - August 15th Havin&#8217; a time with Daniel Payne Studio Read More From June 9th - August 24th Upcoming Ev…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
    "id": "src:https://www.theatrenewfoundland.com|2026-08-24|et Studio Read More From July 10th - August 15th Havin&#8217",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
@@ -310,27 +330,7 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…et Studio Read More From July 10th - August 15th Havin&#8217; a time with Daniel Payne Studio Read More From June 9th - August 24th Upcoming Events 42 events found. Events Views Navigation Event Views Navigation Month List Month Day This Month 8/18/2026 August 2026 Select date. Calendar of…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-18|ations, Daniel has... 1 event 18 has featured events 1 event",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-08-18T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…ations, Daniel has... 1 event 18 has featured events 1 event, 18 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured August 18 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
+   "desc": "…et Studio Read More From July 10th - August 15th Havin&#8217; a time with Daniel Payne Studio Read More From June 9th - August 24th Upcoming Events 42 events found. Events Views Navigation Event Views Navigation Month List Month Day This Month 8/19/2026 August 2026 Select date. Calendar of…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
