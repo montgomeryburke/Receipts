@@ -206,6 +206,8 @@ end
 
 -- ----------------------------------------------------------------- Instance
 STATS = { created = 0, byClass = {}, parts = {} }
+-- Tests that exercise team assignment register their players here.
+PLAYERS_FOR_TEAMS = {}
 
 local Inst = {}
 Inst.__index = function(self, k)
@@ -282,7 +284,16 @@ local function newInstance(class)
 	-- ones abort whatever thread they are in, which hides real behaviour
 	-- behind an error that has nothing to do with the thing being tested.
 	local props = rawget(self, "_props")
-	if class == "ParticleEmitter" then
+	if class == "Team" then
+		props.GetPlayers = function(self)
+			local out = {}
+			-- Whoever currently points at this team.
+			for _, p in (PLAYERS_FOR_TEAMS or {}) do
+				if rawget(p, "_props").Team == self then table.insert(out, p) end
+			end
+			return out
+		end
+	elseif class == "ParticleEmitter" then
 		props.Emit = function() end
 	elseif class == "Sound" then
 		props.Play = function() end

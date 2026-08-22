@@ -25,6 +25,7 @@ local Util = require(Shared:WaitForChild("Util"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
+local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 
 local ProjectileService = {}
 
@@ -129,6 +130,11 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 	local spec = projectile.spec
 
 	-- Giant animals shrug off anything that is not a mega-detonation.
+	-- Fairground props first: they are neither people nor vehicles.
+	if CarnivalService.RegisterHit(hitPart, projectile.owner) then
+		return
+	end
+
 	if WildlifeService.RegisterHit(hitPart, spec.Damage, projectile.owner) then
 		return
 	end

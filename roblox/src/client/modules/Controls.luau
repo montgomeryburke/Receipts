@@ -397,6 +397,13 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		Remotes.Event("MegaDetonate"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.Q then
 		Remotes.Event("Melee"):FireServer()
+	elseif input.KeyCode == Enum.KeyCode.Space then
+		-- Bail out of whatever you are riding. Harmless on foot.
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.SeatPart then
+			Remotes.Event("Eject"):FireServer()
+		end
 	elseif input.KeyCode == Enum.KeyCode.One then
 		selectSlot(1)
 	elseif input.KeyCode == Enum.KeyCode.Two then

@@ -25,7 +25,7 @@ export type MapBuild = {
 	model: Model,
 	teamSpawns: { [number]: { Vector3 } },
 	vehiclePads: { { position: Vector3, kind: string } },
-	pickupPads: { { position: Vector3, kind: string } },
+	pickupPads: { { position: Vector3, kind: string, weapon: string? } },
 }
 
 local SLAB = 3 -- thickness of floors and ramps
@@ -655,13 +655,42 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		})
 	end
 
-	local pickupPads = {}
+	local pickupPads: { { position: Vector3, kind: string, weapon: string? } } = {}
 	local pickupKinds = { "Burger", "Fries", "Shield", "Ammo", "Burger", "Fries", "Shield", "Ammo" }
 	for index, kind in pickupKinds do
 		local angle = (index / #pickupKinds) * math.pi * 2 + 0.4
 		table.insert(pickupPads, {
 			position = Vector3.new(math.cos(angle) * half * 0.3, 4, math.sin(angle) * half * 0.3),
 			kind = kind,
+		})
+	end
+
+	-- Guns, everywhere. Walk over one and it is in your hands.
+	local scattered = {
+		"RPG", "LandMine", "ClusterBomb", "Grenade", "StickyGrenade",
+		"Drone", "Minigun", "AntiMaterial", "AutoShotgun", "Revolver",
+		"MachineGun", "Sniper", "DiamondGun", "Deagle", "SMG", "Shotgun",
+	}
+	for index = 1, 34 do
+		local weapon = scattered[((index - 1) % #scattered) + 1]
+		table.insert(pickupPads, {
+			position = Util.RandomFlatPoint(half * 0.86, rng) + Vector3.new(0, 4, 0),
+			kind = "Weapon",
+			weapon = weapon,
+		})
+	end
+
+	-- Ammo, and the point multiplier, scattered just as freely.
+	for _ = 1, 16 do
+		table.insert(pickupPads, {
+			position = Util.RandomFlatPoint(half * 0.86, rng) + Vector3.new(0, 4, 0),
+			kind = "Ammo",
+		})
+	end
+	for _ = 1, 5 do
+		table.insert(pickupPads, {
+			position = Util.RandomFlatPoint(half * 0.7, rng) + Vector3.new(0, 4, 0),
+			kind = "Multiplier",
 		})
 	end
 

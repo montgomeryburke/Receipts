@@ -22,6 +22,7 @@ local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
+local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 
 local WeaponService = {}
 
@@ -232,6 +233,11 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	impactSpark(result.Position, result.Normal, spec.Color)
 
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
+	-- Fairground props first: they are neither people nor vehicles.
+	if CarnivalService.RegisterHit(result.Instance, player) then
+		return
+	end
+
 	if WildlifeService.RegisterHit(result.Instance, spec.Damage, player) then
 		return
 	end
@@ -618,6 +624,10 @@ function WeaponService.Start()
 
 	Remotes.Event("Melee").OnServerEvent:Connect(function(player)
 		handleMelee(player)
+	end)
+
+	Remotes.Event("Eject").OnServerEvent:Connect(function(player)
+		task.spawn(VehicleService.Eject, player)
 	end)
 
 	Remotes.Event("SetPedal").OnServerEvent:Connect(function(player, value)

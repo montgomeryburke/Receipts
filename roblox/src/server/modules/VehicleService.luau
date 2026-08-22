@@ -24,6 +24,7 @@ local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -1021,6 +1022,130 @@ function VehicleService.SetPedal(player: Player, value: number)
 	if state.vehicle and state.vehicle.Parent and state.seatRole == "Driver" then
 		state.vehicle:SetAttribute("Pedal", math.clamp(value, -1, 1))
 	end
+end
+
+--[[
+	Bail out.
+
+	Press space on a rideable rocket and you are thrown clear, a parachute
+	opens, and you drift down instead of making a crater. The descent is a
+	LinearVelocity in Line mode along world Y: it pins how fast you fall
+	without touching your horizontal movement, so you can still steer where
+	you land.
+]]
+function VehicleService.Eject(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root or not root:IsA("BasePart") then
+		return
+	end
+	if not humanoid.SeatPart then
+		return
+	end
+	-- Already under a canopy.
+	if character:FindFirstChild("Parachute") then
+		return
+	end
+
+	humanoid.Sit = false
+
+	-- Thrown clear of whatever you were riding.
+	task.wait(0.1)
+	if not root.Parent then
+		return
+	end
+	root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + Vector3.new(0, 70, 0)
+
+	local canopy = Instance.new("Model")
+	canopy.Name = "Parachute"
+
+	local dome = Util.Part({
+		Name = "Canopy",
+		Size = Vector3.new(22, 9, 22),
+		CFrame = root.CFrame * CFrame.new(0, 13, 0),
+		Shape = Enum.PartType.Ball,
+		Color = Color3.fromRGB(240, 130, 60),
+		Material = Enum.Material.Fabric,
+		Anchored = false,
+		CanCollide = false,
+		Massless = true,
+		Parent = canopy,
+	})
+
+	-- Lines from the canopy down to the jumper.
+	for index = 1, 4 do
+		local angle = (index / 4) * math.pi * 2
+		local cord = Util.Part({
+			Name = "Cord",
+			Size = Vector3.new(0.2, 9, 0.2),
+			CFrame = root.CFrame * CFrame.new(math.cos(angle) * 5, 7, math.sin(angle) * 5),
+			Color = Color3.fromRGB(230, 230, 230),
+			Anchored = false,
+			CanCollide = false,
+			Massless = true,
+			Parent = canopy,
+		})
+		Util.Weld(dome, cord)
+	end
+
+	Util.Weld(root, dome)
+	canopy.Parent = character
+
+	local anchorPoint = Util.Attachment(root, Vector3.zero, "ChuteRoot")
+
+	local descent = Instance.new("LinearVelocity")
+	descent.Name = "ChuteDescent"
+	descent.Attachment0 = anchorPoint
+	descent.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+	descent.RelativeTo = Enum.ActuatorRelativeTo.World
+	-- Straight down, gently. Horizontal movement is left alone.
+	descent.LineDirection = Vector3.new(0, 1, 0)
+	descent.LineVelocity = -24
+	descent.ForceLimitsEnabled = false
+	descent.MaxForce = math.huge
+	descent.MaxAxesForce = Vector3.new(math.huge, math.huge, math.huge)
+	descent.Enabled = false
+	descent.Parent = root
+
+	Remotes.Event("Notify"):FireClient(player, "Parachute open — steer with WASD.")
+
+	-- Let the launch carry you upward first, then open.
+	task.delay(0.7, function()
+		if descent.Parent then
+			descent.Enabled = true
+		end
+	end)
+
+	-- Cut away once you are down, or after long enough that something is wrong.
+	task.spawn(function()
+		local opened = os.clock()
+		while os.clock() - opened < 30 do
+			task.wait(0.2)
+			if not root.Parent or not canopy.Parent then
+				break
+			end
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			params.FilterDescendantsInstances = { character }
+			local ground = workspace:Raycast(root.Position, Vector3.new(0, -8, 0), params)
+			if ground and os.clock() - opened > 1.2 then
+				break
+			end
+		end
+		if canopy.Parent then
+			canopy:Destroy()
+		end
+		if descent.Parent then
+			descent:Destroy()
+		end
+		if anchorPoint.Parent then
+			anchorPoint:Destroy()
+		end
+	end)
 end
 
 --[[ Hurt a vehicle. At zero health it explodes and takes its riders with it. ]]

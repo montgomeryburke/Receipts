@@ -21,6 +21,8 @@ local PickupService = {}
 
 type Pickup = {
 	kind: string,
+	-- Only set on weapon crates: which gun this one hands over.
+	weapon: string?,
 	part: BasePart,
 	position: Vector3,
 	availableAt: number,
@@ -30,7 +32,16 @@ type Pickup = {
 local pickups: { Pickup } = {}
 local container: Folder?
 
-local function colourFor(kind: string): Color3
+local function colourFor(kind: string, weapon: string?): Color3
+	if kind == "Weapon" and weapon then
+		local spec = Config.Weapons[weapon]
+		if spec then
+			return spec.Color
+		end
+	end
+	if kind == "Multiplier" then
+		return Config.Pickups.Multiplier.Color
+	end
 	if kind == "Burger" then
 		return Config.Pickups.Burger.Color
 	elseif kind == "Fries" then
@@ -49,7 +60,16 @@ local function colourFor(kind: string): Color3
 	return Config.Pickups.Ammo.Color
 end
 
-local function labelFor(kind: string): string
+local function labelFor(kind: string, weapon: string?): string
+	if kind == "Weapon" and weapon then
+		local spec = Config.Weapons[weapon]
+		if spec then
+			return spec.DisplayName
+		end
+	end
+	if kind == "Multiplier" then
+		return Config.Pickups.Multiplier.DisplayName
+	end
 	if kind == "Burger" then
 		return Config.Pickups.Burger.DisplayName
 	elseif kind == "Fries" then
@@ -69,7 +89,7 @@ local function labelFor(kind: string): string
 end
 
 --[[ Hand the pickup's effect to whoever drove into it. ]]
-local function grant(player: Player, kind: string)
+local function grant(player: Player, kind: string, weapon: string?)
 	local state = PlayerState.Get(player)
 	local now = os.clock()
 
@@ -111,6 +131,21 @@ local function grant(player: Player, kind: string)
 		if slot and spec then
 			slot.ammo = math.min(spec.MagSize, slot.ammo + 1)
 		end
+	elseif kind == "Multiplier" then
+		-- Everything you score is worth more for the next minute and a half.
+		state.multiplierUntil = now + Config.Pickups.Multiplier.Duration
+		state.multiplierAmount = Config.Pickups.Multiplier.Amount
+	elseif kind == "Weapon" and weapon then
+		-- Picking a gun up puts it straight in your hands.
+		local spec = Config.Weapons[weapon]
+		if spec and not spec.MountedOnly then
+			state.equipped = weapon
+			local slot = state.weapons[weapon]
+			if slot then
+				slot.ammo = spec.MagSize
+				slot.reloadingUntil = 0
+			end
+		end
 	end
 
 	PlayerState.Changed.Fire(player)
@@ -118,12 +153,12 @@ local function grant(player: Player, kind: string)
 end
 
 --[[ Build the floating, spinning thing you actually drive into. ]]
-local function createPickup(kind: string, position: Vector3, parent: Folder): Pickup
+local function createPickup(kind: string, position: Vector3, parent: Folder, weapon: string?): Pickup
 	local part = Util.Part({
 		Name = `Pickup_{kind}`,
 		Size = Vector3.new(6, 6, 6),
 		CFrame = CFrame.new(position + Vector3.new(0, 4, 0)),
-		Color = colourFor(kind),
+		Color = colourFor(kind, weapon),
 		Material = Enum.Material.Neon,
 		CanCollide = false,
 		Parent = parent,
@@ -138,7 +173,7 @@ local function createPickup(kind: string, position: Vector3, parent: Folder): Pi
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
-	label.Text = labelFor(kind)
+	label.Text = labelFor(kind, weapon)
 	label.TextColor3 = Color3.new(1, 1, 1)
 	label.TextStrokeTransparency = 0.3
 	label.TextScaled = true
@@ -147,6 +182,7 @@ local function createPickup(kind: string, position: Vector3, parent: Folder): Pi
 
 	local pickup: Pickup = {
 		kind = kind,
+		weapon = weapon,
 		part = part,
 		position = position + Vector3.new(0, 4, 0),
 		availableAt = 0,
@@ -171,14 +207,14 @@ local function createPickup(kind: string, position: Vector3, parent: Folder): Pi
 		part.Transparency = 1
 		billboard.Enabled = false
 
-		grant(player, kind)
+		grant(player, kind, weapon)
 	end)
 
 	return pickup
 end
 
 --[[ Lay out every pickup the current map asked for. ]]
-function PickupService.Build(pads: { { position: Vector3, kind: string } })
+function PickupService.Build(pads: { { position: Vector3, kind: string, weapon: string? } })
 	PickupService.Clear()
 
 	local folder = Instance.new("Folder")
@@ -187,7 +223,7 @@ function PickupService.Build(pads: { { position: Vector3, kind: string } })
 	container = folder
 
 	for _, pad in pads do
-		table.insert(pickups, createPickup(pad.kind, pad.position, folder))
+		table.insert(pickups, createPickup(pad.kind, pad.position, folder, pad.weapon))
 	end
 end
 

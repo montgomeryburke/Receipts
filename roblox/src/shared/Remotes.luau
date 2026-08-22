@@ -22,6 +22,7 @@ local EVENT_NAMES = {
 	"SetTurbo",
 	"Melee",
 	"SetPedal",
+	"Eject",
 
 	-- Server -> Client
 	"HudUpdate",

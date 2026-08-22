@@ -48,6 +48,43 @@ Config.ProductGrants = {
 
 -- =================================================================== MATCH ==
 
+--[[
+	GAME MODES.
+
+	Two, voted on between rounds along with the map.
+
+	  Slayer  shoot people for points; the team with the most at the final
+	          whistle wins.
+	  CTF     take the enemy flag back to your own. Kills still score, but a
+	          capture is worth far more than any of them.
+]]
+Config.Modes = {
+	{
+		Id = "Slayer",
+		Name = "Slayer",
+		Blurb = "Shoot everything. Most points wins.",
+	},
+	{
+		Id = "CTF",
+		Name = "Capture the Flag",
+		Blurb = "Take theirs. Defend yours.",
+	},
+}
+
+Config.CTF = {
+	-- What a capture is worth. Deliberately far more than any kill.
+	CapturePoints = 500,
+	-- And a little something for the effort of taking it and bringing it back.
+	FlagTakenPoints = 25,
+	FlagReturnPoints = 40,
+	-- Seconds a dropped flag lies there before it goes home on its own.
+	DroppedReturnDelay = 25,
+	-- Halo's rule: you cannot score unless your own flag is on its stand.
+	RequireOwnFlagHome = true,
+	-- Carrying slows you down, so a runner can be caught.
+	CarrierSpeedFactor = 0.82,
+}
+
 Config.Match = {
 	MaxPlayers = 20,
 	VoteDuration = 20,
@@ -720,6 +757,12 @@ export type ConfigType = {
 	Products: { [string]: number },
 	ProductGrants: { MegaDetonations: number, InstantTopCarTier: number },
 
+	Modes: { { Id: string, Name: string, Blurb: string } },
+	CTF: {
+		CapturePoints: number, FlagTakenPoints: number, FlagReturnPoints: number,
+		DroppedReturnDelay: number, RequireOwnFlagHome: boolean,
+		CarrierSpeedFactor: number,
+	},
 	Match: {
 		MaxPlayers: number,
 		VoteDuration: number,

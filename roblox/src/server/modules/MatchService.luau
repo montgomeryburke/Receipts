@@ -20,6 +20,8 @@ local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
+local FlagService = require(script.Parent:WaitForChild("FlagService"))
+local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local EffectService = require(script.Parent:WaitForChild("EffectService"))
@@ -33,9 +35,11 @@ local phaseEndsAt = 0
 local scores = { 0, 0 }
 local currentMap: MapService.MapBuild? = nil
 local currentMapSpec: Config.MapSpec? = nil
+local currentMode = Config.Modes[1]
 
--- Map voting.
-local ballot: { Config.MapSpec } = {}
+-- Map voting. Each option is a map paired with a mode, so one vote picks
+-- both what you play and where.
+local ballot: { { map: Config.MapSpec, mode: typeof(Config.Modes[1]) } } = {}
 local votes: { [Player]: number } = {}
 
 -- The one car each player currently owns.
@@ -57,8 +61,10 @@ end
 	must never be empty: an arena exists from the moment the server boots,
 	long before the first round begins.
 ]]
-local function buildArena(spec: Config.MapSpec)
+local function buildArena(entry: { map: Config.MapSpec, mode: typeof(Config.Modes[1]) })
+	local spec = entry.map
 	currentMapSpec = spec
+	currentMode = entry.mode
 
 	ProjectileService.ClearAll()
 	VehicleService.ClearAll()
@@ -71,8 +77,14 @@ local function buildArena(spec: Config.MapSpec)
 	end
 	MatchService.SpawnMapVehicles()
 
-	-- Elephants, and therefore poop.
 	WildlifeService.Populate(spec.Size)
+	CarnivalService.Build(spec.Size)
+
+	-- Flags only exist in Capture the Flag.
+	FlagService.Clear()
+	if currentMode.Id == "CTF" and build then
+		FlagService.Setup(build, teamColours())
+	end
 end
 
 --[[ Push the scoreboard and the clock to everybody's screen. ]]
@@ -82,6 +94,11 @@ local function broadcast()
 		timeLeft = math.max(0, phaseEndsAt - os.clock()),
 		scores = scores,
 		mapName = if currentMapSpec then currentMapSpec.Name else "—",
+		modeName = currentMode.Name,
+		-- Only meaningful in Capture the Flag, ignored otherwise.
+		flags = if FlagService.IsActive()
+			then { FlagService.StateOf(1), FlagService.StateOf(2) }
+			else nil,
 	}
 	Remotes.Event("MatchState"):FireAllClients(payload)
 end
@@ -174,15 +191,21 @@ local function runVoting()
 	-- Offer a few maps at random out of the ten.
 	local pool = table.clone(Config.Maps)
 	ballot = {}
-	for _ = 1, math.min(Config.Match.MapChoices, #pool) do
+	for index = 1, math.min(Config.Match.MapChoices, #pool) do
 		local pick = rng:NextInteger(1, #pool)
-		table.insert(ballot, pool[pick])
+		-- Alternate the modes down the ballot so both are always on offer.
+		local mode = Config.Modes[((index - 1) % #Config.Modes) + 1]
+		table.insert(ballot, { map = pool[pick], mode = mode })
 		table.remove(pool, pick)
 	end
 
 	local options = {}
-	for index, map in ballot do
-		options[index] = { id = map.Id, name = map.Name }
+	for index, entry in ballot do
+		options[index] = {
+			id = entry.map.Id,
+			name = `{entry.mode.Name} · {entry.map.Name}`,
+			blurb = entry.mode.Blurb,
+		}
 	end
 	Remotes.Event("VoteOptions"):FireAllClients(options, Config.Match.VoteDuration)
 
@@ -193,7 +216,7 @@ local function runVoting()
 end
 
 --[[ Count the votes. A tie, or nobody voting at all, is broken at random. ]]
-local function tallyVotes(): Config.MapSpec
+local function tallyVotes(): { map: Config.MapSpec, mode: typeof(Config.Modes[1]) }
 	local counts = table.create(#ballot, 0)
 	for _, choice in votes do
 		if ballot[choice] then
@@ -236,6 +259,7 @@ local function runIntermission()
 	phaseEndsAt = os.clock() + Config.Match.IntermissionDuration
 
 	-- Who won, and the WIENER treatment for them.
+	-- Whichever team has the most points at the whistle, in either mode.
 	local winnerIndex = if scores[1] == scores[2] then 0 elseif scores[1] > scores[2] then 1 else 2
 	local winnerName = if winnerIndex == 0 then "NOBODY" else Config.Teams[winnerIndex].Name
 	EffectService.CelebrateWinner(winnerName)
@@ -313,6 +337,16 @@ function MatchService.Start()
 		end
 	end)
 
+	-- A capture is worth a great deal, and it goes on the team's total.
+	FlagService.Captured.Connect(function(_player: Player, teamIndex: number, points: number)
+		if phase == "Playing" then
+			scores[teamIndex] += points
+			broadcast()
+		end
+	end)
+
+	FlagService.Start()
+
 	Remotes.Event("CastVote").OnServerEvent:Connect(function(player, choice)
 		if phase ~= "Voting" then
 			return
@@ -387,7 +421,10 @@ function MatchService.Start()
 	end)
 
 	-- The world exists before anybody can possibly join it.
-	buildArena(Config.Maps[rng:NextInteger(1, #Config.Maps)])
+	buildArena({
+		map = Config.Maps[rng:NextInteger(1, #Config.Maps)],
+		mode = Config.Modes[rng:NextInteger(1, #Config.Modes)],
+	})
 
 	task.spawn(loop)
 end

@@ -16,12 +16,43 @@ Monetization is written and ready but switched off — see the bottom of this fi
 That file is built from `src/`. If you only want to play with it, you never
 need to touch anything else.
 
+## The two game modes
+
+Between rounds everyone votes, and each option pairs a map with a mode.
+
+**Slayer** — shoot everything that moves. Every weapon is worth its own
+points: 10 for a pistol round, 30 for a sniper, 35 for the anti-truck rifle,
+5 for poop. Zombies, civilians and practice targets all score too. The team
+with the most points at the final whistle wins.
+
+**Capture the Flag** — Halo's rules. Take the enemy flag back to your own
+stand. Dying drops it where you fell; a dropped flag goes home on its own
+after 25 seconds, or instantly if a defender touches it. **You cannot score
+unless your own flag is on its stand.** Carrying slows you down, so a runner
+can be caught. A capture is worth 500 points, which dwarfs any kill.
+
+The scoreboard shows where both flags are at all times.
+
+## The carnival
+
+One corner of every map is a fairground, for when you want a break:
+
+- **Dunk tank** — one player takes the seat, anyone else shoots the target
+  beside it, and the sitter drops into the water.
+- **Shooting gallery** — three rows of ducks sliding back and forth. Hit one
+  and it tips over backwards.
+- **High striker** — shoot the pad and the puck rides up the tower to ring
+  the bell.
+
+All of it scores points.
+
 ## Controls
 
 | Input | Does |
 | --- | --- |
 | **E** | Get into a vehicle (walk up to it first) |
 | **WASD** | Drive / fly / steer the torpedo |
+| **Space** | Bail out of a rideable rocket — a parachute opens |
 | **Left Shift** | **Turbo** — faster in a vehicle, sprint on foot |
 | **Left mouse** | Fire — hold it down. Every gun is automatic except a scoped sniper, which is one shot at a time |
 | **Right mouse** | Zoom, on guns with a scope |

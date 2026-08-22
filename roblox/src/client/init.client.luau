@@ -106,7 +106,9 @@ Remotes.Event("MatchState").OnClientEvent:Connect(function(payload)
 		payload.phase or "Warmup",
 		payload.timeLeft or 0,
 		payload.scores or { 0, 0 },
-		payload.mapName or "—"
+		payload.mapName or "—",
+		payload.modeName,
+		payload.flags
 	)
 	-- The ballot only belongs on screen while voting is actually open, and
 	-- the cursor has to come free to click it.

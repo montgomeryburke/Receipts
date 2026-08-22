@@ -88,6 +88,43 @@ Config.ProductGrants = {
 
 -- =================================================================== MATCH ==
 
+--[[
+	GAME MODES.
+
+	Two, voted on between rounds along with the map.
+
+	  Slayer  shoot people for points; the team with the most at the final
+	          whistle wins.
+	  CTF     take the enemy flag back to your own. Kills still score, but a
+	          capture is worth far more than any of them.
+]]
+Config.Modes = {
+	{
+		Id = "Slayer",
+		Name = "Slayer",
+		Blurb = "Shoot everything. Most points wins.",
+	},
+	{
+		Id = "CTF",
+		Name = "Capture the Flag",
+		Blurb = "Take theirs. Defend yours.",
+	},
+}
+
+Config.CTF = {
+	-- What a capture is worth. Deliberately far more than any kill.
+	CapturePoints = 500,
+	-- And a little something for the effort of taking it and bringing it back.
+	FlagTakenPoints = 25,
+	FlagReturnPoints = 40,
+	-- Seconds a dropped flag lies there before it goes home on its own.
+	DroppedReturnDelay = 25,
+	-- Halo's rule: you cannot score unless your own flag is on its stand.
+	RequireOwnFlagHome = true,
+	-- Carrying slows you down, so a runner can be caught.
+	CarrierSpeedFactor = 0.82,
+}
+
 Config.Match = {
 	MaxPlayers = 20,
 	VoteDuration = 20,
@@ -760,6 +797,12 @@ export type ConfigType = {
 	Products: { [string]: number },
 	ProductGrants: { MegaDetonations: number, InstantTopCarTier: number },
 
+	Modes: { { Id: string, Name: string, Blurb: string } },
+	CTF: {
+		CapturePoints: number, FlagTakenPoints: number, FlagReturnPoints: number,
+		DroppedReturnDelay: number, RequireOwnFlagHome: boolean,
+		CarrierSpeedFactor: number,
+	},
 	Match: {
 		MaxPlayers: number,
 		VoteDuration: number,
@@ -873,6 +916,7 @@ local EVENT_NAMES = {
 	"SetTurbo",
 	"Melee",
 	"SetPedal",
+	"Eject",
 
 	-- Server -> Client
 	"HudUpdate",
@@ -1350,6 +1394,515 @@ print("[Nuclear Mud Arena] Server ready.")
         </Properties>
         <Item class="ModuleScript" referent="11">
           <Properties>
+            <string name="Name">CarnivalService</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	CarnivalService — the fairground.
+
+	A corner of every map is given over to things that are not trying to kill
+	you: a dunk tank, a shooting gallery with ducks that slide back and forth,
+	and a high striker with a bell on top.
+
+	All of it scores points, so messing about is not entirely wasted time.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Util = require(Shared:WaitForChild("Util"))
+
+local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+
+local CarnivalService = {}
+
+local container: Folder? = nil
+local origin = Vector3.zero
+
+type Duck = {
+	part: BasePart,
+	centre: Vector3,
+	span: number,
+	speed: number,
+	phase: number,
+	downUntil: number,
+}
+
+local ducks: { Duck } = {}
+local dunkSeat: Seat? = nil
+local dunkHome: CFrame = CFrame.identity
+local dunkWetUntil = 0
+local strikerPuck: BasePart? = nil
+local strikerUntil = 0
+
+local rng = Random.new()
+
+local DUNK_POINTS = 60
+local DUCK_POINTS = 20
+local STRIKER_POINTS = 35
+
+-- ================================================================= HELPERS ==
+
+local function award(player: Player?, points: number, message: string)
+	if not player then
+		return
+	end
+	local earned = PlayerState.AwardPoints(player, points)
+	Remotes.Event("Notify"):FireClient(player, `{message} +{earned}`)
+end
+
+local function sign(parent: Instance, position: Vector3, text: string, colour: Color3)
+	local post = Util.Part({
+		Name = "SignPost",
+		Size = Vector3.new(1, 14, 1),
+		CFrame = CFrame.new(position + Vector3.new(0, 7, 0)),
+		Color = Color3.fromRGB(120, 90, 60),
+		Material = Enum.Material.Wood,
+		Parent = parent,
+	})
+
+	local board = Util.Part({
+		Name = "SignBoard",
+		Size = Vector3.new(18, 5, 0.6),
+		CFrame = CFrame.new(position + Vector3.new(0, 16, 0)),
+		Color = colour,
+		Material = Enum.Material.SmoothPlastic,
+		Parent = parent,
+	})
+	Util.Weld(post, board)
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromScale(18, 5)
+	billboard.AlwaysOnTop = false
+	billboard.MaxDistance = 600
+	billboard.Parent = board
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = Color3.fromRGB(30, 26, 24)
+	label.TextScaled = true
+	label.Font = Enum.Font.LuckiestGuy
+	label.Parent = billboard
+end
+
+-- =============================================================== DUNK TANK ==
+
+--[[
+	The dunk tank: a seat on a plank over a tank of water, and a target on a
+	post beside it. Hit the target and the seat gives way.
+]]
+local function buildDunkTank(at: Vector3, parent: Instance)
+	-- The tank.
+	Util.Part({
+		Name = "TankWall",
+		Size = Vector3.new(26, 14, 1.5),
+		CFrame = CFrame.new(at + Vector3.new(0, 7, 13)),
+		Color = Color3.fromRGB(150, 160, 170),
+		Material = Enum.Material.Glass,
+		Transparency = 0.55,
+		Parent = parent,
+	})
+	for _, side in { -1, 1 } do
+		Util.Part({
+			Name = "TankWall",
+			Size = Vector3.new(1.5, 14, 26),
+			CFrame = CFrame.new(at + Vector3.new(side * 13, 7, 0)),
+			Color = Color3.fromRGB(150, 160, 170),
+			Material = Enum.Material.Glass,
+			Transparency = 0.55,
+			Parent = parent,
+		})
+	end
+	Util.Part({
+		Name = "TankWall",
+		Size = Vector3.new(26, 14, 1.5),
+		CFrame = CFrame.new(at + Vector3.new(0, 7, -13)),
+		Color = Color3.fromRGB(150, 160, 170),
+		Material = Enum.Material.Glass,
+		Transparency = 0.55,
+		Parent = parent,
+	})
+
+	-- The water. Non-solid, so you fall in rather than onto.
+	Util.Part({
+		Name = "DunkWater",
+		Size = Vector3.new(25, 11, 25),
+		CFrame = CFrame.new(at + Vector3.new(0, 5.5, 0)),
+		Color = Color3.fromRGB(70, 140, 190),
+		Material = Enum.Material.Water,
+		Transparency = 0.35,
+		CanCollide = false,
+		Parent = parent,
+	})
+
+	-- The plank and the seat above it.
+	local plank = Util.Part({
+		Name = "DunkPlank",
+		Size = Vector3.new(10, 1, 4),
+		CFrame = CFrame.new(at + Vector3.new(0, 18, 0)),
+		Color = Color3.fromRGB(150, 110, 70),
+		Material = Enum.Material.WoodPlanks,
+		Parent = parent,
+	})
+
+	local seat = Instance.new("Seat")
+	seat.Name = "DunkSeat"
+	seat.Size = Vector3.new(5, 1, 5)
+	seat.CFrame = CFrame.new(at + Vector3.new(0, 19.5, 0))
+	seat.Anchored = true
+	seat.Color = Color3.fromRGB(220, 90, 90)
+	seat.Material = Enum.Material.SmoothPlastic
+	seat.Parent = parent
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Take the hot seat"
+	prompt.ObjectText = "Dunk Tank"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 22
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = seat
+
+	prompt.Triggered:Connect(function(player)
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.Health > 0 and not humanoid.SeatPart then
+			seat:Sit(humanoid)
+		end
+	end)
+
+	dunkSeat = seat
+	dunkHome = seat.CFrame
+	local _ = plank
+
+	-- The target, on a post to one side.
+	local post = Util.Part({
+		Name = "DunkPost",
+		Size = Vector3.new(1.2, 20, 1.2),
+		CFrame = CFrame.new(at + Vector3.new(18, 10, 0)),
+		Color = Color3.fromRGB(110, 82, 54),
+		Material = Enum.Material.Wood,
+		Parent = parent,
+	})
+
+	local target = Util.Part({
+		Name = "DunkTarget",
+		Size = Vector3.new(7, 7, 0.8),
+		CFrame = CFrame.new(at + Vector3.new(18, 20, 0)),
+		Color = Color3.fromRGB(240, 240, 235),
+		Material = Enum.Material.SmoothPlastic,
+		Parent = parent,
+	})
+	target:SetAttribute("Carnival", "Dunk")
+	Util.Weld(post, target)
+
+	local ring = Util.Part({
+		Name = "DunkRing",
+		Size = Vector3.new(4.6, 4.6, 0.3),
+		CFrame = target.CFrame * CFrame.new(0, 0, -0.6) * CFrame.Angles(0, math.rad(90), 0),
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(220, 40, 40),
+		Material = Enum.Material.SmoothPlastic,
+		CanCollide = false,
+		Parent = parent,
+	})
+	ring:SetAttribute("Carnival", "Dunk")
+	Util.Weld(target, ring)
+
+	sign(parent, at + Vector3.new(0, 0, -20), "DUNK TANK — HIT THE TARGET", Color3.fromRGB(240, 200, 90))
+end
+
+--[[ Drop whoever is on the seat into the water. ]]
+local function dunk(shooter: Player?)
+	local seat = dunkSeat
+	if not seat or not seat.Parent then
+		return
+	end
+	if os.clock() < dunkWetUntil then
+		return
+	end
+	dunkWetUntil = os.clock() + 3
+
+	local occupant = seat.Occupant
+	if occupant then
+		local character = occupant.Parent
+		local dunked = if character then Players:GetPlayerFromCharacter(character) else nil
+		occupant.Sit = false
+
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			root.CFrame = CFrame.new(seat.Position - Vector3.new(0, 14, 0))
+			root.AssemblyLinearVelocity = Vector3.zero
+		end
+
+		if dunked then
+			Remotes.Event("Notify"):FireClient(dunked, "SPLASH. You have been dunked.")
+		end
+		award(shooter, DUNK_POINTS, "DUNKED THEM!")
+	else
+		award(shooter, math.floor(DUNK_POINTS / 4), "Bullseye — nobody was sitting.")
+	end
+
+	-- The splash.
+	local splash = Util.Part({
+		Name = "Splash",
+		Size = Vector3.new(1, 1, 1),
+		CFrame = CFrame.new(seat.Position - Vector3.new(0, 12, 0)),
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = workspace,
+	})
+	local spray = Instance.new("ParticleEmitter")
+	spray.Color = ColorSequence.new(Color3.fromRGB(150, 210, 240))
+	spray.Size = NumberSequence.new(3, 0)
+	spray.Lifetime = NumberRange.new(0.5, 1.2)
+	spray.Speed = NumberRange.new(20, 44)
+	spray.SpreadAngle = Vector2.new(70, 70)
+	spray.Rate = 0
+	spray.Parent = splash
+	spray:Emit(90)
+	Debris:AddItem(splash, 3)
+end
+
+-- ========================================================= SHOOTING GALLERY ==
+
+local function buildGallery(at: Vector3, parent: Instance)
+	Util.Part({
+		Name = "GalleryBack",
+		Size = Vector3.new(60, 20, 1.5),
+		CFrame = CFrame.new(at + Vector3.new(0, 10, 8)),
+		Color = Color3.fromRGB(180, 90, 70),
+		Material = Enum.Material.WoodPlanks,
+		Parent = parent,
+	})
+	Util.Part({
+		Name = "GalleryCounter",
+		Size = Vector3.new(60, 6, 6),
+		CFrame = CFrame.new(at + Vector3.new(0, 3, 0)),
+		Color = Color3.fromRGB(150, 120, 80),
+		Material = Enum.Material.WoodPlanks,
+		Parent = parent,
+	})
+
+	for lane = 1, 3 do
+		local height = 8 + lane * 3.5
+		local duck = Util.Part({
+			Name = "Duck",
+			Size = Vector3.new(4.5, 4, 2),
+			CFrame = CFrame.new(at + Vector3.new(0, height, 5)),
+			Color = if lane == 1 then Color3.fromRGB(250, 210, 60)
+				elseif lane == 2 then Color3.fromRGB(240, 130, 60)
+				else Color3.fromRGB(120, 200, 240),
+			Material = Enum.Material.SmoothPlastic,
+			Parent = parent,
+		})
+		duck:SetAttribute("Carnival", "Duck")
+
+		local head = Util.Part({
+			Name = "DuckHead",
+			Size = Vector3.new(2, 2.2, 2),
+			CFrame = duck.CFrame * CFrame.new(1.4, 2.6, 0),
+			Color = duck.Color,
+			Material = Enum.Material.SmoothPlastic,
+			Parent = parent,
+		})
+		head:SetAttribute("Carnival", "Duck")
+		Util.Weld(duck, head)
+
+		table.insert(ducks, {
+			part = duck :: BasePart,
+			centre = at + Vector3.new(0, height, 5),
+			span = 22,
+			speed = 0.6 + lane * 0.25,
+			phase = rng:NextNumber(0, math.pi * 2),
+			downUntil = 0,
+		})
+	end
+
+	sign(parent, at + Vector3.new(0, 0, -10), "SHOOTING GALLERY", Color3.fromRGB(250, 210, 60))
+end
+
+--[[
+	Which duck was hit.
+
+	A duck's head is a separate part welded on, so a head shot has to be
+	matched back to the body it belongs to — nearest one wins.
+]]
+local function hitDuck(part: BasePart, shooter: Player?): boolean
+	local best: Duck? = nil
+	local bestDistance = 12
+
+	for _, duck in ducks do
+		if not duck.part.Parent then
+			continue
+		end
+		local distance = (duck.part.Position - part.Position).Magnitude
+		if distance < bestDistance then
+			best, bestDistance = duck, distance
+		end
+	end
+
+	if not best or os.clock() < best.downUntil then
+		return false
+	end
+
+	best.downUntil = os.clock() + 3
+	award(shooter, DUCK_POINTS, "Duck down!")
+	return true
+end
+
+-- ============================================================= HIGH STRIKER ==
+
+local function buildStriker(at: Vector3, parent: Instance)
+	Util.Part({
+		Name = "StrikerTower",
+		Size = Vector3.new(4, 60, 4),
+		CFrame = CFrame.new(at + Vector3.new(0, 30, 0)),
+		Color = Color3.fromRGB(90, 70, 110),
+		Material = Enum.Material.Metal,
+		Parent = parent,
+	})
+
+	local bell = Util.Part({
+		Name = "StrikerBell",
+		Size = Vector3.new(7, 6, 7),
+		CFrame = CFrame.new(at + Vector3.new(0, 63, 0)),
+		Color = Color3.fromRGB(240, 200, 70),
+		Material = Enum.Material.Metal,
+		Parent = parent,
+	})
+	local _ = bell
+
+	local pad = Util.Part({
+		Name = "StrikerPad",
+		Size = Vector3.new(9, 3, 9),
+		CFrame = CFrame.new(at + Vector3.new(0, 1.5, 0)),
+		Color = Color3.fromRGB(220, 60, 60),
+		Material = Enum.Material.SmoothPlastic,
+		Parent = parent,
+	})
+	pad:SetAttribute("Carnival", "Striker")
+
+	strikerPuck = Util.Part({
+		Name = "StrikerPuck",
+		Size = Vector3.new(6, 2.5, 6),
+		CFrame = CFrame.new(at + Vector3.new(0, 4, 0)),
+		Color = Color3.fromRGB(250, 250, 250),
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+		Parent = parent,
+	})
+
+	sign(parent, at + Vector3.new(0, 0, -12), "HIGH STRIKER — SHOOT THE PAD", Color3.fromRGB(220, 120, 200))
+end
+
+local function ringBell(shooter: Player?)
+	if os.clock() < strikerUntil then
+		return
+	end
+	strikerUntil = os.clock() + 2.5
+	award(shooter, STRIKER_POINTS, "DING! Bell rung.")
+end
+
+-- ================================================================== PUBLIC ==
+
+--[[ Something was shot. Returns true if it was a carnival prop. ]]
+function CarnivalService.RegisterHit(part: BasePart, attacker: Player?): boolean
+	local game_ = part:GetAttribute("Carnival")
+	if game_ == "Dunk" then
+		dunk(attacker)
+		return true
+	elseif game_ == "Duck" then
+		hitDuck(part, attacker)
+		return true
+	elseif game_ == "Striker" then
+		ringBell(attacker)
+		return true
+	end
+	return false
+end
+
+--[[ Put the fairground up, off to one side of the arena. ]]
+function CarnivalService.Build(mapSize: number)
+	CarnivalService.Clear()
+
+	local folder = Instance.new("Folder")
+	folder.Name = "Carnival"
+	folder.Parent = workspace
+	container = folder
+
+	-- Off to one side, clear of the bases at either end.
+	origin = Vector3.new(mapSize * 0.3, 0, 0)
+
+	Util.Part({
+		Name = "CarnivalGround",
+		Size = Vector3.new(160, 1, 130),
+		CFrame = CFrame.new(origin + Vector3.new(0, 0.6, 0)),
+		Color = Color3.fromRGB(140, 120, 96),
+		Material = Enum.Material.Sand,
+		Parent = folder,
+	})
+
+	buildDunkTank(origin + Vector3.new(-45, 1, 0), folder)
+	buildGallery(origin + Vector3.new(30, 1, -30), folder)
+	buildStriker(origin + Vector3.new(35, 1, 35), folder)
+end
+
+function CarnivalService.Clear()
+	if container then
+		container:Destroy()
+		container = nil
+	end
+	table.clear(ducks)
+	dunkSeat = nil
+	strikerPuck = nil
+end
+
+--[[ Ducks slide back and forth; a shot one lies down for a moment. ]]
+local function step()
+	if not container then
+		return
+	end
+	local now = os.clock()
+
+	for _, duck in ducks do
+		if not duck.part.Parent then
+			continue
+		end
+		if now < duck.downUntil then
+			-- Tipped over backwards.
+			duck.part.CFrame = CFrame.new(duck.centre) * CFrame.Angles(math.rad(-80), 0, 0)
+		else
+			local slide = math.sin(now * duck.speed + duck.phase) * duck.span
+			duck.part.CFrame = CFrame.new(duck.centre + Vector3.new(slide, 0, 0))
+		end
+	end
+
+	-- The puck sits at the bottom, then rides up the tower when the bell is
+	-- rung and slides back down afterwards.
+	local puck = strikerPuck
+	if puck and puck.Parent then
+		local remaining = strikerUntil - now
+		local climbed = if remaining > 0 then (1 - remaining / 2.5) * 56 else 0
+		puck.CFrame = CFrame.new(puck.Position.X, origin.Y + 4 + climbed, puck.Position.Z)
+	end
+end
+
+RunService.Heartbeat:Connect(step)
+
+return CarnivalService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="12">
+          <Properties>
             <string name="Name">DamageService</string>
             <string name="Source"><![CDATA[--!strict
 --[[
@@ -1556,7 +2109,7 @@ return DamageService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="12">
+        <Item class="ModuleScript" referent="13">
           <Properties>
             <string name="Name">EffectService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1841,7 +2394,432 @@ return EffectService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="13">
+        <Item class="ModuleScript" referent="14">
+          <Properties>
+            <string name="Name">FlagService</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	FlagService — Capture the Flag.
+
+	One flag per team, on a stand at their end of the map. Touch the enemy's
+	to pick it up, carry it back to your own stand, and score.
+
+	Halo's rules, which are what make it a game rather than a footrace:
+	  * you cannot score unless your own flag is sitting on its stand
+	  * dying drops the flag where you fell
+	  * a dropped flag goes home on its own after a while
+	  * your own dropped flag goes straight home if you touch it
+	  * carrying slows you down, so a runner can be caught
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Signal = require(Shared:WaitForChild("Signal"))
+local Util = require(Shared:WaitForChild("Util"))
+
+local DamageService = require(script.Parent:WaitForChild("DamageService"))
+local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+local TeamService = require(script.Parent:WaitForChild("TeamService"))
+
+local FlagService = {}
+
+type Flag = {
+	teamIndex: number,
+	model: Model,
+	pole: BasePart,
+	home: Vector3,
+	state: string, -- "Home" | "Carried" | "Dropped"
+	carrier: Player?,
+	droppedAt: number,
+	colour: BrickColor,
+}
+
+local flags: { [number]: Flag } = {}
+local stands: { [number]: BasePart } = {}
+local container: Folder? = nil
+local active = false
+
+--[[ Fired as (player, teamIndex, points) when somebody scores. ]]
+FlagService.Captured = Signal.new()
+
+-- ================================================================ BUILDING ==
+
+local function buildStand(position: Vector3, colour: BrickColor, parent: Instance): BasePart
+	local base = Util.Part({
+		Name = "FlagStand",
+		Size = Vector3.new(16, 1.5, 16),
+		CFrame = CFrame.new(position),
+		Color = colour.Color,
+		Material = Enum.Material.Neon,
+		Parent = parent,
+	})
+
+	-- A ring of posts, so the stand reads from a distance.
+	for index = 1, 8 do
+		local angle = (index / 8) * math.pi * 2
+		Util.Part({
+			Name = "StandPost",
+			Size = Vector3.new(0.8, 6, 0.8),
+			CFrame = CFrame.new(position + Vector3.new(math.cos(angle) * 7, 3, math.sin(angle) * 7)),
+			Color = colour.Color,
+			Material = Enum.Material.Metal,
+			Parent = parent,
+		})
+	end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromScale(16, 4)
+	billboard.StudsOffset = Vector3.new(0, 14, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 2000
+	billboard.Parent = base
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = "BASE"
+	label.TextColor3 = colour.Color
+	label.TextStrokeTransparency = 0.2
+	label.TextScaled = true
+	label.Font = Enum.Font.LuckiestGuy
+	label.Parent = billboard
+
+	return base
+end
+
+local function buildFlag(teamIndex: number, home: Vector3, colour: BrickColor, parent: Instance): Flag
+	local model = Instance.new("Model")
+	model.Name = `Flag_{teamIndex}`
+
+	local pole = Util.Part({
+		Name = "Pole",
+		Size = Vector3.new(0.7, 14, 0.7),
+		CFrame = CFrame.new(home + Vector3.new(0, 8, 0)),
+		Color = Color3.fromRGB(210, 210, 215),
+		Material = Enum.Material.Metal,
+		CanCollide = false,
+		Parent = model,
+	})
+	model.PrimaryPart = pole
+
+	local cloth = Util.Part({
+		Name = "Cloth",
+		Size = Vector3.new(0.3, 5, 8),
+		CFrame = pole.CFrame * CFrame.new(0, 4, -4),
+		Color = colour.Color,
+		Material = Enum.Material.Fabric,
+		CanCollide = false,
+		Parent = model,
+	})
+	Util.Weld(pole, cloth)
+
+	local glow = Instance.new("PointLight")
+	glow.Color = colour.Color
+	glow.Brightness = 3
+	glow.Range = 30
+	glow.Parent = pole
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromScale(12, 3)
+	billboard.StudsOffset = Vector3.new(0, 9, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 3000
+	billboard.Parent = pole
+
+	local label = Instance.new("TextLabel")
+	label.Name = "FlagLabel"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = "FLAG"
+	label.TextColor3 = colour.Color
+	label.TextStrokeTransparency = 0.2
+	label.TextScaled = true
+	label.Font = Enum.Font.LuckiestGuy
+	label.Parent = billboard
+
+	model.Parent = parent
+
+	return {
+		teamIndex = teamIndex,
+		model = model,
+		pole = pole,
+		home = home,
+		state = "Home",
+		carrier = nil,
+		droppedAt = 0,
+		colour = colour,
+	}
+end
+
+-- ================================================================== HELPERS ==
+
+local function announce(message: string)
+	for _, player in Players:GetPlayers() do
+		Remotes.Event("Notify"):FireClient(player, message)
+	end
+end
+
+local function setLabel(flag: Flag, text: string)
+	local label = flag.pole:FindFirstChild("BillboardGui")
+	if not label then
+		for _, child in flag.pole:GetChildren() do
+			if child:IsA("BillboardGui") then
+				label = child
+				break
+			end
+		end
+	end
+	if label then
+		local text_ = label:FindFirstChild("FlagLabel")
+		if text_ and text_:IsA("TextLabel") then
+			text_.Text = text
+		end
+	end
+end
+
+--[[ Put a flag back on its stand. ]]
+local function sendHome(flag: Flag, quiet: boolean?)
+	flag.state = "Home"
+	flag.carrier = nil
+	flag.model:PivotTo(CFrame.new(flag.home + Vector3.new(0, 8, 0)))
+	setLabel(flag, "FLAG")
+	if not quiet then
+		local team = TeamService.Get(flag.teamIndex)
+		announce(`{if team then team.Name else "A"} flag returned.`)
+	end
+end
+
+--[[ Drop it where the carrier fell. ]]
+local function drop(flag: Flag, position: Vector3)
+	flag.state = "Dropped"
+	flag.carrier = nil
+	flag.droppedAt = os.clock()
+	flag.model:PivotTo(CFrame.new(position + Vector3.new(0, 6, 0)))
+	setLabel(flag, "DROPPED")
+
+	local team = TeamService.Get(flag.teamIndex)
+	announce(`{if team then team.Name else "A"} flag dropped!`)
+end
+
+--[[ Slow the carrier down, or put them back to normal. ]]
+local function setCarrierSpeed(player: Player, carrying: boolean)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	humanoid.WalkSpeed = if carrying
+		then Config.Turbo.WalkSpeed * Config.CTF.CarrierSpeedFactor
+		else Config.Turbo.WalkSpeed
+end
+
+local function pickUp(flag: Flag, player: Player)
+	flag.state = "Carried"
+	flag.carrier = player
+	setLabel(flag, "TAKEN")
+	setCarrierSpeed(player, true)
+
+	PlayerState.AwardPoints(player, Config.CTF.FlagTakenPoints)
+	local team = TeamService.Get(flag.teamIndex)
+	announce(`{player.DisplayName} has the {if team then team.Name else ""} flag!`)
+end
+
+--[[ Somebody made it home with the other team's flag. ]]
+local function capture(flag: Flag, player: Player, scorerIndex: number)
+	local earned = PlayerState.AwardPoints(player, Config.CTF.CapturePoints)
+	FlagService.Captured.Fire(player, scorerIndex, earned)
+
+	announce(`{player.DisplayName} CAPTURED THE FLAG! +{earned}`)
+	setCarrierSpeed(player, false)
+	sendHome(flag, true)
+end
+
+-- ================================================================== TOUCHING ==
+
+--[[
+	Work out what touching a flag means for this player.
+
+	Their own flag: if it is lying on the ground, they send it home. If it is
+	on its stand and they are carrying the enemy's, that is a capture.
+	The enemy's flag: they pick it up.
+]]
+local function onFlagTouched(flag: Flag, player: Player)
+	if not active then
+		return
+	end
+
+	local playerTeam = TeamService.IndexOf(player)
+
+	if flag.teamIndex == playerTeam then
+		if flag.state == "Dropped" then
+			PlayerState.AwardPoints(player, Config.CTF.FlagReturnPoints)
+			sendHome(flag)
+		end
+		return
+	end
+
+	-- The enemy's flag.
+	if flag.state == "Home" or flag.state == "Dropped" then
+		pickUp(flag, player)
+	end
+end
+
+--[[ Reaching your own stand while carrying theirs. ]]
+local function onStandTouched(teamIndex: number, player: Player)
+	if not active then
+		return
+	end
+	if TeamService.IndexOf(player) ~= teamIndex then
+		return
+	end
+
+	-- Are they carrying anything?
+	local carried: Flag? = nil
+	for _, flag in flags do
+		if flag.carrier == player then
+			carried = flag
+		end
+	end
+	if not carried then
+		return
+	end
+
+	-- Halo's rule: your own flag has to be home for a capture to count.
+	local ownFlag = flags[teamIndex]
+	if Config.CTF.RequireOwnFlagHome and ownFlag and ownFlag.state ~= "Home" then
+		Remotes.Event("Notify"):FireClient(player, "Your own flag is not home — you cannot score yet!")
+		return
+	end
+
+	capture(carried, player, teamIndex)
+end
+
+local function bindTouch(part: BasePart, handler: (Player) -> ())
+	part.Touched:Connect(function(hit)
+		local character = hit:FindFirstAncestorOfClass("Model")
+		if not character then
+			return
+		end
+		local player = Players:GetPlayerFromCharacter(character)
+		if player then
+			handler(player)
+		end
+	end)
+end
+
+-- =================================================================== PUBLIC ==
+
+--[[ Build the flags and stands for a Capture the Flag round. ]]
+function FlagService.Setup(build: any, teamColours: { BrickColor })
+	FlagService.Clear()
+
+	local folder = Instance.new("Folder")
+	folder.Name = "CaptureTheFlag"
+	folder.Parent = workspace
+	container = folder
+
+	for teamIndex = 1, 2 do
+		local spawns = build.teamSpawns[teamIndex]
+		if not spawns or #spawns == 0 then
+			continue
+		end
+
+		-- Behind the middle of that team's spawn line.
+		local middle = spawns[math.max(1, math.floor(#spawns / 2))]
+		local home = Vector3.new(middle.X, 1, middle.Z * 1.04)
+		local colour = teamColours[teamIndex] or BrickColor.new("Medium stone grey")
+
+		local stand = buildStand(home, colour, folder)
+		stands[teamIndex] = stand
+		bindTouch(stand, function(player)
+			onStandTouched(teamIndex, player)
+		end)
+
+		local flag = buildFlag(teamIndex, home, colour, folder)
+		flags[teamIndex] = flag
+		bindTouch(flag.pole, function(player)
+			onFlagTouched(flag, player)
+		end)
+	end
+
+	active = true
+end
+
+function FlagService.Clear()
+	active = false
+	if container then
+		container:Destroy()
+		container = nil
+	end
+	table.clear(flags)
+	table.clear(stands)
+end
+
+--[[ Is a Capture the Flag round running? ]]
+function FlagService.IsActive(): boolean
+	return active
+end
+
+--[[ Flag state for the scoreboard: "Home", "Carried" or "Dropped". ]]
+function FlagService.StateOf(teamIndex: number): string
+	local flag = flags[teamIndex]
+	return if flag then flag.state else "None"
+end
+
+--[[ Carried flags follow their carrier; dropped ones eventually go home. ]]
+local function step()
+	if not active then
+		return
+	end
+	local now = os.clock()
+
+	for _, flag in flags do
+		if flag.state == "Carried" then
+			local carrier = flag.carrier
+			local character = carrier and carrier.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			if root and root:IsA("BasePart") then
+				-- Held up and slightly behind, so it is obvious who has it.
+				flag.model:PivotTo(root.CFrame * CFrame.new(0, 6, 1.6))
+			else
+				-- Carrier vanished without dying properly.
+				sendHome(flag)
+			end
+		elseif flag.state == "Dropped" then
+			if now - flag.droppedAt >= Config.CTF.DroppedReturnDelay then
+				sendHome(flag)
+			end
+		end
+	end
+end
+
+function FlagService.Start()
+	-- Dying drops whatever you were carrying, right where you fell.
+	DamageService.Killed.Connect(function(victim: Player, _killer: Player?, _cause: string)
+		for _, flag in flags do
+			if flag.carrier == victim then
+				local character = victim.Character
+				local root = character and character:FindFirstChild("HumanoidRootPart")
+				local where = if root and root:IsA("BasePart") then root.Position else flag.home
+				setCarrierSpeed(victim, false)
+				drop(flag, where)
+			end
+		end
+	end)
+
+	RunService.Heartbeat:Connect(step)
+end
+
+return FlagService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="15">
           <Properties>
             <string name="Name">GraphicsService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1956,7 +2934,7 @@ return GraphicsService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">MapService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1986,7 +2964,7 @@ export type MapBuild = {
 	model: Model,
 	teamSpawns: { [number]: { Vector3 } },
 	vehiclePads: { { position: Vector3, kind: string } },
-	pickupPads: { { position: Vector3, kind: string } },
+	pickupPads: { { position: Vector3, kind: string, weapon: string? } },
 }
 
 local SLAB = 3 -- thickness of floors and ramps
@@ -2616,13 +3594,42 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		})
 	end
 
-	local pickupPads = {}
+	local pickupPads: { { position: Vector3, kind: string, weapon: string? } } = {}
 	local pickupKinds = { "Burger", "Fries", "Shield", "Ammo", "Burger", "Fries", "Shield", "Ammo" }
 	for index, kind in pickupKinds do
 		local angle = (index / #pickupKinds) * math.pi * 2 + 0.4
 		table.insert(pickupPads, {
 			position = Vector3.new(math.cos(angle) * half * 0.3, 4, math.sin(angle) * half * 0.3),
 			kind = kind,
+		})
+	end
+
+	-- Guns, everywhere. Walk over one and it is in your hands.
+	local scattered = {
+		"RPG", "LandMine", "ClusterBomb", "Grenade", "StickyGrenade",
+		"Drone", "Minigun", "AntiMaterial", "AutoShotgun", "Revolver",
+		"MachineGun", "Sniper", "DiamondGun", "Deagle", "SMG", "Shotgun",
+	}
+	for index = 1, 34 do
+		local weapon = scattered[((index - 1) % #scattered) + 1]
+		table.insert(pickupPads, {
+			position = Util.RandomFlatPoint(half * 0.86, rng) + Vector3.new(0, 4, 0),
+			kind = "Weapon",
+			weapon = weapon,
+		})
+	end
+
+	-- Ammo, and the point multiplier, scattered just as freely.
+	for _ = 1, 16 do
+		table.insert(pickupPads, {
+			position = Util.RandomFlatPoint(half * 0.86, rng) + Vector3.new(0, 4, 0),
+			kind = "Ammo",
+		})
+	end
+	for _ = 1, 5 do
+		table.insert(pickupPads, {
+			position = Util.RandomFlatPoint(half * 0.7, rng) + Vector3.new(0, 4, 0),
+			kind = "Multiplier",
 		})
 	end
 
@@ -2659,7 +3666,7 @@ return MapService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">MatchService</string>
             <string name="Source"><![CDATA[--!strict
@@ -2684,6 +3691,8 @@ local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
+local FlagService = require(script.Parent:WaitForChild("FlagService"))
+local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local EffectService = require(script.Parent:WaitForChild("EffectService"))
@@ -2697,9 +3706,11 @@ local phaseEndsAt = 0
 local scores = { 0, 0 }
 local currentMap: MapService.MapBuild? = nil
 local currentMapSpec: Config.MapSpec? = nil
+local currentMode = Config.Modes[1]
 
--- Map voting.
-local ballot: { Config.MapSpec } = {}
+-- Map voting. Each option is a map paired with a mode, so one vote picks
+-- both what you play and where.
+local ballot: { { map: Config.MapSpec, mode: typeof(Config.Modes[1]) } } = {}
 local votes: { [Player]: number } = {}
 
 -- The one car each player currently owns.
@@ -2721,8 +3732,10 @@ end
 	must never be empty: an arena exists from the moment the server boots,
 	long before the first round begins.
 ]]
-local function buildArena(spec: Config.MapSpec)
+local function buildArena(entry: { map: Config.MapSpec, mode: typeof(Config.Modes[1]) })
+	local spec = entry.map
 	currentMapSpec = spec
+	currentMode = entry.mode
 
 	ProjectileService.ClearAll()
 	VehicleService.ClearAll()
@@ -2735,8 +3748,14 @@ local function buildArena(spec: Config.MapSpec)
 	end
 	MatchService.SpawnMapVehicles()
 
-	-- Elephants, and therefore poop.
 	WildlifeService.Populate(spec.Size)
+	CarnivalService.Build(spec.Size)
+
+	-- Flags only exist in Capture the Flag.
+	FlagService.Clear()
+	if currentMode.Id == "CTF" and build then
+		FlagService.Setup(build, teamColours())
+	end
 end
 
 --[[ Push the scoreboard and the clock to everybody's screen. ]]
@@ -2746,6 +3765,11 @@ local function broadcast()
 		timeLeft = math.max(0, phaseEndsAt - os.clock()),
 		scores = scores,
 		mapName = if currentMapSpec then currentMapSpec.Name else "—",
+		modeName = currentMode.Name,
+		-- Only meaningful in Capture the Flag, ignored otherwise.
+		flags = if FlagService.IsActive()
+			then { FlagService.StateOf(1), FlagService.StateOf(2) }
+			else nil,
 	}
 	Remotes.Event("MatchState"):FireAllClients(payload)
 end
@@ -2838,15 +3862,21 @@ local function runVoting()
 	-- Offer a few maps at random out of the ten.
 	local pool = table.clone(Config.Maps)
 	ballot = {}
-	for _ = 1, math.min(Config.Match.MapChoices, #pool) do
+	for index = 1, math.min(Config.Match.MapChoices, #pool) do
 		local pick = rng:NextInteger(1, #pool)
-		table.insert(ballot, pool[pick])
+		-- Alternate the modes down the ballot so both are always on offer.
+		local mode = Config.Modes[((index - 1) % #Config.Modes) + 1]
+		table.insert(ballot, { map = pool[pick], mode = mode })
 		table.remove(pool, pick)
 	end
 
 	local options = {}
-	for index, map in ballot do
-		options[index] = { id = map.Id, name = map.Name }
+	for index, entry in ballot do
+		options[index] = {
+			id = entry.map.Id,
+			name = `{entry.mode.Name} · {entry.map.Name}`,
+			blurb = entry.mode.Blurb,
+		}
 	end
 	Remotes.Event("VoteOptions"):FireAllClients(options, Config.Match.VoteDuration)
 
@@ -2857,7 +3887,7 @@ local function runVoting()
 end
 
 --[[ Count the votes. A tie, or nobody voting at all, is broken at random. ]]
-local function tallyVotes(): Config.MapSpec
+local function tallyVotes(): { map: Config.MapSpec, mode: typeof(Config.Modes[1]) }
 	local counts = table.create(#ballot, 0)
 	for _, choice in votes do
 		if ballot[choice] then
@@ -2900,6 +3930,7 @@ local function runIntermission()
 	phaseEndsAt = os.clock() + Config.Match.IntermissionDuration
 
 	-- Who won, and the WIENER treatment for them.
+	-- Whichever team has the most points at the whistle, in either mode.
 	local winnerIndex = if scores[1] == scores[2] then 0 elseif scores[1] > scores[2] then 1 else 2
 	local winnerName = if winnerIndex == 0 then "NOBODY" else Config.Teams[winnerIndex].Name
 	EffectService.CelebrateWinner(winnerName)
@@ -2977,6 +4008,16 @@ function MatchService.Start()
 		end
 	end)
 
+	-- A capture is worth a great deal, and it goes on the team's total.
+	FlagService.Captured.Connect(function(_player: Player, teamIndex: number, points: number)
+		if phase == "Playing" then
+			scores[teamIndex] += points
+			broadcast()
+		end
+	end)
+
+	FlagService.Start()
+
 	Remotes.Event("CastVote").OnServerEvent:Connect(function(player, choice)
 		if phase ~= "Voting" then
 			return
@@ -3051,7 +4092,10 @@ function MatchService.Start()
 	end)
 
 	-- The world exists before anybody can possibly join it.
-	buildArena(Config.Maps[rng:NextInteger(1, #Config.Maps)])
+	buildArena({
+		map = Config.Maps[rng:NextInteger(1, #Config.Maps)],
+		mode = Config.Modes[rng:NextInteger(1, #Config.Modes)],
+	})
 
 	task.spawn(loop)
 end
@@ -3065,7 +4109,7 @@ return MatchService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="18">
           <Properties>
             <string name="Name">MonetizationService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3241,7 +4285,7 @@ return MonetizationService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">PickupService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3267,6 +4311,8 @@ local PickupService = {}
 
 type Pickup = {
 	kind: string,
+	-- Only set on weapon crates: which gun this one hands over.
+	weapon: string?,
 	part: BasePart,
 	position: Vector3,
 	availableAt: number,
@@ -3276,7 +4322,16 @@ type Pickup = {
 local pickups: { Pickup } = {}
 local container: Folder?
 
-local function colourFor(kind: string): Color3
+local function colourFor(kind: string, weapon: string?): Color3
+	if kind == "Weapon" and weapon then
+		local spec = Config.Weapons[weapon]
+		if spec then
+			return spec.Color
+		end
+	end
+	if kind == "Multiplier" then
+		return Config.Pickups.Multiplier.Color
+	end
 	if kind == "Burger" then
 		return Config.Pickups.Burger.Color
 	elseif kind == "Fries" then
@@ -3295,7 +4350,16 @@ local function colourFor(kind: string): Color3
 	return Config.Pickups.Ammo.Color
 end
 
-local function labelFor(kind: string): string
+local function labelFor(kind: string, weapon: string?): string
+	if kind == "Weapon" and weapon then
+		local spec = Config.Weapons[weapon]
+		if spec then
+			return spec.DisplayName
+		end
+	end
+	if kind == "Multiplier" then
+		return Config.Pickups.Multiplier.DisplayName
+	end
 	if kind == "Burger" then
 		return Config.Pickups.Burger.DisplayName
 	elseif kind == "Fries" then
@@ -3315,7 +4379,7 @@ local function labelFor(kind: string): string
 end
 
 --[[ Hand the pickup's effect to whoever drove into it. ]]
-local function grant(player: Player, kind: string)
+local function grant(player: Player, kind: string, weapon: string?)
 	local state = PlayerState.Get(player)
 	local now = os.clock()
 
@@ -3357,6 +4421,21 @@ local function grant(player: Player, kind: string)
 		if slot and spec then
 			slot.ammo = math.min(spec.MagSize, slot.ammo + 1)
 		end
+	elseif kind == "Multiplier" then
+		-- Everything you score is worth more for the next minute and a half.
+		state.multiplierUntil = now + Config.Pickups.Multiplier.Duration
+		state.multiplierAmount = Config.Pickups.Multiplier.Amount
+	elseif kind == "Weapon" and weapon then
+		-- Picking a gun up puts it straight in your hands.
+		local spec = Config.Weapons[weapon]
+		if spec and not spec.MountedOnly then
+			state.equipped = weapon
+			local slot = state.weapons[weapon]
+			if slot then
+				slot.ammo = spec.MagSize
+				slot.reloadingUntil = 0
+			end
+		end
 	end
 
 	PlayerState.Changed.Fire(player)
@@ -3364,12 +4443,12 @@ local function grant(player: Player, kind: string)
 end
 
 --[[ Build the floating, spinning thing you actually drive into. ]]
-local function createPickup(kind: string, position: Vector3, parent: Folder): Pickup
+local function createPickup(kind: string, position: Vector3, parent: Folder, weapon: string?): Pickup
 	local part = Util.Part({
 		Name = `Pickup_{kind}`,
 		Size = Vector3.new(6, 6, 6),
 		CFrame = CFrame.new(position + Vector3.new(0, 4, 0)),
-		Color = colourFor(kind),
+		Color = colourFor(kind, weapon),
 		Material = Enum.Material.Neon,
 		CanCollide = false,
 		Parent = parent,
@@ -3384,7 +4463,7 @@ local function createPickup(kind: string, position: Vector3, parent: Folder): Pi
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
-	label.Text = labelFor(kind)
+	label.Text = labelFor(kind, weapon)
 	label.TextColor3 = Color3.new(1, 1, 1)
 	label.TextStrokeTransparency = 0.3
 	label.TextScaled = true
@@ -3393,6 +4472,7 @@ local function createPickup(kind: string, position: Vector3, parent: Folder): Pi
 
 	local pickup: Pickup = {
 		kind = kind,
+		weapon = weapon,
 		part = part,
 		position = position + Vector3.new(0, 4, 0),
 		availableAt = 0,
@@ -3417,14 +4497,14 @@ local function createPickup(kind: string, position: Vector3, parent: Folder): Pi
 		part.Transparency = 1
 		billboard.Enabled = false
 
-		grant(player, kind)
+		grant(player, kind, weapon)
 	end)
 
 	return pickup
 end
 
 --[[ Lay out every pickup the current map asked for. ]]
-function PickupService.Build(pads: { { position: Vector3, kind: string } })
+function PickupService.Build(pads: { { position: Vector3, kind: string, weapon: string? } })
 	PickupService.Clear()
 
 	local folder = Instance.new("Folder")
@@ -3433,7 +4513,7 @@ function PickupService.Build(pads: { { position: Vector3, kind: string } })
 	container = folder
 
 	for _, pad in pads do
-		table.insert(pickups, createPickup(pad.kind, pad.position, folder))
+		table.insert(pickups, createPickup(pad.kind, pad.position, folder, pad.weapon))
 	end
 end
 
@@ -3475,7 +4555,7 @@ return PickupService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">PlayerState</string>
             <string name="Source"><![CDATA[--!strict
@@ -3666,7 +4746,7 @@ return PlayerState
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">ProjectileService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3696,6 +4776,7 @@ local Util = require(Shared:WaitForChild("Util"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
+local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 
 local ProjectileService = {}
 
@@ -3800,6 +4881,11 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 	local spec = projectile.spec
 
 	-- Giant animals shrug off anything that is not a mega-detonation.
+	-- Fairground props first: they are neither people nor vehicles.
+	if CarnivalService.RegisterHit(hitPart, projectile.owner) then
+		return
+	end
+
 	if WildlifeService.RegisterHit(hitPart, spec.Damage, projectile.owner) then
 		return
 	end
@@ -4091,7 +5177,7 @@ return ProjectileService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">TeamService</string>
             <string name="Source"><![CDATA[--!strict
@@ -4174,7 +5260,7 @@ return TeamService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -4203,6 +5289,7 @@ local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -5202,6 +6289,130 @@ function VehicleService.SetPedal(player: Player, value: number)
 	end
 end
 
+--[[
+	Bail out.
+
+	Press space on a rideable rocket and you are thrown clear, a parachute
+	opens, and you drift down instead of making a crater. The descent is a
+	LinearVelocity in Line mode along world Y: it pins how fast you fall
+	without touching your horizontal movement, so you can still steer where
+	you land.
+]]
+function VehicleService.Eject(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root or not root:IsA("BasePart") then
+		return
+	end
+	if not humanoid.SeatPart then
+		return
+	end
+	-- Already under a canopy.
+	if character:FindFirstChild("Parachute") then
+		return
+	end
+
+	humanoid.Sit = false
+
+	-- Thrown clear of whatever you were riding.
+	task.wait(0.1)
+	if not root.Parent then
+		return
+	end
+	root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + Vector3.new(0, 70, 0)
+
+	local canopy = Instance.new("Model")
+	canopy.Name = "Parachute"
+
+	local dome = Util.Part({
+		Name = "Canopy",
+		Size = Vector3.new(22, 9, 22),
+		CFrame = root.CFrame * CFrame.new(0, 13, 0),
+		Shape = Enum.PartType.Ball,
+		Color = Color3.fromRGB(240, 130, 60),
+		Material = Enum.Material.Fabric,
+		Anchored = false,
+		CanCollide = false,
+		Massless = true,
+		Parent = canopy,
+	})
+
+	-- Lines from the canopy down to the jumper.
+	for index = 1, 4 do
+		local angle = (index / 4) * math.pi * 2
+		local cord = Util.Part({
+			Name = "Cord",
+			Size = Vector3.new(0.2, 9, 0.2),
+			CFrame = root.CFrame * CFrame.new(math.cos(angle) * 5, 7, math.sin(angle) * 5),
+			Color = Color3.fromRGB(230, 230, 230),
+			Anchored = false,
+			CanCollide = false,
+			Massless = true,
+			Parent = canopy,
+		})
+		Util.Weld(dome, cord)
+	end
+
+	Util.Weld(root, dome)
+	canopy.Parent = character
+
+	local anchorPoint = Util.Attachment(root, Vector3.zero, "ChuteRoot")
+
+	local descent = Instance.new("LinearVelocity")
+	descent.Name = "ChuteDescent"
+	descent.Attachment0 = anchorPoint
+	descent.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+	descent.RelativeTo = Enum.ActuatorRelativeTo.World
+	-- Straight down, gently. Horizontal movement is left alone.
+	descent.LineDirection = Vector3.new(0, 1, 0)
+	descent.LineVelocity = -24
+	descent.ForceLimitsEnabled = false
+	descent.MaxForce = math.huge
+	descent.MaxAxesForce = Vector3.new(math.huge, math.huge, math.huge)
+	descent.Enabled = false
+	descent.Parent = root
+
+	Remotes.Event("Notify"):FireClient(player, "Parachute open — steer with WASD.")
+
+	-- Let the launch carry you upward first, then open.
+	task.delay(0.7, function()
+		if descent.Parent then
+			descent.Enabled = true
+		end
+	end)
+
+	-- Cut away once you are down, or after long enough that something is wrong.
+	task.spawn(function()
+		local opened = os.clock()
+		while os.clock() - opened < 30 do
+			task.wait(0.2)
+			if not root.Parent or not canopy.Parent then
+				break
+			end
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			params.FilterDescendantsInstances = { character }
+			local ground = workspace:Raycast(root.Position, Vector3.new(0, -8, 0), params)
+			if ground and os.clock() - opened > 1.2 then
+				break
+			end
+		end
+		if canopy.Parent then
+			canopy:Destroy()
+		end
+		if descent.Parent then
+			descent:Destroy()
+		end
+		if anchorPoint.Parent then
+			anchorPoint:Destroy()
+		end
+	end)
+end
+
 --[[ Hurt a vehicle. At zero health it explodes and takes its riders with it. ]]
 function VehicleService.Damage(model: Model, amount: number, _attacker: Player?)
 	if not model or not model.Parent then
@@ -5325,7 +6536,7 @@ return VehicleService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">WeaponService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5352,6 +6563,7 @@ local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
+local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 
 local WeaponService = {}
 
@@ -5562,6 +6774,11 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	impactSpark(result.Position, result.Normal, spec.Color)
 
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
+	-- Fairground props first: they are neither people nor vehicles.
+	if CarnivalService.RegisterHit(result.Instance, player) then
+		return
+	end
+
 	if WildlifeService.RegisterHit(result.Instance, spec.Damage, player) then
 		return
 	end
@@ -5950,6 +7167,10 @@ function WeaponService.Start()
 		handleMelee(player)
 	end)
 
+	Remotes.Event("Eject").OnServerEvent:Connect(function(player)
+		task.spawn(VehicleService.Eject, player)
+	end)
+
 	Remotes.Event("SetPedal").OnServerEvent:Connect(function(player, value)
 		if typeof(value) == "number" then
 			VehicleService.SetPedal(player, value)
@@ -5989,7 +7210,7 @@ return WeaponService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">WildlifeService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6768,27 +7989,27 @@ return WildlifeService
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="24">
+  <Item class="SoundService" referent="26">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterGui" referent="25">
+  <Item class="StarterGui" referent="27">
     <Properties>
       <string name="Name">StarterGui</string>
       <bool name="ResetPlayerGuiOnSpawn">false</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="26">
+  <Item class="StarterPlayer" referent="28">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="27">
+    <Item class="StarterPlayerScripts" referent="29">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="28">
+      <Item class="LocalScript" referent="30">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
@@ -6963,11 +8184,11 @@ end)
 print("[Nuclear Mud Arena] Client ready. WASD drives, F mega-detonates.")
 ]]></string>
         </Properties>
-        <Item class="Folder" referent="29">
+        <Item class="Folder" referent="31">
           <Properties>
             <string name="Name">modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="30">
+          <Item class="ModuleScript" referent="32">
             <Properties>
               <string name="Name">Controls</string>
               <string name="Source"><![CDATA[--!strict
@@ -7369,6 +8590,13 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		Remotes.Event("MegaDetonate"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.Q then
 		Remotes.Event("Melee"):FireServer()
+	elseif input.KeyCode == Enum.KeyCode.Space then
+		-- Bail out of whatever you are riding. Harmless on foot.
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.SeatPart then
+			Remotes.Event("Eject"):FireServer()
+		end
 	elseif input.KeyCode == Enum.KeyCode.One then
 		selectSlot(1)
 	elseif input.KeyCode == Enum.KeyCode.Two then
@@ -7662,7 +8890,7 @@ return Controls
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="31">
+          <Item class="ModuleScript" referent="33">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--!strict
@@ -8394,7 +9622,7 @@ return Hud
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="32">
+  <Item class="Workspace" referent="34">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

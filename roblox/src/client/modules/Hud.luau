@@ -465,13 +465,21 @@ function Hud.SetStats(keys: number, carTierName: string, megaCharges: number, ki
 	}, "\n")
 end
 
-function Hud.SetMatch(phase: string, timeLeft: number, scores: { number }, mapName: string)
+function Hud.SetMatch(
+	phase: string,
+	timeLeft: number,
+	scores: { number },
+	mapName: string,
+	modeName: string?,
+	flags: { string }?
+)
 	if not clockLabel then
 		return
 	end
 
 	if phase == "Playing" then
-		clockLabel.Text = `{mapName}  ·  {Util.FormatClock(timeLeft)}`
+		local mode = if modeName then `{modeName} · ` else ""
+		clockLabel.Text = `{mode}{mapName}  ·  {Util.FormatClock(timeLeft)}`
 	elseif phase == "Voting" then
 		clockLabel.Text = `VOTING  ·  {Util.FormatClock(timeLeft)}`
 	elseif phase == "Intermission" then
@@ -480,7 +488,15 @@ function Hud.SetMatch(phase: string, timeLeft: number, scores: { number }, mapNa
 		clockLabel.Text = "WAITING FOR PLAYERS"
 	end
 
-	scoreLabel.Text = `RED {scores[1] or 0}   —   BLUE {scores[2] or 0}`
+	-- In Capture the Flag the scoreboard also says where each flag is, which
+	-- is the single most useful thing to know at a glance.
+	if flags then
+		local red = flags[1] or "?"
+		local blue = flags[2] or "?"
+		scoreLabel.Text = `RED {scores[1] or 0} [{string.upper(red)}]   —   [{string.upper(blue)}] BLUE {scores[2] or 0}`
+	else
+		scoreLabel.Text = `RED {scores[1] or 0}   —   BLUE {scores[2] or 0}`
+	end
 end
 
 --[[ Show the map ballot, and call back with whichever one gets clicked. ]]

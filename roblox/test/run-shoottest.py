@@ -34,7 +34,8 @@ def strip(s):
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes']
 SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
-          'ProjectileService', 'WeaponService', 'TeamService', 'PickupService', 'EffectService']
+          'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
+          'EffectService', 'FlagService']
 
 parts = [read(HERE, 'stubs.luau'), read(HERE, 'serverstubs.luau'), '''
 local Players = game:GetService("Players")
@@ -261,6 +262,104 @@ for shot = 1, 30 do
 end
 check("ammo never runs down", ammoState.weapons.MachineGun.ammo == startAmmo,
 	string.format("%d rounds after 30 shots", ammoState.weapons.MachineGun.ammo))
+
+-- ---------------------------------------------------- capture the flag
+DUMP("")
+DUMP("Capture the Flag:")
+TeamService.Start()
+TeamService.Assign(shooter)
+FlagService.Start()
+
+local teamColours = { BrickColor.new("Bright red"), BrickColor.new("Bright blue") }
+local fakeBuild = {
+	teamSpawns = {
+		{ Vector3.new(0, 4, -300), Vector3.new(20, 4, -300) },
+		{ Vector3.new(0, 4, 300), Vector3.new(20, 4, 300) },
+	},
+}
+FlagService.Setup(fakeBuild, teamColours)
+check("CTF is running", FlagService.IsActive(), "")
+check("both flags start home",
+	FlagService.StateOf(1) == "Home" and FlagService.StateOf(2) == "Home",
+	string.format("%s / %s", FlagService.StateOf(1), FlagService.StateOf(2)))
+
+local myTeam = TeamService.IndexOf(shooter)
+local enemyTeam = if myTeam == 1 then 2 else 1
+
+-- Find the enemy flag pole and walk into it.
+local enemyPole, myStand
+for _, child in workspace:GetChildren() do
+	if child._props.Name == "CaptureTheFlag" then
+		for _, piece in child:GetChildren() do
+			if piece._props.Name == string.format("Flag_%d", enemyTeam) then
+				enemyPole = piece:FindFirstChild("Pole")
+			end
+		end
+		for _, piece in child:GetChildren() do
+			if piece._props.Name == "FlagStand" then
+				-- Whichever stand is on our side of the map.
+				local z = piece._props.CFrame.Position.Z
+				local mine = if myTeam == 1 then z < 0 else z > 0
+				if mine then myStand = piece end
+			end
+		end
+	end
+end
+
+check("the enemy flag exists", enemyPole ~= nil, "")
+if enemyPole then
+	enemyPole._props.Touched._fire(shooterChar:FindFirstChild("HumanoidRootPart"))
+	RUN_SPAWNED()
+	check("picking it up works", FlagService.StateOf(enemyTeam) == "Carried",
+		FlagService.StateOf(enemyTeam))
+end
+
+local captured = false
+FlagService.Captured.Connect(function() captured = true end)
+
+check("our own stand exists", myStand ~= nil, "")
+if myStand then
+	myStand._props.Touched._fire(shooterChar:FindFirstChild("HumanoidRootPart"))
+	RUN_SPAWNED()
+	check("carrying it home scores", captured, "capture fired")
+	check("the flag goes back on its stand", FlagService.StateOf(enemyTeam) == "Home",
+		FlagService.StateOf(enemyTeam))
+end
+
+-- ------------------------------------------------------------ carnival
+DUMP("")
+DUMP("The carnival:")
+CarnivalService.Build(700)
+
+local dunkTarget, duck, strikerPad
+for _, child in workspace:GetChildren() do
+	if child._props.Name == "Carnival" then
+		for _, piece in child:GetChildren() do
+			local kind = piece:GetAttribute("Carnival")
+			if kind == "Dunk" and not dunkTarget then dunkTarget = piece end
+			if kind == "Duck" and not duck then duck = piece end
+			if kind == "Striker" and not strikerPad then strikerPad = piece end
+		end
+	end
+end
+
+check("the dunk tank is built", dunkTarget ~= nil, "")
+check("the shooting gallery is built", duck ~= nil, "")
+check("the high striker is built", strikerPad ~= nil, "")
+
+local carnivalPoints = PlayerState.Get(shooter).points
+if dunkTarget then
+	check("shooting the dunk target counts",
+		CarnivalService.RegisterHit(dunkTarget, shooter), "")
+end
+if duck then
+	check("shooting a duck counts", CarnivalService.RegisterHit(duck, shooter), "")
+end
+if strikerPad then
+	check("shooting the striker counts", CarnivalService.RegisterHit(strikerPad, shooter), "")
+end
+check("carnival games score points", PlayerState.Get(shooter).points > carnivalPoints,
+	string.format("%d points", PlayerState.Get(shooter).points))
 
 DUMP("")
 DUMP(if failures == 0 then "SHOOTING WORKS" else failures .. " FAILURES")
