@@ -350,13 +350,15 @@ local function boostArrows(origin: Vector3, direction: Vector3, parent: Instance
 	local flat = Vector3.new(direction.X, 0, direction.Z)
 	flat = if flat.Magnitude < 0.01 then Vector3.new(0, 0, 1) else flat.Unit
 
-	for step = 1, 4 do
-		local centre = origin - flat * (step * 16)
+	-- Two chevrons, close in. Four spread over sixty studs was a long enough
+	-- run-up to arrive at the ramp far too fast.
+	for step = 1, 2 do
+		local centre = origin - flat * (step * 11)
 		-- Each chevron is two angled bars meeting at a point.
 		for _, side in { -1, 1 } do
 			local bar = Util.Part({
 				Name = "BoostPad",
-				Size = Vector3.new(3, 0.6, 14),
+				Size = Vector3.new(3, 0.6, 9),
 				CFrame = CFrame.lookAt(centre + Vector3.new(0, 1.1, 0), centre + flat)
 					* CFrame.new(side * 4, 0, 0)
 					* CFrame.Angles(0, side * math.rad(28), 0),

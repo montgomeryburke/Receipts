@@ -23,7 +23,7 @@ need to touch anything else.
 | **E** | Get into a vehicle (walk up to it first) |
 | **WASD** | Drive / fly / steer the torpedo |
 | **Left Shift** | **Turbo** — faster in a vehicle, sprint on foot |
-| **Left mouse** | Fire (hold for automatic guns) |
+| **Left mouse** | Fire — hold it down. Every gun is automatic except a scoped sniper, which is one shot at a time |
 | **Right mouse** | Zoom, on guns with a scope |
 | **R** | Reload |
 | **Q** | Melee — lethal from behind |

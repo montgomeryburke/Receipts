@@ -142,6 +142,31 @@ fireRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0, -1))
 check("a diamond round launches", liveProjectiles() > beforeShots,
 	string.format("%d in flight", liveProjectiles() - beforeShots))
 
+-- ------------------------------------------------------------ gun in hand
+DUMP("")
+DUMP("A gun in his hand:")
+-- Give the character a hand to hold it in.
+local hand = Instance.new("Part")
+hand._props.Name = "RightHand"
+hand._props.CFrame = CFrame.new(1, 4, 0)
+hand.Parent = shooterChar
+
+WeaponService.UpdateHeldWeapon(shooter)
+local held = shooterChar:FindFirstChild("HeldWeapon")
+check("a weapon model is held", held ~= nil, "")
+if held then
+	local barrel = held:FindFirstChild("Barrel")
+	check("it has a barrel", barrel ~= nil, "")
+end
+
+-- Switching weapons swaps the model rather than stacking them.
+Remotes.Event("EquipWeapon")._props.OnServerEvent._fire(shooter, "Sniper")
+local heldCount = 0
+for _, child in shooterChar:GetChildren() do
+	if child._props.Name == "HeldWeapon" then heldCount += 1 end
+end
+check("only ever one weapon held", heldCount == 1, string.format("%d models", heldCount))
+
 -- ------------------------------------------------------------------ melee
 DUMP("")
 DUMP("Melee and turbo remotes:")

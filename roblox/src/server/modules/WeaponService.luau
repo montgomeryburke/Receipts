@@ -32,7 +32,15 @@ local MAX_ORIGIN_DRIFT = 30
 
 local rng = Random.new()
 
---[[ Draw a quick line where a hitscan shot went, so shooting looks like shooting. ]]
+--[[
+	Draw the shot.
+
+	The old version of this was a 0.22-stud line at 35% transparency lasting
+	0.08 seconds — technically a tracer, practically invisible. Hitscan guns
+	therefore looked like they were doing nothing at all, while the vehicle
+	guns, which fire visible projectiles, looked fine. This is deliberately
+	loud: a thick bright beam, a muzzle flash and a spark where it lands.
+]]
 local function drawTracer(from: Vector3, to: Vector3, color: Color3)
 	local delta = to - from
 	local length = delta.Magnitude
@@ -42,18 +50,158 @@ local function drawTracer(from: Vector3, to: Vector3, color: Color3)
 
 	local tracer = Util.Part({
 		Name = "Tracer",
-		Size = Vector3.new(0.22, 0.22, length),
+		Size = Vector3.new(0.55, 0.55, length),
 		CFrame = CFrame.lookAt(from + delta * 0.5, to),
 		Color = color,
 		Material = Enum.Material.Neon,
 		CanCollide = false,
 		CanQuery = false,
 		CanTouch = false,
-		Transparency = 0.35,
+		Transparency = 0.1,
 		Parent = workspace,
 	})
-	Debris:AddItem(tracer, 0.08)
+	Debris:AddItem(tracer, 0.35)
 end
+
+--[[ The flash at the muzzle, so you can see your own gun going off. ]]
+local function muzzleFlash(position: Vector3, colour: Color3)
+	local flash = Util.Part({
+		Name = "MuzzleFlash",
+		Size = Vector3.new(2.4, 2.4, 2.4),
+		CFrame = CFrame.new(position),
+		Shape = Enum.PartType.Ball,
+		Color = Color3.fromRGB(255, 230, 150),
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+		Parent = workspace,
+	})
+
+	local light = Instance.new("PointLight")
+	light.Color = colour
+	light.Brightness = 6
+	light.Range = 22
+	light.Parent = flash
+
+	Debris:AddItem(flash, 0.09)
+end
+
+--[[ Sparks where the shot lands, so you can tell what you hit. ]]
+local function impactSpark(position: Vector3, normal: Vector3, colour: Color3)
+	local anchor = Util.Part({
+		Name = "Impact",
+		Size = Vector3.new(0.6, 0.6, 0.6),
+		CFrame = CFrame.new(position + normal * 0.4),
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+		Parent = workspace,
+	})
+
+	local spark = Instance.new("ParticleEmitter")
+	spark.Color = ColorSequence.new(colour)
+	spark.Size = NumberSequence.new(1.1, 0)
+	spark.Lifetime = NumberRange.new(0.12, 0.3)
+	spark.Speed = NumberRange.new(14, 30)
+	spark.SpreadAngle = Vector2.new(60, 60)
+	spark.Rate = 0
+	spark.Parent = anchor
+	spark:Emit(14)
+
+	Debris:AddItem(anchor, 0.7)
+end
+
+--[[
+	The gun in your hands.
+
+	Built as a couple of parts welded to the right hand, so there is always
+	something visible to shoot with and you can tell at a glance which weapon
+	you are holding.
+]]
+local function updateHeldWeapon(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	local existing = character:FindFirstChild("HeldWeapon")
+	if existing then
+		existing:Destroy()
+	end
+
+	-- Riding an animal means empty hands.
+	if WildlifeService.IsRiding(player) then
+		return
+	end
+
+	local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
+	if not hand or not hand:IsA("BasePart") then
+		return
+	end
+
+	local state = PlayerState.Get(player)
+	local spec = Config.Weapons[state.equipped]
+	if not spec then
+		return
+	end
+
+	local model = Instance.new("Model")
+	model.Name = "HeldWeapon"
+
+	-- Longer barrel for the long guns, stubby for sidearms.
+	local length = if spec.Category == "Sniper" then 5.5
+		elseif spec.Category == "Automatic" then 4.2
+		elseif spec.Category == "Shotgun" then 4.0
+		elseif spec.Category == "Explosive" then 3.6
+		else 2.2
+
+	local body = Util.Part({
+		Name = "Barrel",
+		Size = Vector3.new(0.4, 0.5, length),
+		CFrame = hand.CFrame * CFrame.new(0, -0.4, -length * 0.4),
+		Color = spec.Color,
+		Material = Enum.Material.Metal,
+		Anchored = false,
+		CanCollide = false,
+		Massless = true,
+		Parent = model,
+	})
+
+	local grip = Util.Part({
+		Name = "Grip",
+		Size = Vector3.new(0.35, 0.9, 0.5),
+		CFrame = body.CFrame * CFrame.new(0, -0.5, length * 0.3),
+		Color = Color3.fromRGB(48, 42, 38),
+		Material = Enum.Material.Wood,
+		Anchored = false,
+		CanCollide = false,
+		Massless = true,
+		Parent = model,
+	})
+	Util.Weld(body, grip)
+
+	if spec.Category == "Sniper" then
+		local scope = Util.Part({
+			Name = "Scope",
+			Size = Vector3.new(0.3, 0.3, 1.4),
+			CFrame = body.CFrame * CFrame.new(0, 0.45, 0.4),
+			Color = Color3.fromRGB(24, 24, 26),
+			Material = Enum.Material.Metal,
+			Anchored = false,
+			CanCollide = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(body, scope)
+	end
+
+	Util.Weld(hand, body)
+	model.Parent = character
+end
+
+WeaponService.UpdateHeldWeapon = updateHeldWeapon
 
 --[[ Everything a shot from this player should pass straight through. ]]
 local function ignoreListFor(player: Player): { Instance }
@@ -75,10 +223,13 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 
 	local endPoint = if result then result.Position else origin + direction * spec.Range
 	drawTracer(origin, endPoint, spec.Color)
+	muzzleFlash(origin + direction * 2, spec.Color)
 
 	if not result then
 		return
 	end
+
+	impactSpark(result.Position, result.Normal, spec.Color)
 
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
 	if WildlifeService.RegisterHit(result.Instance) then
@@ -315,6 +466,7 @@ local function handleEquip(player: Player, weaponName: any)
 
 	local state = PlayerState.Get(player)
 	state.equipped = weaponName
+	updateHeldWeapon(player)
 	PlayerState.Changed.Fire(player)
 end
 
@@ -416,6 +568,25 @@ local function handleAim(player: Player, worldTarget: any)
 end
 
 function WeaponService.Start()
+	-- Everyone spawns holding something.
+	local function armOnSpawn(player: Player)
+		player.CharacterAdded:Connect(function()
+			task.wait(0.5)
+			updateHeldWeapon(player)
+		end)
+		if player.Character then
+			task.spawn(function()
+				task.wait(0.5)
+				updateHeldWeapon(player)
+			end)
+		end
+	end
+
+	Players.PlayerAdded:Connect(armOnSpawn)
+	for _, player in Players:GetPlayers() do
+		armOnSpawn(player)
+	end
+
 	Remotes.Event("FireWeapon").OnServerEvent:Connect(function(player, direction)
 		handleFire(player, direction)
 	end)

@@ -87,18 +87,21 @@ Config.Weapons = {
 		Kind = "Hitscan", Damage = 12, Cooldown = 0.28, Range = 400,
 		MagSize = 12, ReloadTime = 1.3, Spread = 1.2,
 		Color = Color3.fromRGB(90, 90, 96),
+		Automatic = true,
 	},
 	Revolver = {
 		Slot = 1, Category = "Sidearm", DisplayName = ".44 Revolver",
 		Kind = "Hitscan", Damage = 34, Cooldown = 0.7, Range = 500,
 		MagSize = 6, ReloadTime = 2.1, Spread = 0.8,
 		Color = Color3.fromRGB(150, 130, 90),
+		Automatic = true,
 	},
 	Deagle = {
 		Slot = 1, Category = "Sidearm", DisplayName = "Hand Cannon",
 		Kind = "Hitscan", Damage = 42, Cooldown = 0.75, Range = 480,
 		MagSize = 7, ReloadTime = 2.0, Spread = 1.0,
 		Color = Color3.fromRGB(200, 180, 110),
+		Automatic = true,
 	},
 
 	-- ------------------------------------------------------------ AUTOMATIC
@@ -135,6 +138,7 @@ Config.Weapons = {
 		Kind = "Hitscan", Damage = 9, Cooldown = 0.85, Range = 160,
 		MagSize = 6, ReloadTime = 2.6, Spread = 6.0, Pellets = 9,
 		Color = Color3.fromRGB(120, 84, 52),
+		Automatic = true,
 	},
 	AutoShotgun = {
 		Slot = 3, Category = "Shotgun", DisplayName = "Auto Shotgun",
@@ -153,6 +157,10 @@ Config.Weapons = {
 		-- across a room, 10x reaches the other end of the map.
 		ZoomLevels = { 2, 4, 6, 10 },
 		ZoomFov = 22, AutoAim = true,
+		-- Holds down from the hip; one shot at a time once scoped, so a
+		-- long-range rifle still has to be aimed.
+		Automatic = true,
+		SemiAutoWhenScoped = true,
 		Color = Color3.fromRGB(46, 56, 46),
 	},
 	AntiMaterial = {
@@ -161,6 +169,8 @@ Config.Weapons = {
 		MagSize = 3, ReloadTime = 3.6, Spread = 0.0,
 		ZoomLevels = { 2, 5, 10, 16 },
 		ZoomFov = 16, AutoAim = true,
+		Automatic = true,
+		SemiAutoWhenScoped = true,
 		-- Wrecks vehicles specifically.
 		VehicleDamageMultiplier = 3,
 		Color = Color3.fromRGB(60, 60, 70),
@@ -180,6 +190,7 @@ Config.Weapons = {
 		CanMegaDetonate = true,
 		AutoAim = true,
 		Color = Color3.fromRGB(120, 230, 245),
+		Automatic = true,
 	},
 
 	-- --------------------------------------------------------- EXPLOSIVES
@@ -218,6 +229,7 @@ Config.Weapons = {
 		Splat = true,
 		AmmoFromPickupsOnly = true,
 		Color = Color3.fromRGB(92, 64, 38),
+		Automatic = true,
 	},
 	Drone = {
 		Slot = 7, Category = "Utility", DisplayName = "Hunter Drone",
@@ -384,9 +396,11 @@ Config.Beast = {
 	serious air.
 ]]
 Config.Boost = {
-	Speed = 190,
-	-- Extra upward kick as you leave the lip.
-	Lift = 55,
+	-- Horizontal only. This used to be 190, which fired a truck off the
+	-- following ramp like a trampoline; the arrows are meant to make you
+	-- quick along the ground, and the ramp decides how much air you get.
+	Speed = 118,
+	Lift = 0,
 }
 
 --[[ The mega-detonation. Press F while a diamond bullet is still flying. ]]
@@ -593,6 +607,7 @@ export type WeaponSpec = {
 	AutoAim: boolean?,
 	ZoomFov: number?,
 	ZoomLevels: { number }?,
+	SemiAutoWhenScoped: boolean?,
 	FuseTime: number?,
 	Sticky: boolean?,
 	MountedOnly: boolean?,

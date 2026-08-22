@@ -202,6 +202,38 @@ local boosted = runCar(1, 0, true, 6)
 check("turbo is faster", boosted > plain * 1.4,
 	string.format("%.0f studs vs %.0f over 6s", boosted, plain))
 
+-- The reported bug: boost pads launched the truck like a trampoline.
+DUMP("")
+DUMP("Boost pads:")
+do
+	local pad = Instance.new("Part")
+	pad._props.Name = "BoostPad"
+	pad:SetAttribute("Boost", true)
+	local savedRaycast = rawget(workspace, "_props").Raycast
+	rawget(workspace, "_props").Raycast = function()
+		return {{
+			Instance = pad,
+			Position = Vector3.new(0, 0, 0),
+			Material = Enum.Material.Plastic,
+			Normal = Vector3.new(0, 1, 0),
+		}}
+	end
+
+	local boostDistance, boostCF = runCar(1, 0, false, 2)
+	rawget(workspace, "_props").Raycast = savedRaycast
+
+	check("boost speeds the car up", boostDistance > distance,
+		string.format("%.0f studs vs %.0f without", boostDistance, distance))
+
+	-- The whole point of the report: forward, not upward.
+	local boostRise = math.abs(boostCF.Position.Y - 5)
+	check("boost does NOT launch it upward", boostRise < 2,
+		string.format("vertical drift %.2f studs", boostRise))
+
+	check("boost is not a trampoline", boostDistance < 400,
+		string.format("%.0f studs in 2s is drivable", boostDistance))
+end
+
 DUMP("")
 DUMP("Steering:")
 local _, straightCF = runCar(1, 0, false, 2)

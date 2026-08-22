@@ -41,6 +41,7 @@ type ArsenalEntry = {
 	ZoomLevels: { number }?,
 	AutoAim: boolean,
 	CanMegaDetonate: boolean,
+	SemiAutoWhenScoped: boolean,
 	MountedOnly: boolean,
 }
 
@@ -242,6 +243,8 @@ local function applyZoom()
 	if not levels or zoomStage < 1 then
 		zoomStage = 0
 		TweenService:Create(camera, TweenInfo.new(0.12), { FieldOfView = defaultFov }):Play()
+		-- Back over the shoulder.
+		player.CameraMode = Enum.CameraMode.Classic
 		Hud.SetZoom(0)
 		return
 	end
@@ -250,6 +253,10 @@ local function applyZoom()
 	TweenService:Create(camera, TweenInfo.new(0.12), {
 		FieldOfView = defaultFov / magnification,
 	}):Play()
+	-- Down the sight properly. Zoomed out over the shoulder, the character's
+	-- own head sits in the middle of the scope and hides what you are
+	-- aiming at; first person puts the camera where his eye is.
+	player.CameraMode = Enum.CameraMode.LockFirstPerson
 	Hud.SetZoom(magnification)
 end
 
@@ -422,7 +429,13 @@ end
 local function onHeartbeat()
 	local spec = arsenal[effectiveWeaponName()]
 
-	if firing and spec and spec.Automatic then
+	-- Everything holds down, except a scoped rifle: down the sight it is one
+	-- shot at a time, so range still has to be earned.
+	local automatic = spec ~= nil and spec.Automatic
+	if spec and spec.SemiAutoWhenScoped and zoomStage >= 1 then
+		automatic = false
+	end
+	if firing and automatic then
 		tryFire()
 	end
 
@@ -633,6 +646,7 @@ function Controls.Start()
 			Automatic = spec.Automatic == true,
 			ZoomFov = spec.ZoomFov,
 			ZoomLevels = spec.ZoomLevels,
+			SemiAutoWhenScoped = spec.SemiAutoWhenScoped == true,
 			AutoAim = spec.AutoAim == true,
 			CanMegaDetonate = spec.CanMegaDetonate == true,
 			MountedOnly = spec.MountedOnly == true,

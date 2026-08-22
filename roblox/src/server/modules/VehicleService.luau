@@ -339,10 +339,13 @@ local function addTurret(chassis: BasePart, model: Model, offset: Vector3, barre
 	-- No limits: the turret spins all the way round.
 	yaw.LimitsEnabled = false
 
+	-- Raised well clear of the gunner and pushed forward off the drum. The
+	-- previous barrel sat at head height and long enough to clip the rider,
+	-- which stopped them turning.
 	local barrel = Util.Part({
 		Name = "Barrel",
 		Size = Vector3.new(1.6, 1.6, barrelLength),
-		CFrame = drum.CFrame * CFrame.new(0, 1.2, -barrelLength * 0.5),
+		CFrame = drum.CFrame * CFrame.new(0, 3.6, -barrelLength * 0.5 - 3),
 		Color = Color3.fromRGB(40, 40, 44),
 		Material = Enum.Material.Metal,
 		Anchored = false,
@@ -354,7 +357,7 @@ local function addTurret(chassis: BasePart, model: Model, offset: Vector3, barre
 	-- Where bullets actually come out.
 	Util.Attachment(barrel, Vector3.new(0, 0, -barrelLength * 0.5), "Muzzle")
 
-	local gunnerSeat = addPassengerSeat(drum, model, Vector3.new(0, 2, 2.5), "GunnerSeat")
+	local gunnerSeat = addPassengerSeat(drum, model, Vector3.new(0, 1.5, 3.5), "GunnerSeat")
 
 	return drum, barrel, gunnerSeat, yaw
 end
@@ -450,7 +453,7 @@ function VehicleService.SpawnTurretTruck(position: Vector3): Model
 	)
 	local seat = addDriverSeat(chassis, model, Vector3.new(0, CHASSIS_HEIGHT * 0.5 + 0.5, -6))
 	local drum, barrel, gunnerSeat, yaw =
-		addTurret(chassis, model, Vector3.new(0, CHASSIS_HEIGHT * 0.5 + 2, 6), 12, spec.Color)
+		addTurret(chassis, model, Vector3.new(0, CHASSIS_HEIGHT * 0.5 + 2, 6), 8, spec.Color)
 
 	bindSeat(seat, model, "Driver")
 	bindSeat(gunnerSeat, model, "Gunner")
@@ -492,7 +495,7 @@ function VehicleService.SpawnTank(position: Vector3): Model
 	)
 	local seat = addDriverSeat(chassis, model, Vector3.new(0, 3, -8))
 	local drum, barrel, gunnerSeat, yaw =
-		addTurret(chassis, model, Vector3.new(0, 3.5, 2), 20, spec.Color)
+		addTurret(chassis, model, Vector3.new(0, 3.5, 2), 14, spec.Color)
 
 	-- Track skirts, purely so it reads as a tank rather than a big car.
 	for _, side in { -1, 1 } do
