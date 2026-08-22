@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Claude Assist",
+        "description": "Paste an Anthropic API key from console.anthropic.com.",
+        "data": { "api_key": "API key" }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Anthropic API. Check the Pi's internet connection.",
+      "invalid_auth": "That API key was rejected.",
+      "unknown": "Something went wrong. Check the Home Assistant log."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Claude Assist settings",
+        "data": {
+          "prompt": "Instructions",
+          "llm_hass_api": "Device control",
+          "model": "Model",
+          "effort": "Thinking effort",
+          "max_tokens": "Maximum reply length"
+        },
+        "data_description": {
+          "prompt": "How Claude should speak and behave. Templates are supported.",
+          "llm_hass_api": "Which devices and services Claude is allowed to control.",
+          "model": "Anthropic model ID.",
+          "effort": "Lower is faster and cheaper; higher thinks harder before answering.",
+          "max_tokens": "Upper bound on a single spoken reply."
+        }
+      }
+    }
+  }
+}

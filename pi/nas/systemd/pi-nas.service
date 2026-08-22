@@ -1,0 +1,42 @@
+[Unit]
+Description=pi-nas file server
+Documentation=https://github.com/montgomeryburke/Receipts/tree/main/pi
+After=network-online.target srv-nas.mount
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=pinas
+Group=pinas
+EnvironmentFile=/etc/pi-nas/config.env
+WorkingDirectory=/opt/pi-nas
+ExecStart=/opt/pi-nas/venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8765 \
+    --proxy-headers \
+    --timeout-keep-alive 60
+Restart=on-failure
+RestartSec=3
+
+# --- hardening -------------------------------------------------------------
+# The service only ever needs to read its config and read/write the share.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+ReadWritePaths=/srv/nas
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

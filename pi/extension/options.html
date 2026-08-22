@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pi NAS settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <h1>Pi NAS</h1>
+    <p class="lede">Connect this extension to the file server on your Raspberry Pi.</p>
+
+    <label for="base-url">NAS address</label>
+    <input id="base-url" type="url" placeholder="https://raspberrypi.tail1234.ts.net" spellcheck="false">
+    <p class="hint">Printed at the end of the installer. Starts with <code>https://</code>.</p>
+
+    <label for="token">Access token</label>
+    <input id="token" type="password" placeholder="pinas_…" spellcheck="false">
+    <p class="hint">
+      Shown once when the installer ran. Lost it? On the Pi run
+      <code>sudo pi-nas-token add my-laptop</code> for a new one.
+    </p>
+
+    <div class="actions">
+      <button id="save" class="primary">Connect and save</button>
+      <button id="forget">Forget</button>
+    </div>
+
+    <div id="status" class="status hidden" role="status"></div>
+
+    <section class="footnote">
+      <h2>This extension's ID</h2>
+      <p>
+        Paste this into <code>PI_NAS_ALLOWED_EXTENSION_IDS</code> in
+        <code>/etc/pi-nas/config.env</code> to allow only this extension to call
+        your server, then <code>sudo systemctl restart pi-nas</code>.
+      </p>
+      <code id="extension-id" class="block"></code>
+    </section>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

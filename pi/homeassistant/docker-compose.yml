@@ -1,0 +1,52 @@
+# Home Assistant plus a fully local voice pipeline.
+#
+# Speech recognition, speech synthesis, and wake-word detection all run on the
+# Pi. Only the conversation itself goes to Anthropic, so the microphone audio
+# never leaves the house.
+services:
+  homeassistant:
+    container_name: homeassistant
+    image: ghcr.io/home-assistant/home-assistant:stable
+    restart: unless-stopped
+    privileged: true
+    # Host networking so device discovery (Chromecast, HomeKit, mDNS) works;
+    # these protocols rely on broadcast traffic that bridge mode drops.
+    network_mode: host
+    volumes:
+      - ./config:/config
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro
+    environment:
+      - TZ=${TZ:-Etc/UTC}
+
+  whisper:
+    container_name: whisper
+    image: rhasspy/wyoming-whisper:latest
+    restart: unless-stopped
+    # tiny-int8 is the model that keeps up on a Pi. On a Pi 5 with 8 GB you can
+    # move to base-int8 for noticeably better accuracy.
+    command: --model ${WHISPER_MODEL:-tiny-int8} --language ${VOICE_LANGUAGE:-en} --beam-size 1
+    volumes:
+      - ./whisper-data:/data
+    ports:
+      - "10300:10300"
+
+  piper:
+    container_name: piper
+    image: rhasspy/wyoming-piper:latest
+    restart: unless-stopped
+    command: --voice ${PIPER_VOICE:-en_US-lessac-medium}
+    volumes:
+      - ./piper-data:/data
+    ports:
+      - "10200:10200"
+
+  openwakeword:
+    container_name: openwakeword
+    image: rhasspy/wyoming-openwakeword:latest
+    restart: unless-stopped
+    command: --preload-model ${WAKE_WORD:-ok_nabu}
+    volumes:
+      - ./wakeword-data:/data
+    ports:
+      - "10400:10400"

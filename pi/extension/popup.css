@@ -1,0 +1,198 @@
+/* Theme follows whatever the browser is set to, so the popup never flashes a
+   bright panel at someone browsing in the dark. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --hover: #f3f4f6;
+  --accent: #2563eb;
+  --danger: #dc2626;
+  --radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --fg: #f2f2f7;
+    --muted: #9ca3af;
+    --border: #333336;
+    --hover: #2c2c2e;
+    --accent: #4f8cf7;
+    --danger: #f87171;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 420px;
+  min-height: 320px;
+  max-height: 580px;
+  margin: 0;
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+.hidden { display: none !important; }
+.screen { display: flex; flex-direction: column; max-height: 580px; }
+
+/* ---------------------------------------------------------------- setup */
+.setup-inner { padding: 40px 24px; text-align: center; }
+.setup-inner h1 { font-size: 16px; margin: 0 0 8px; }
+.setup-inner p { color: var(--muted); margin: 0 0 20px; }
+
+/* --------------------------------------------------------------- header */
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+#breadcrumb {
+  flex: 1;
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 2px;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+#breadcrumb::-webkit-scrollbar { display: none; }
+
+#breadcrumb button {
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: 4px;
+}
+#breadcrumb button:hover { background: var(--hover); }
+#breadcrumb button:last-child { color: var(--fg); font-weight: 600; cursor: default; }
+#breadcrumb button:last-child:hover { background: none; }
+#breadcrumb .sep { color: var(--muted); padding: 2px 0; }
+
+/* -------------------------------------------------------------- toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.spacer { flex: 1; }
+.usage { color: var(--muted); font-size: 11px; }
+
+button {
+  font: inherit;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+button:hover { background: var(--hover); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { filter: brightness(1.08); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+.icon-button {
+  border: 0;
+  background: none;
+  font-size: 15px;
+  padding: 4px 6px;
+  line-height: 1;
+}
+
+/* -------------------------------------------------------------- listing */
+.listing {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 120px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.row:hover { background: var(--hover); }
+.row .glyph { width: 16px; text-align: center; flex-shrink: 0; }
+
+.row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.row.file .name { cursor: default; }
+.row .meta { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+
+.row .actions { display: flex; gap: 2px; opacity: 0; flex-shrink: 0; }
+.row:hover .actions, .row:focus-within .actions { opacity: 1; }
+.row .actions button { border: 0; background: none; padding: 3px 5px; font-size: 13px; }
+.row .actions .delete:hover { color: var(--danger); }
+
+/* --------------------------------------------------------- empty/message */
+.empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+.empty p { margin: 4px 0; }
+.empty .hint { font-size: 11px; }
+
+.message {
+  padding: 8px 12px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  border-bottom: 1px solid var(--border);
+}
+.message.info {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------ transfers */
+.transfers { border-top: 1px solid var(--border); padding: 6px 12px 10px; }
+.transfer { font-size: 11px; color: var(--muted); margin-top: 6px; }
+.transfer .bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 3px;
+}
+.transfer .bar > div { height: 100%; background: var(--accent); width: 0; transition: width 0.15s; }
+
+/* ----------------------------------------------------------- drop target */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+  border: 2px dashed var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: var(--accent);
+  z-index: 10;
+}

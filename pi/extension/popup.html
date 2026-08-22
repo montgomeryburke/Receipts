@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pi NAS</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="setup" class="screen hidden">
+    <div class="setup-inner">
+      <h1>Connect to your Pi</h1>
+      <p>Add your NAS address and access token to get started.</p>
+      <button id="open-options" class="primary">Open settings</button>
+    </div>
+  </div>
+
+  <div id="browser" class="screen hidden">
+    <header>
+      <nav id="breadcrumb" aria-label="Folder path"></nav>
+      <button id="refresh" class="icon-button" title="Refresh" aria-label="Refresh">⟳</button>
+    </header>
+
+    <div class="toolbar">
+      <button id="upload-button" class="primary">Upload</button>
+      <button id="new-folder">New folder</button>
+      <span class="spacer"></span>
+      <span id="usage" class="usage"></span>
+      <input type="file" id="file-input" multiple hidden>
+    </div>
+
+    <div id="message" class="message hidden" role="status"></div>
+
+    <ul id="listing" class="listing"></ul>
+
+    <div id="empty" class="empty hidden">
+      <p>This folder is empty.</p>
+      <p class="hint">Drop files here to upload.</p>
+    </div>
+
+    <div id="transfers" class="transfers hidden"></div>
+  </div>
+
+  <div id="drop-overlay" class="drop-overlay hidden"><span>Drop to upload</span></div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

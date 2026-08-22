@@ -1,0 +1,54 @@
+# Optional extras for the Claude voice assistant.
+#
+# Loaded automatically if configuration.yaml contains:
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# Everything here is convenience; the assistant works without it.
+
+script:
+  # Speak a phrase on a chosen speaker. Handy from automations:
+  #   action: script.say
+  #   data: {message: "The washing machine has finished", target: media_player.kitchen}
+  say:
+    alias: Say something out loud
+    fields:
+      message:
+        description: What to speak
+        example: Dinner is ready
+        required: true
+      target:
+        description: Media player entity to speak through
+        example: media_player.kitchen
+        required: true
+    sequence:
+      - action: tts.speak
+        target:
+          entity_id: tts.piper
+        data:
+          media_player_entity_id: "{{ target }}"
+          message: "{{ message }}"
+
+  # Ask Claude something from an automation and speak the answer back.
+  ask_claude:
+    alias: Ask Claude and speak the reply
+    fields:
+      question:
+        description: What to ask
+        example: Summarise today's weather in one sentence
+        required: true
+      target:
+        description: Media player entity to speak through
+        required: true
+    sequence:
+      - action: conversation.process
+        data:
+          agent_id: conversation.claude_assist
+          text: "{{ question }}"
+        response_variable: reply
+      - action: tts.speak
+        target:
+          entity_id: tts.piper
+        data:
+          media_player_entity_id: "{{ target }}"
+          message: "{{ reply.response.speech.plain.speech }}"

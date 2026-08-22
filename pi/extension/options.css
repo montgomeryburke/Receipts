@@ -1,0 +1,52 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280;
+  --border: #e5e7eb; --accent: #2563eb; --danger: #dc2626; --ok: #16a34a;
+  --hover: #f3f4f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e; --fg: #f2f2f7; --muted: #9ca3af;
+    --border: #333336; --accent: #4f8cf7; --danger: #f87171; --ok: #4ade80;
+    --hover: #2c2c2e;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 40px 20px;
+  font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg); color: var(--fg);
+}
+main { max-width: 520px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.lede { color: var(--muted); margin: 0 0 28px; }
+label { display: block; font-weight: 600; margin-bottom: 6px; }
+input {
+  width: 100%; padding: 9px 11px; font: inherit;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--fg);
+}
+input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.hint { color: var(--muted); font-size: 12px; margin: 6px 0 20px; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+code.block {
+  display: block; padding: 8px 10px; background: var(--hover);
+  border-radius: 6px; word-break: break-all;
+}
+.actions { display: flex; gap: 8px; margin-top: 4px; }
+button {
+  font: inherit; padding: 8px 14px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg); color: var(--fg); cursor: pointer;
+}
+button:hover { background: var(--hover); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { filter: brightness(1.08); }
+button:disabled { opacity: 0.55; cursor: default; }
+.status { margin-top: 18px; padding: 10px 12px; border-radius: 8px; font-size: 13px; }
+.status.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.status.error { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.status.busy { background: var(--hover); color: var(--muted); }
+.hidden { display: none; }
+.footnote { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border); }
+.footnote h2 { font-size: 13px; margin: 0 0 6px; }
+.footnote p { color: var(--muted); font-size: 12px; margin: 0 0 10px; }

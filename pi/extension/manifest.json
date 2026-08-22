@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Pi NAS",
+  "version": "1.0.0",
+  "description": "Private file access to the NAS on your Raspberry Pi. Browse, upload, and download files for your Claude projects.",
+  "permissions": ["storage", "downloads"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Pi NAS",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "128": "icons/icon-128.png"
+  }
+}

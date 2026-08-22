@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Mint, list, and revoke pi-nas access tokens.
+
+The token itself is printed once, at creation. Only its SHA-256 digest is
+stored, so a lost token cannot be recovered — mint a new one and revoke the old.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/opt/pi-nas")
+
+from app.auth import add_token, read_store, write_store  # noqa: E402
+
+DEFAULT_TOKENS = Path(os.environ.get("PI_NAS_TOKENS_FILE", "/etc/pi-nas/tokens.json"))
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    scopes = ["read"] if args.read_only else ["read", "write"]
+    token = add_token(args.file, args.name, scopes)
+    print()
+    print("  Token created. Copy it now — it is not stored and cannot be shown again.")
+    print()
+    print(f"    {token}")
+    print()
+    print(f"  name:   {args.name}")
+    print(f"  scopes: {', '.join(scopes)}")
+    print()
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    records = read_store(args.file)
+    if not records:
+        print("No tokens. Create one with:  sudo pi-nas-token add <name>")
+        return 0
+    print(f"{'ID':<10} {'NAME':<22} {'SCOPES':<14} CREATED")
+    for record in records:
+        created = record.get("created", 0)
+        stamp = dt.datetime.fromtimestamp(created).strftime("%Y-%m-%d %H:%M") if created else "-"
+        print(
+            f"{record.get('id', '?'):<10} {record.get('name', ''):<22} "
+            f"{','.join(record.get('scopes', [])):<14} {stamp}"
+        )
+    return 0
+
+
+def cmd_revoke(args: argparse.Namespace) -> int:
+    records = read_store(args.file)
+    remaining = [r for r in records if r.get("id") != args.id and r.get("name") != args.id]
+    if len(remaining) == len(records):
+        print(f"No token matching '{args.id}'.", file=sys.stderr)
+        return 1
+    write_store(args.file, remaining)
+    print(f"Revoked {len(records) - len(remaining)} token(s). Effective immediately.")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="pi-nas-token", description=__doc__)
+    parser.add_argument("--file", type=Path, default=DEFAULT_TOKENS, help="tokens.json path")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    add = sub.add_parser("add", help="create a new token")
+    add.add_argument("name", help="label, e.g. 'work-laptop'")
+    add.add_argument("--read-only", action="store_true", help="deny uploads and deletes")
+    add.set_defaults(func=cmd_add)
+
+    listing = sub.add_parser("list", help="list tokens")
+    listing.set_defaults(func=cmd_list)
+
+    revoke = sub.add_parser("revoke", help="revoke a token by id or name")
+    revoke.add_argument("id")
+    revoke.set_defaults(func=cmd_revoke)
+
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
