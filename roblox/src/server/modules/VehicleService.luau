@@ -159,7 +159,16 @@ local function buildChassis(
 	-- Line mode constrains one axis only, leaving gravity to do its job, so
 	-- ramps and jumps still behave.
 	drive.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
-	drive.RelativeTo = Enum.ActuatorRelativeTo.Attachment0
+	-- WORLD space, with the direction recomputed every frame from the
+	-- chassis, rather than a fixed direction in the attachment's frame.
+	--
+	-- Attachment-relative was reported driving the truck straight up: forward
+	-- launched it into the sky, reverse slammed it into the ground. Whatever
+	-- the attachment's orientation was actually doing, this removes the
+	-- question — the direction is computed, flattened, and inspectable, so
+	-- the drive axis is horizontal by construction and a car cannot be
+	-- driven vertically at all.
+	drive.RelativeTo = Enum.ActuatorRelativeTo.World
 	drive.LineDirection = Vector3.new(0, 0, -1)
 	drive.LineVelocity = 0
 	-- THE ONE THAT ACTUALLY MATTERS.
@@ -770,6 +779,13 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local throttle = if seat.Occupant then seat.Throttle else 0
 	local steer = if seat.Occupant then seat.Steer else 0
 
+	-- On a phone there is no W key, so the on-screen pedals send their value
+	-- here and it overrides the seat's own throttle when pressed.
+	local pedal = model:GetAttribute("Pedal")
+	if seat.Occupant and typeof(pedal) == "number" and math.abs(pedal) > 0.01 then
+		throttle = math.clamp(pedal, -1, 1)
+	end
+
 	-- Mud drags you down. We look at what is actually under the wheels
 	-- rather than trusting a flag.
 	local speedFactor = 1
@@ -779,6 +795,13 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local ground = workspace:Raycast(chassis.Position, Vector3.new(0, -14, 0), groundParams)
 	if ground and (ground.Instance.Name == "Mud" or ground.Material == Enum.Material.Mud) then
 		speedFactor = Config.MudSpeedFactor
+	end
+
+	-- Boost chevrons. Driving over one flings you forward, which is what
+	-- makes the jump beyond it worth hitting.
+	local boosted = false
+	if ground and ground.Instance:GetAttribute("Boost") then
+		boosted = true
 	end
 
 	-- Turbo, held by the driver.
@@ -803,6 +826,12 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local difference = target - current
 	local step = rate * deltaTime
 	current = if math.abs(difference) <= step then target else current + math.sign(difference) * step
+
+	-- A boost pad overrides the gradual wind-up entirely: you leave it fast.
+	if boosted and throttle >= 0 then
+		current = math.max(current, Config.Boost.Speed)
+	end
+
 	state.currentSpeed = current
 
 	-- An empty car rolls to a stop and then stops asking for anything.
@@ -813,8 +842,16 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		return
 	end
 
+	-- The drive axis: the chassis's forward, flattened onto the horizontal.
+	-- Flattening is what guarantees the car drives along the ground instead
+	-- of nosing into the sky when it tips on a ramp.
+	local look = chassis.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
+
 	drive.Enabled = true
 	turn.Enabled = true
+	drive.LineDirection = flat
 	drive.LineVelocity = current
 
 	-- Steering bites less the slower you are going, and reverses when you
@@ -917,6 +954,14 @@ function VehicleService.SetTurbo(player: Player, on: boolean)
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		humanoid.WalkSpeed = if on then Config.Turbo.SprintWalkSpeed else Config.Turbo.WalkSpeed
+	end
+end
+
+--[[ The on-screen gas and brake pedals, for players without a keyboard. ]]
+function VehicleService.SetPedal(player: Player, value: number)
+	local state = PlayerState.Get(player)
+	if state.vehicle and state.vehicle.Parent and state.seatRole == "Driver" then
+		state.vehicle:SetAttribute("Pedal", math.clamp(value, -1, 1))
 	end
 end
 

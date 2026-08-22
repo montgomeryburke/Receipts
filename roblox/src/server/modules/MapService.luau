@@ -307,6 +307,69 @@ end
 
 -- =================================================================== PIECES ==
 
+--[[
+	A barricade: a long, low wall you can crouch behind and shoot over, with
+	a sandbag look. Scattered thickly, because open ground is no fun on foot.
+]]
+local function barricade(origin: Vector3, heading: number, rng: Random, parent: Instance)
+	local length = rng:NextNumber(18, 34)
+	local height = rng:NextNumber(6, 9)
+	local facing = CFrame.Angles(0, heading, 0)
+
+	local wall = Util.Part({
+		Name = "Barricade",
+		Size = Vector3.new(length, height, 3.5),
+		CFrame = CFrame.new(origin + Vector3.new(0, height * 0.5, 0)) * facing,
+		Color = Color3.fromRGB(118, 106, 84),
+		Material = Enum.Material.Sandstone,
+		Parent = parent,
+	})
+	wall:SetAttribute("Destructible", true)
+
+	-- A stack of sandbags along the top, so it reads as cover rather than
+	-- a random slab.
+	for bag = 0, 2 do
+		local offset = -length * 0.3 + bag * (length * 0.3)
+		Util.Part({
+			Name = "Sandbag",
+			Size = Vector3.new(length * 0.28, 2.4, 4.4),
+			CFrame = CFrame.new(origin + Vector3.new(0, height + 1.2, 0)) * facing * CFrame.new(offset, 0, 0),
+			Color = Color3.fromRGB(132, 118, 92),
+			Material = Enum.Material.Sand,
+			Parent = parent,
+		})
+	end
+end
+
+--[[
+	Boost arrows: chevrons painted on the run-up to a jump. Drive over them
+	and the vehicle is flung forward, which is what turns a ramp into real
+	air rather than a gentle hop.
+]]
+local function boostArrows(origin: Vector3, direction: Vector3, parent: Instance)
+	local flat = Vector3.new(direction.X, 0, direction.Z)
+	flat = if flat.Magnitude < 0.01 then Vector3.new(0, 0, 1) else flat.Unit
+
+	for step = 1, 4 do
+		local centre = origin - flat * (step * 16)
+		-- Each chevron is two angled bars meeting at a point.
+		for _, side in { -1, 1 } do
+			local bar = Util.Part({
+				Name = "BoostPad",
+				Size = Vector3.new(3, 0.6, 14),
+				CFrame = CFrame.lookAt(centre + Vector3.new(0, 1.1, 0), centre + flat)
+					* CFrame.new(side * 4, 0, 0)
+					* CFrame.Angles(0, side * math.rad(28), 0),
+				Color = Color3.fromRGB(255, 190, 40),
+				Material = Enum.Material.Neon,
+				CanCollide = false,
+				Parent = parent,
+			})
+			bar:SetAttribute("Boost", true)
+		end
+	end
+end
+
 --[[ A stunt jump: launch ramp, a real gap, and a landing ramp to catch you. ]]
 local function stuntJump(origin: Vector3, direction: Vector3, scale: number, color: Color3, parent: Instance)
 	local flat = Vector3.new(direction.X, 0, direction.Z)
@@ -316,6 +379,9 @@ local function stuntJump(origin: Vector3, direction: Vector3, scale: number, col
 	local launchHeight = 16 * scale
 	local gap = 70 * scale
 	local width = 26
+
+	-- Chevrons on the run-up.
+	boostArrows(origin, flat, parent)
 
 	ramp(origin, origin + flat * launchLength + Vector3.new(0, launchHeight, 0), width, color, parent)
 
@@ -537,6 +603,17 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		cover(Util.RandomFlatPoint(half * 0.88, rng), rng, mapConfig.Theme, model)
 	end
 
+	-- Barricades, thickly. Somewhere to break line of sight is the difference
+	-- between a firefight and being shot from across an empty field.
+	for _ = 1, 70 do
+		barricade(
+			Util.RandomFlatPoint(half * 0.9, rng),
+			rng:NextNumber(0, math.pi * 2),
+			rng,
+			model
+		)
+	end
+
 	-- Team spawns at opposite ends, with real SpawnLocations on them.
 	local teamSpawns: { [number]: { Vector3 } } = { {}, {} }
 	for teamIndex = 1, 2 do
@@ -577,6 +654,19 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		local angle = (index / #pickupKinds) * math.pi * 2 + 0.4
 		table.insert(pickupPads, {
 			position = Vector3.new(math.cos(angle) * half * 0.3, 4, math.sin(angle) * half * 0.3),
+			kind = kind,
+		})
+	end
+
+	-- The hidden ones. These go INSIDE buildings rather than out on the pads,
+	-- so they are a reward for going in and looking rather than something you
+	-- trip over crossing the map.
+	local hiddenKinds = { "Health", "Invincibility", "DroneAmmo", "Health", "Invincibility", "DroneAmmo" }
+	for index, spot in placed do
+		local kind = hiddenKinds[((index - 1) % #hiddenKinds) + 1]
+		table.insert(pickupPads, {
+			-- Ground floor, tucked into a corner of the interior.
+			position = spot + Vector3.new(rng:NextNumber(-14, 14), 6, rng:NextNumber(-14, 14)),
 			kind = kind,
 		})
 	end

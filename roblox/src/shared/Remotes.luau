@@ -21,6 +21,7 @@ local EVENT_NAMES = {
 	"SetAimDirection",
 	"SetTurbo",
 	"Melee",
+	"SetPedal",
 
 	-- Server -> Client
 	"HudUpdate",

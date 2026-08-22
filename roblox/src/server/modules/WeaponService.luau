@@ -178,6 +178,10 @@ local function beginReload(player: Player, weaponName: string)
 	if slot.reloadingUntil > os.clock() or slot.ammo >= spec.MagSize then
 		return
 	end
+	-- Poop and drones do not reload. What you scavenged is what you have.
+	if spec.AmmoFromPickupsOnly then
+		return
+	end
 
 	slot.reloadingUntil = os.clock() + spec.ReloadTime
 	PlayerState.Changed.Fire(player)
@@ -427,6 +431,12 @@ function WeaponService.Start()
 
 	Remotes.Event("Melee").OnServerEvent:Connect(function(player)
 		handleMelee(player)
+	end)
+
+	Remotes.Event("SetPedal").OnServerEvent:Connect(function(player, value)
+		if typeof(value) == "number" then
+			VehicleService.SetPedal(player, value)
+		end
 	end)
 
 	-- The client asks once at join for the full gun list, so the weapon wheel

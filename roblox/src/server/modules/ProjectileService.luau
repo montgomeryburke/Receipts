@@ -19,6 +19,7 @@ local Debris = game:GetService("Debris")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
@@ -40,6 +41,8 @@ type Projectile = {
 	bornAt: number,
 	-- Grenades only.
 	fuseAt: number?,
+	-- Drones only: who it is chasing.
+	target: BasePart?,
 	stuck: boolean,
 	dead: boolean,
 	-- Everything this projectile is not allowed to hit (the shooter, their car).
@@ -123,6 +126,15 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 		local victim = Players:GetPlayerFromCharacter(character)
 		if victim and victim ~= projectile.owner then
 			DamageService.ApplyDamage(victim, spec.Damage, projectile.owner, spec.DisplayName)
+
+			-- Poop does barely any damage; the point is that they cannot see.
+			if spec.Splat then
+				Remotes.Event("PlayEffect"):FireClient(victim, {
+					effect = "Splat",
+					duration = Config.Wildlife.SplatDuration,
+				})
+				Remotes.Event("Notify"):FireClient(projectile.owner, "Direct hit. Disgusting.")
+			end
 			return
 		end
 	end
@@ -158,6 +170,22 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 		projectile.velocity += GRAVITY * deltaTime
 	end
 
+	-- A drone steers itself. It does not fall, and it does not give up.
+	if kind == "Homing" then
+		local target = projectile.target
+		if target and target.Parent then
+			local toTarget = target.Position - projectile.position
+			if toTarget.Magnitude > 0.1 then
+				local wanted = toTarget.Unit * projectile.velocity.Magnitude
+				-- Turn toward the target at a limited rate, so it arcs round
+				-- rather than snapping onto them instantly.
+				local turnRate = (spec.HomingTurnRate or 3) * deltaTime
+				projectile.velocity = (projectile.velocity + (wanted - projectile.velocity) * math.min(1, turnRate)).Unit
+					* projectile.velocity.Magnitude
+			end
+		end
+	end
+
 	local remainingTravel = projectile.velocity * deltaTime
 	local params = Util.RayParams(projectile.ignore)
 
@@ -177,7 +205,7 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 		local hitPoint = result.Position
 		applyDirectHit(projectile, result.Instance)
 
-		if kind == "Rocket" then
+		if kind == "Rocket" or kind == "Homing" then
 			detonate(projectile, hitPoint, 1)
 			retire(projectile)
 			return
@@ -274,6 +302,43 @@ function ProjectileService.Spawn(
 	local speed = spec.Speed or 300
 	local isDiamond = spec.CanMegaDetonate == true
 
+	--[[
+		A drone locks on at launch: the enemy nearest to where you aimed.
+		After that it is on its own — it will follow them round corners until
+		it catches them or its battery dies.
+	]]
+	local lockedTarget: BasePart? = nil
+	if spec.Kind == "Homing" then
+		local bestAngle = 50
+		for _, other in Players:GetPlayers() do
+			if other == owner then
+				continue
+			end
+			if other.Team and owner.Team and other.Team == owner.Team then
+				continue
+			end
+			local character = other.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
+				local toTarget = root.Position - origin
+				if toTarget.Magnitude <= spec.Range then
+					local angle = Util.AngleBetween(direction, toTarget)
+					if angle < bestAngle then
+						bestAngle = angle
+						lockedTarget = root
+					end
+				end
+			end
+		end
+
+		if lockedTarget then
+			Remotes.Event("Notify"):FireClient(owner, "Drone locked on.")
+		else
+			Remotes.Event("Notify"):FireClient(owner, "Drone launched — no lock.")
+		end
+	end
+
 	local projectile: Projectile = {
 		owner = owner,
 		weaponName = weaponName,
@@ -283,7 +348,11 @@ function ProjectileService.Spawn(
 		velocity = direction.Unit * speed,
 		piercesLeft = spec.Pierces or 0,
 		bornAt = os.clock(),
-		fuseAt = if spec.FuseTime then os.clock() + spec.FuseTime else nil,
+		fuseAt = if spec.Kind == "Homing"
+			then os.clock() + (spec.HomingLifetime or 12)
+			elseif spec.FuseTime and spec.FuseTime > 0 then os.clock() + spec.FuseTime
+			else nil,
+		target = lockedTarget,
 		stuck = false,
 		dead = false,
 		ignore = ignore,

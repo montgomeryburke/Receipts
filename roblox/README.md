@@ -27,6 +27,7 @@ need to touch anything else.
 | **Right mouse** | Zoom, on guns with a scope |
 | **R** | Reload |
 | **Q** | Melee — lethal from behind |
+| **7** | Poop and the hunter drone (both scavenged from the map) |
 | **Right click** | Step the scope up a magnification, then back to hipfire |
 | **F** | **MEGA-DETONATE** a diamond bullet that is still in the air — 10x blast |
 | **1 – 6** | Weapon slots. Press the same number again to cycle within a slot |
@@ -86,7 +87,8 @@ Four suites, all runnable from a terminal without Roblox Studio:
 | `run-maptest.py` | Do all ten maps generate, with ground and spawns? |
 | `run-servertest.py` | Does opening the place produce a world? Runs the published and unpublished cases. |
 | `run-clienttest.py` | Does input still get wired up when the server is dead? |
-| `run-drivetest.py` | Does a car actually move, reverse, boost and steer? |
+| `run-drivetest.py` | Does a car actually move, reverse, boost and steer — and stay on the ground? |
+| `run-shoottest.py` | Does pulling the trigger produce a shot? Also melee, elephants, poop and drones. |
 
 `run-drivetest.py` applies Roblox's documented constraint behaviour by hand and
 integrates it over time. It proves throttle reaches the drive constraint and

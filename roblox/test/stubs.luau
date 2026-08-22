@@ -179,6 +179,27 @@ Enum = setmetatable({}, {
 	end,
 })
 
+-- ------------------------------------------------------------------ typeof
+-- Roblox's `typeof` reports "Vector3", "CFrame", "Instance" and so on, and
+-- game code guards on exactly those strings. Plain Luau would call every one
+-- of these stand-ins a "table", so a guard like
+--     if typeof(direction) ~= "Vector3" then return end
+-- would reject perfectly good input and the test would quietly pass over a
+-- code path it never actually ran.
+__STUB_TYPEOF = true
+local rawTypeof = typeof
+local metatableNames = { [V3] = "Vector3", [CF] = "CFrame", [C3] = "Color3" }
+
+function typeof(value)
+	if type(value) == "table" then
+		local mt = getmetatable(value)
+		local named = mt and metatableNames[mt]
+		if named then return named end
+		if rawget(value, "_class") then return "Instance" end
+	end
+	return rawTypeof(value)
+end
+
 -- ----------------------------------------------------------------- Instance
 STATS = { created = 0, byClass = {}, parts = {} }
 
@@ -188,6 +209,18 @@ Inst.__index = function(self, k)
 	-- WaitForChild the way a real instance's own children would.
 	local props = rawget(self, "_props")
 	if props and props[k] ~= nil then return props[k] end
+
+	-- Position and Orientation are derived from CFrame on a real BasePart.
+	-- Without this, code as ordinary as `head.Position` reads nil and the
+	-- whole path silently bails — which is exactly how a working feature
+	-- can look broken in a test.
+	if k == "Position" and props and props.CFrame then
+		return props.CFrame.Position
+	end
+	if k == "CFrame" and props and props.Position then
+		return CFrame.new(props.Position)
+	end
+
 	return rawget(Inst, k)
 end
 Inst.__newindex = function(self, k, v)
@@ -239,6 +272,15 @@ function Inst:FindFirstChildOfClass(c)
 end
 function Inst:WaitForChild(n) return self:FindFirstChild(n) or newInstance("Folder") end
 function Inst:GetChildren() return self._children end
+function Inst:PivotTo(cf)
+	local primary = self._props.PrimaryPart
+	if primary then primary._props.CFrame = cf end
+	self._props.CFrame = cf
+end
+function Inst:GetPivot()
+	local primary = self._props.PrimaryPart
+	return (primary and primary._props.CFrame) or self._props.CFrame or CFrame.new()
+end
 function Inst:GetDescendants()
 	local out = {}
 	local function walk(node)

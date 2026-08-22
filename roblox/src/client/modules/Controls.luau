@@ -54,6 +54,10 @@ local defaultFov = 70
 local nextLocalFire = 0
 local lockedTarget: BasePart? = nil
 
+-- Defined further down, next to the rest of the look handling, but declared
+-- here so the per-frame loop above can reach it.
+local updateLook: () -> ()
+
 --[[
 	The gun that is actually in play right now.
 
@@ -182,7 +186,9 @@ local function currentAimDirection(): (Vector3?, Vector3?)
 	local rawDirection = camera.CFrame.LookVector
 	local spec = arsenal[effectiveWeaponName()]
 
-	if spec and spec.AutoAim then
+	-- Auto-aim is always on for touch players. Aiming precisely with a thumb
+	-- on glass is not a fair fight against a mouse.
+	if spec and (spec.AutoAim or UserInputService.TouchEnabled) then
 		local target = findAutoAimTarget(origin, rawDirection)
 		lockedTarget = target
 		if target then
@@ -304,7 +310,7 @@ local slotChoice: { [number]: string } = {}
 
 local function refreshWeaponBar()
 	local names: { [number]: string } = {}
-	for slot = 1, 6 do
+	for slot = 1, 7 do
 		local chosen = slotChoice[slot]
 		if not chosen then
 			local list = slotOrder[slot]
@@ -346,7 +352,14 @@ end
 -- ===================================================================== INPUT ==
 
 local function onInputBegan(input: InputObject, processed: boolean)
-	if processed then
+	-- Mouse buttons are handled even when Roblox says a GUI consumed the
+	-- click. The HUD covers a lot of the screen, and a click landing on a
+	-- label rather than the world is not a reason to refuse to shoot — which
+	-- is what "left click does nothing" turned out to be.
+	local isMouseButton = input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.MouseButton2
+
+	if processed and not isMouseButton then
 		return
 	end
 
@@ -389,6 +402,8 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		selectSlot(5)
 	elseif input.KeyCode == Enum.KeyCode.Six then
 		selectSlot(6)
+	elseif input.KeyCode == Enum.KeyCode.Seven then
+		selectSlot(7)
 	end
 end
 
@@ -412,6 +427,7 @@ local function onHeartbeat()
 	end
 
 	Hud.SetLocked(lockedTarget ~= nil)
+	updateLook()
 
 	-- If we are working a mounted gun, tell the server where to point it.
 	local character = player.Character
@@ -426,6 +442,65 @@ local function onHeartbeat()
 			Remotes.Event("SetAimDirection"):FireServer(origin + aim * 300)
 		end
 	end
+end
+
+-- ============================================================== LOOK & AIM ==
+
+--[[ While the vote panel is up the cursor has to be free to click it. ]]
+local mouseFree = false
+
+function Controls.SetMouseFree(free: boolean)
+	mouseFree = free
+end
+
+--[[
+	Pin the cursor to the middle of the screen and turn the character to face
+	wherever the camera is looking.
+
+	This is the "the person and the screen should look where the cursor is"
+	behaviour: aim is the centre of the screen, your body follows it, and
+	there is no loose cursor to drift over a HUD element and eat your clicks.
+]]
+function updateLook()
+	if UserInputService.TouchEnabled then
+		return
+	end
+
+	if mouseFree then
+		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			UserInputService.MouseIconEnabled = true
+		end
+		return
+	end
+
+	-- Roblox resets this, so it is re-asserted every frame.
+	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	UserInputService.MouseIconEnabled = false
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root or not root:IsA("BasePart") then
+		return
+	end
+	if humanoid.Health <= 0 then
+		return
+	end
+	-- In a vehicle the seat decides which way you face; do not fight it.
+	if humanoid.SeatPart then
+		humanoid.AutoRotate = true
+		return
+	end
+
+	humanoid.AutoRotate = false
+
+	local look = camera.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	if flat.Magnitude < 0.01 then
+		return
+	end
+	root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
 end
 
 -- ==================================================================== TOUCH ==
@@ -482,6 +557,35 @@ local function buildTouchButton()
 	mega.Activated:Connect(function()
 		Remotes.Event("MegaDetonate"):FireServer()
 	end)
+
+	--[[ Gas and brake, for players with no keyboard. ]]
+	local function pedal(text: string, colour: Color3, position: UDim2, value: number)
+		local button = Instance.new("TextButton")
+		button.Size = UDim2.fromOffset(96, 96)
+		button.Position = position
+		button.BackgroundColor3 = colour
+		button.BackgroundTransparency = 0.25
+		button.Text = text
+		button.TextColor3 = Color3.new(0, 0, 0)
+		button.TextSize = 18
+		button.Font = Enum.Font.GothamBold
+		button.Parent = gui
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(1, 0)
+		corner.Parent = button
+
+		button.MouseButton1Down:Connect(function()
+			Remotes.Event("SetPedal"):FireServer(value)
+		end)
+		button.MouseButton1Up:Connect(function()
+			Remotes.Event("SetPedal"):FireServer(0)
+		end)
+		return button
+	end
+
+	pedal("GAS", Color3.fromRGB(120, 220, 130), UDim2.new(0, 30, 1, -150), 1)
+	pedal("BRAKE", Color3.fromRGB(230, 120, 110), UDim2.new(0, 140, 1, -150), -1)
 
 	local turbo = Instance.new("TextButton")
 	turbo.Size = UDim2.fromOffset(90, 90)

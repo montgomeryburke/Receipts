@@ -23,6 +23,15 @@ function warn(...)
 end
 DUMP = function(...) realPrint(...) end
 
+-- VIRTUAL CLOCK.
+-- Simulated frames run in microseconds of real time, so anything waiting on
+-- os.clock() would never come due. Tests advance this by hand instead.
+local virtualNow = 1000
+local realOs = os
+-- `os` itself is frozen, so it is shadowed rather than modified.
+os = setmetatable({ clock = function() return virtualNow end }, { __index = realOs })
+ADVANCE = function(seconds) virtualNow += seconds end
+
 task = {
 	spawn = function(fn, ...)
 		-- Captured, not run: the match loop would never return.

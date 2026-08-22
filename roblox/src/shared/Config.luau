@@ -206,6 +206,32 @@ Config.Weapons = {
 		Color = Color3.fromRGB(170, 70, 50),
 	},
 
+	-- ------------------------------------------------------------- UTILITY
+	-- Both of these are found on the map rather than carried from spawn, and
+	-- neither reloads: what you pick up is what you have.
+	Poop = {
+		Slot = 7, Category = "Utility", DisplayName = "Elephant Poop",
+		Kind = "Arcing", Damage = 6, Cooldown = 0.55, Range = 220, Speed = 88,
+		MagSize = 6, ReloadTime = 0, Spread = 1.5,
+		FuseTime = 0,
+		-- Splatters across whoever it hits and blocks their view.
+		Splat = true,
+		AmmoFromPickupsOnly = true,
+		Color = Color3.fromRGB(92, 64, 38),
+	},
+	Drone = {
+		Slot = 7, Category = "Utility", DisplayName = "Hunter Drone",
+		Kind = "Homing", Damage = 0, Cooldown = 1.6, Range = 1000, Speed = 92,
+		MagSize = 2, ReloadTime = 0, Spread = 0,
+		BlastRadius = 28, BlastDamage = 95,
+		-- How hard it can turn while chasing, and how long its battery lasts.
+		HomingTurnRate = 3.4,
+		HomingLifetime = 14,
+		AmmoFromPickupsOnly = true,
+		AutoAim = true,
+		Color = Color3.fromRGB(120, 205, 255),
+	},
+
 	-- --------------------------------------------------- VEHICLE-MOUNTED
 	-- These are not carried on foot; they come attached to a vehicle seat.
 	FiftyCal = {
@@ -266,6 +292,39 @@ Config.Driving = {
 	Coast = 26,
 	-- Below this fraction of top speed, steering is reduced.
 	SteerGripSpeed = 0.35,
+}
+
+--[[
+	The elephant.
+
+	It wanders the map on its own, minds its own business, and leaves a great
+	deal of poop behind it. The poop is the point: walk over it to pick it up,
+	then throw it at people.
+]]
+Config.Wildlife = {
+	ElephantCount = 2,
+	ElephantSpeed = 15,
+	-- Seconds between droppings.
+	PoopInterval = 5,
+	-- How long a dropping sits there before it fades.
+	PoopLifetime = 90,
+	-- How many throws one pile is worth.
+	PoopPerPile = 2,
+	-- Never more than this many piles on the map at once.
+	MaxPoopPiles = 40,
+	-- Seconds the victim's screen stays covered.
+	SplatDuration = 4,
+}
+
+--[[
+	Boost arrows: chevrons painted on the approach to every jump. Drive over
+	them and you are flung up to this speed, which is what turns a ramp into
+	serious air.
+]]
+Config.Boost = {
+	Speed = 190,
+	-- Extra upward kick as you leave the lip.
+	Lift = 55,
 }
 
 --[[ The mega-detonation. Press F while a diamond bullet is still flying. ]]
@@ -389,6 +448,16 @@ Config.Pickups = {
 	Fries = { DisplayName = "Triple-Gun Fries", Duration = 15, Barrels = 3, SpreadDegrees = 7, Color = Color3.fromRGB(240, 200, 70) },
 	Shield = { DisplayName = "Shield Cell", Amount = 50, Color = Color3.fromRGB(90, 180, 240) },
 	Ammo = { DisplayName = "Ammo Crate", Color = Color3.fromRGB(140, 120, 70) },
+	-- Hidden ones. These are tucked inside buildings and behind cover rather
+	-- than sitting out on the open pads.
+	Health = { DisplayName = "Health Pack", Color = Color3.fromRGB(240, 90, 110) },
+	Invincibility = {
+		DisplayName = "Invincibility Shield",
+		Duration = 20,
+		Color = Color3.fromRGB(190, 140, 255),
+	},
+	PoopAmmo = { DisplayName = "Poop", Color = Color3.fromRGB(92, 64, 38) },
+	DroneAmmo = { DisplayName = "Hunter Drone", Color = Color3.fromRGB(120, 205, 255) },
 }
 
 -- ================================================================= EFFECTS ==
@@ -465,6 +534,10 @@ export type WeaponSpec = {
 	FuseTime: number?,
 	Sticky: boolean?,
 	MountedOnly: boolean?,
+	Splat: boolean?,
+	AmmoFromPickupsOnly: boolean?,
+	HomingTurnRate: number?,
+	HomingLifetime: number?,
 	VehicleDamageMultiplier: number?,
 	MoveSpeedFactor: number?,
 }
@@ -553,6 +626,12 @@ export type ConfigType = {
 		Acceleration: number, BrakeDeceleration: number,
 		Coast: number, SteerGripSpeed: number,
 	},
+	Wildlife: {
+		ElephantCount: number, ElephantSpeed: number,
+		PoopInterval: number, PoopLifetime: number, PoopPerPile: number,
+		MaxPoopPiles: number, SplatDuration: number,
+	},
+	Boost: { Speed: number, Lift: number },
 
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
@@ -568,6 +647,10 @@ export type ConfigType = {
 		Fries: { DisplayName: string, Duration: number, Barrels: number, SpreadDegrees: number, Color: Color3 },
 		Shield: { DisplayName: string, Amount: number, Color: Color3 },
 		Ammo: { DisplayName: string, Color: Color3 },
+		Health: { DisplayName: string, Color: Color3 },
+		Invincibility: { DisplayName: string, Duration: number, Color: Color3 },
+		PoopAmmo: { DisplayName: string, Color: Color3 },
+		DroneAmmo: { DisplayName: string, Color: Color3 },
 	},
 
 	Effects: {

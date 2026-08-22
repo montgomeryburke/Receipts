@@ -19,6 +19,7 @@ local PickupService = require(script.Parent:WaitForChild("PickupService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
+local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local EffectService = require(script.Parent:WaitForChild("EffectService"))
@@ -69,6 +70,9 @@ local function buildArena(spec: Config.MapSpec)
 		PickupService.Build(build.pickupPads)
 	end
 	MatchService.SpawnMapVehicles()
+
+	-- Elephants, and therefore poop.
+	WildlifeService.Populate(spec.Size)
 end
 
 --[[ Push the scoreboard and the clock to everybody's screen. ]]

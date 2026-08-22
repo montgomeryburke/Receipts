@@ -26,6 +26,7 @@ local shieldTrack: Frame
 local turboText: TextLabel
 local statusText: TextLabel
 local zoomText: TextLabel
+local scope: Frame
 local weaponBar: Frame
 local slotChips: { [number]: TextLabel } = {}
 local weaponLabel: TextLabel
@@ -248,6 +249,69 @@ function Hud.Build()
 		Visible = false,
 		ZIndex = 22,
 	})
+
+	-- The scope. Black surround, a round lens, crosshair and mil-dots — so
+	-- zooming in actually looks like looking down a sniper sight rather than
+	-- just narrowing the camera.
+	scope = makeFrame(screen, {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 1,
+		Visible = false,
+		ZIndex = 8,
+	})
+
+	-- Two heavy bars close the view down to a letterbox, and the ring sits
+	-- between them, which reads as a scope without needing any image assets.
+	for _, side in { -1, 1 } do
+		local bar = makeFrame(scope, {
+			Size = UDim2.new(0.5, -170, 1, 0),
+			Position = if side == -1 then UDim2.fromScale(0, 0) else UDim2.new(0.5, 170, 0, 0),
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BackgroundTransparency = 0.05,
+			ZIndex = 8,
+		})
+		bar.Name = "ScopeBlind"
+	end
+
+	local lens = makeFrame(scope, {
+		Size = UDim2.fromOffset(340, 340),
+		Position = UDim2.new(0.5, -170, 0.5, -170),
+		BackgroundTransparency = 1,
+		ZIndex = 9,
+	})
+	local lensCorner = Instance.new("UICorner")
+	lensCorner.CornerRadius = UDim.new(1, 0)
+	lensCorner.Parent = lens
+
+	local ring = Instance.new("UIStroke")
+	ring.Color = Color3.new(0, 0, 0)
+	ring.Thickness = 10
+	ring.Parent = lens
+
+	-- Crosshair.
+	for _, vertical in { true, false } do
+		local hair = makeFrame(lens, {
+			Size = if vertical then UDim2.new(0, 2, 1, 0) else UDim2.new(1, 0, 0, 2),
+			Position = if vertical then UDim2.new(0.5, -1, 0, 0) else UDim2.new(0, 0, 0.5, -1),
+			BackgroundColor3 = Color3.fromRGB(20, 24, 20),
+			BackgroundTransparency = 0.25,
+			ZIndex = 10,
+		})
+		hair.Name = "Hair"
+	end
+
+	-- Mil-dots down the vertical, for holding over at range.
+	for step = 1, 3 do
+		local dot = makeFrame(lens, {
+			Size = UDim2.fromOffset(6, 2),
+			Position = UDim2.new(0.5, -3, 0.5, step * 26),
+			BackgroundColor3 = Color3.fromRGB(20, 24, 20),
+			BackgroundTransparency = 0.25,
+			ZIndex = 10,
+		})
+		dot.Name = "MilDot"
+	end
 
 	-- Magnification, sitting just under the crosshair where your eye is.
 	zoomText = makeLabel(screen, {
@@ -552,12 +616,82 @@ function Hud.SetLoadout(names: { [number]: string }, activeSlot: number)
 	end
 end
 
---[[ Show the current magnification, or nothing when hipfiring. ]]
+--[[ Show the current magnification, and raise the scope with it. ]]
 function Hud.SetZoom(magnification: number)
 	if not zoomText then
 		return
 	end
 	zoomText.Text = if magnification > 0 then `{magnification}×` else ""
+	if scope then
+		scope.Visible = magnification > 0
+	end
+	if crosshair then
+		-- The scope has its own crosshair; two would be confusing.
+		crosshair.Visible = magnification <= 0
+	end
+end
+
+--[[
+	Poop, across the screen.
+
+	Blobs rather than a flat colour, so it reads as something thrown at you
+	and you can still just about see between them.
+]]
+function Hud.Splat(duration: number)
+	if not screen then
+		return
+	end
+
+	local splat = makeFrame(screen, {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.fromRGB(74, 52, 30),
+		BackgroundTransparency = 0.35,
+		ZIndex = 30,
+	})
+
+	local blobRng = Random.new()
+	for _ = 1, 16 do
+		local blob = makeFrame(splat, {
+			Size = UDim2.fromOffset(blobRng:NextInteger(70, 240), blobRng:NextInteger(70, 240)),
+			Position = UDim2.fromScale(blobRng:NextNumber(-0.05, 0.95), blobRng:NextNumber(-0.05, 0.9)),
+			BackgroundColor3 = Color3.fromRGB(
+				blobRng:NextInteger(56, 96),
+				blobRng:NextInteger(38, 66),
+				blobRng:NextInteger(20, 40)
+			),
+			BackgroundTransparency = blobRng:NextNumber(0, 0.2),
+			ZIndex = 31,
+		})
+		local blobCorner = Instance.new("UICorner")
+		blobCorner.CornerRadius = UDim.new(1, 0)
+		blobCorner.Parent = blob
+	end
+
+	local label = makeLabel(splat, {
+		Size = UDim2.new(1, 0, 0, 60),
+		Position = UDim2.new(0, 0, 0.5, -30),
+		Text = "SPLAT",
+		TextSize = 52,
+		Font = Enum.Font.LuckiestGuy,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(230, 200, 160),
+		ZIndex = 32,
+	})
+	local _ = label
+
+	task.delay(duration, function()
+		local fade = TweenService:Create(splat, TweenInfo.new(0.5), { BackgroundTransparency = 1 })
+		fade:Play()
+		for _, child in splat:GetChildren() do
+			if child:IsA("Frame") then
+				TweenService:Create(child, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
+			elseif child:IsA("TextLabel") then
+				TweenService:Create(child, TweenInfo.new(0.5), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+			end
+		end
+		fade.Completed:Wait()
+		splat:Destroy()
+	end)
 end
 
 --[[ Report control health on screen. Green when fine, red when not. ]]

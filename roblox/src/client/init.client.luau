@@ -108,9 +108,13 @@ Remotes.Event("MatchState").OnClientEvent:Connect(function(payload)
 		payload.scores or { 0, 0 },
 		payload.mapName or "—"
 	)
-	-- The ballot only belongs on screen while voting is actually open.
+	-- The ballot only belongs on screen while voting is actually open, and
+	-- the cursor has to come free to click it.
 	if payload.phase ~= "Voting" then
 		Hud.HideVote()
+		Controls.SetMouseFree(false)
+	else
+		Controls.SetMouseFree(true)
 	end
 end)
 
@@ -136,6 +140,8 @@ Remotes.Event("PlayEffect").OnClientEvent:Connect(function(payload)
 	end
 	if payload.effect == "Wiener" then
 		Hud.ShowWiener(payload.team or "NOBODY", payload.duration or 8)
+	elseif payload.effect == "Splat" then
+		Hud.Splat(payload.duration or 4)
 	end
 end)
 

@@ -37,6 +37,14 @@ local function colourFor(kind: string): Color3
 		return Config.Pickups.Fries.Color
 	elseif kind == "Shield" then
 		return Config.Pickups.Shield.Color
+	elseif kind == "Health" then
+		return Config.Pickups.Health.Color
+	elseif kind == "Invincibility" then
+		return Config.Pickups.Invincibility.Color
+	elseif kind == "PoopAmmo" then
+		return Config.Pickups.PoopAmmo.Color
+	elseif kind == "DroneAmmo" then
+		return Config.Pickups.DroneAmmo.Color
 	end
 	return Config.Pickups.Ammo.Color
 end
@@ -48,6 +56,14 @@ local function labelFor(kind: string): string
 		return Config.Pickups.Fries.DisplayName
 	elseif kind == "Shield" then
 		return Config.Pickups.Shield.DisplayName
+	elseif kind == "Health" then
+		return Config.Pickups.Health.DisplayName
+	elseif kind == "Invincibility" then
+		return Config.Pickups.Invincibility.DisplayName
+	elseif kind == "PoopAmmo" then
+		return Config.Pickups.PoopAmmo.DisplayName
+	elseif kind == "DroneAmmo" then
+		return Config.Pickups.DroneAmmo.DisplayName
 	end
 	return Config.Pickups.Ammo.DisplayName
 end
@@ -67,10 +83,33 @@ local function grant(player: Player, kind: string)
 	elseif kind == "Ammo" then
 		for name, slot in state.weapons do
 			local spec = Config.Weapons[name]
-			if spec then
+			-- Poop and drones are scavenged, not resupplied by a crate.
+			if spec and not spec.AmmoFromPickupsOnly then
 				slot.ammo = spec.MagSize
 				slot.reloadingUntil = 0
 			end
+		end
+	elseif kind == "Health" then
+		-- Straight back to full.
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.Health = humanoid.MaxHealth
+		end
+	elseif kind == "Invincibility" then
+		-- Twenty seconds of nothing being able to touch you.
+		state.burgerUntil = now + Config.Pickups.Invincibility.Duration
+	elseif kind == "PoopAmmo" then
+		local slot = state.weapons.Poop
+		local spec = Config.Weapons.Poop
+		if slot and spec then
+			slot.ammo = math.min(spec.MagSize, slot.ammo + 2)
+		end
+	elseif kind == "DroneAmmo" then
+		local slot = state.weapons.Drone
+		local spec = Config.Weapons.Drone
+		if slot and spec then
+			slot.ammo = math.min(spec.MagSize, slot.ammo + 1)
 		end
 	end
 

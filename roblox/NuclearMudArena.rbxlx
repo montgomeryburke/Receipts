@@ -246,6 +246,32 @@ Config.Weapons = {
 		Color = Color3.fromRGB(170, 70, 50),
 	},
 
+	-- ------------------------------------------------------------- UTILITY
+	-- Both of these are found on the map rather than carried from spawn, and
+	-- neither reloads: what you pick up is what you have.
+	Poop = {
+		Slot = 7, Category = "Utility", DisplayName = "Elephant Poop",
+		Kind = "Arcing", Damage = 6, Cooldown = 0.55, Range = 220, Speed = 88,
+		MagSize = 6, ReloadTime = 0, Spread = 1.5,
+		FuseTime = 0,
+		-- Splatters across whoever it hits and blocks their view.
+		Splat = true,
+		AmmoFromPickupsOnly = true,
+		Color = Color3.fromRGB(92, 64, 38),
+	},
+	Drone = {
+		Slot = 7, Category = "Utility", DisplayName = "Hunter Drone",
+		Kind = "Homing", Damage = 0, Cooldown = 1.6, Range = 1000, Speed = 92,
+		MagSize = 2, ReloadTime = 0, Spread = 0,
+		BlastRadius = 28, BlastDamage = 95,
+		-- How hard it can turn while chasing, and how long its battery lasts.
+		HomingTurnRate = 3.4,
+		HomingLifetime = 14,
+		AmmoFromPickupsOnly = true,
+		AutoAim = true,
+		Color = Color3.fromRGB(120, 205, 255),
+	},
+
 	-- --------------------------------------------------- VEHICLE-MOUNTED
 	-- These are not carried on foot; they come attached to a vehicle seat.
 	FiftyCal = {
@@ -306,6 +332,39 @@ Config.Driving = {
 	Coast = 26,
 	-- Below this fraction of top speed, steering is reduced.
 	SteerGripSpeed = 0.35,
+}
+
+--[[
+	The elephant.
+
+	It wanders the map on its own, minds its own business, and leaves a great
+	deal of poop behind it. The poop is the point: walk over it to pick it up,
+	then throw it at people.
+]]
+Config.Wildlife = {
+	ElephantCount = 2,
+	ElephantSpeed = 15,
+	-- Seconds between droppings.
+	PoopInterval = 5,
+	-- How long a dropping sits there before it fades.
+	PoopLifetime = 90,
+	-- How many throws one pile is worth.
+	PoopPerPile = 2,
+	-- Never more than this many piles on the map at once.
+	MaxPoopPiles = 40,
+	-- Seconds the victim's screen stays covered.
+	SplatDuration = 4,
+}
+
+--[[
+	Boost arrows: chevrons painted on the approach to every jump. Drive over
+	them and you are flung up to this speed, which is what turns a ramp into
+	serious air.
+]]
+Config.Boost = {
+	Speed = 190,
+	-- Extra upward kick as you leave the lip.
+	Lift = 55,
 }
 
 --[[ The mega-detonation. Press F while a diamond bullet is still flying. ]]
@@ -429,6 +488,16 @@ Config.Pickups = {
 	Fries = { DisplayName = "Triple-Gun Fries", Duration = 15, Barrels = 3, SpreadDegrees = 7, Color = Color3.fromRGB(240, 200, 70) },
 	Shield = { DisplayName = "Shield Cell", Amount = 50, Color = Color3.fromRGB(90, 180, 240) },
 	Ammo = { DisplayName = "Ammo Crate", Color = Color3.fromRGB(140, 120, 70) },
+	-- Hidden ones. These are tucked inside buildings and behind cover rather
+	-- than sitting out on the open pads.
+	Health = { DisplayName = "Health Pack", Color = Color3.fromRGB(240, 90, 110) },
+	Invincibility = {
+		DisplayName = "Invincibility Shield",
+		Duration = 20,
+		Color = Color3.fromRGB(190, 140, 255),
+	},
+	PoopAmmo = { DisplayName = "Poop", Color = Color3.fromRGB(92, 64, 38) },
+	DroneAmmo = { DisplayName = "Hunter Drone", Color = Color3.fromRGB(120, 205, 255) },
 }
 
 -- ================================================================= EFFECTS ==
@@ -505,6 +574,10 @@ export type WeaponSpec = {
 	FuseTime: number?,
 	Sticky: boolean?,
 	MountedOnly: boolean?,
+	Splat: boolean?,
+	AmmoFromPickupsOnly: boolean?,
+	HomingTurnRate: number?,
+	HomingLifetime: number?,
 	VehicleDamageMultiplier: number?,
 	MoveSpeedFactor: number?,
 }
@@ -593,6 +666,12 @@ export type ConfigType = {
 		Acceleration: number, BrakeDeceleration: number,
 		Coast: number, SteerGripSpeed: number,
 	},
+	Wildlife: {
+		ElephantCount: number, ElephantSpeed: number,
+		PoopInterval: number, PoopLifetime: number, PoopPerPile: number,
+		MaxPoopPiles: number, SplatDuration: number,
+	},
+	Boost: { Speed: number, Lift: number },
 
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
@@ -608,6 +687,10 @@ export type ConfigType = {
 		Fries: { DisplayName: string, Duration: number, Barrels: number, SpreadDegrees: number, Color: Color3 },
 		Shield: { DisplayName: string, Amount: number, Color: Color3 },
 		Ammo: { DisplayName: string, Color: Color3 },
+		Health: { DisplayName: string, Color: Color3 },
+		Invincibility: { DisplayName: string, Duration: number, Color: Color3 },
+		PoopAmmo: { DisplayName: string, Color: Color3 },
+		DroneAmmo: { DisplayName: string, Color: Color3 },
 	},
 
 	Effects: {
@@ -652,6 +735,7 @@ local EVENT_NAMES = {
 	"SetAimDirection",
 	"SetTurbo",
 	"Melee",
+	"SetPedal",
 
 	-- Server -> Client
 	"HudUpdate",
@@ -1916,6 +2000,69 @@ end
 
 -- =================================================================== PIECES ==
 
+--[[
+	A barricade: a long, low wall you can crouch behind and shoot over, with
+	a sandbag look. Scattered thickly, because open ground is no fun on foot.
+]]
+local function barricade(origin: Vector3, heading: number, rng: Random, parent: Instance)
+	local length = rng:NextNumber(18, 34)
+	local height = rng:NextNumber(6, 9)
+	local facing = CFrame.Angles(0, heading, 0)
+
+	local wall = Util.Part({
+		Name = "Barricade",
+		Size = Vector3.new(length, height, 3.5),
+		CFrame = CFrame.new(origin + Vector3.new(0, height * 0.5, 0)) * facing,
+		Color = Color3.fromRGB(118, 106, 84),
+		Material = Enum.Material.Sandstone,
+		Parent = parent,
+	})
+	wall:SetAttribute("Destructible", true)
+
+	-- A stack of sandbags along the top, so it reads as cover rather than
+	-- a random slab.
+	for bag = 0, 2 do
+		local offset = -length * 0.3 + bag * (length * 0.3)
+		Util.Part({
+			Name = "Sandbag",
+			Size = Vector3.new(length * 0.28, 2.4, 4.4),
+			CFrame = CFrame.new(origin + Vector3.new(0, height + 1.2, 0)) * facing * CFrame.new(offset, 0, 0),
+			Color = Color3.fromRGB(132, 118, 92),
+			Material = Enum.Material.Sand,
+			Parent = parent,
+		})
+	end
+end
+
+--[[
+	Boost arrows: chevrons painted on the run-up to a jump. Drive over them
+	and the vehicle is flung forward, which is what turns a ramp into real
+	air rather than a gentle hop.
+]]
+local function boostArrows(origin: Vector3, direction: Vector3, parent: Instance)
+	local flat = Vector3.new(direction.X, 0, direction.Z)
+	flat = if flat.Magnitude < 0.01 then Vector3.new(0, 0, 1) else flat.Unit
+
+	for step = 1, 4 do
+		local centre = origin - flat * (step * 16)
+		-- Each chevron is two angled bars meeting at a point.
+		for _, side in { -1, 1 } do
+			local bar = Util.Part({
+				Name = "BoostPad",
+				Size = Vector3.new(3, 0.6, 14),
+				CFrame = CFrame.lookAt(centre + Vector3.new(0, 1.1, 0), centre + flat)
+					* CFrame.new(side * 4, 0, 0)
+					* CFrame.Angles(0, side * math.rad(28), 0),
+				Color = Color3.fromRGB(255, 190, 40),
+				Material = Enum.Material.Neon,
+				CanCollide = false,
+				Parent = parent,
+			})
+			bar:SetAttribute("Boost", true)
+		end
+	end
+end
+
 --[[ A stunt jump: launch ramp, a real gap, and a landing ramp to catch you. ]]
 local function stuntJump(origin: Vector3, direction: Vector3, scale: number, color: Color3, parent: Instance)
 	local flat = Vector3.new(direction.X, 0, direction.Z)
@@ -1925,6 +2072,9 @@ local function stuntJump(origin: Vector3, direction: Vector3, scale: number, col
 	local launchHeight = 16 * scale
 	local gap = 70 * scale
 	local width = 26
+
+	-- Chevrons on the run-up.
+	boostArrows(origin, flat, parent)
 
 	ramp(origin, origin + flat * launchLength + Vector3.new(0, launchHeight, 0), width, color, parent)
 
@@ -2146,6 +2296,17 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		cover(Util.RandomFlatPoint(half * 0.88, rng), rng, mapConfig.Theme, model)
 	end
 
+	-- Barricades, thickly. Somewhere to break line of sight is the difference
+	-- between a firefight and being shot from across an empty field.
+	for _ = 1, 70 do
+		barricade(
+			Util.RandomFlatPoint(half * 0.9, rng),
+			rng:NextNumber(0, math.pi * 2),
+			rng,
+			model
+		)
+	end
+
 	-- Team spawns at opposite ends, with real SpawnLocations on them.
 	local teamSpawns: { [number]: { Vector3 } } = { {}, {} }
 	for teamIndex = 1, 2 do
@@ -2186,6 +2347,19 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		local angle = (index / #pickupKinds) * math.pi * 2 + 0.4
 		table.insert(pickupPads, {
 			position = Vector3.new(math.cos(angle) * half * 0.3, 4, math.sin(angle) * half * 0.3),
+			kind = kind,
+		})
+	end
+
+	-- The hidden ones. These go INSIDE buildings rather than out on the pads,
+	-- so they are a reward for going in and looking rather than something you
+	-- trip over crossing the map.
+	local hiddenKinds = { "Health", "Invincibility", "DroneAmmo", "Health", "Invincibility", "DroneAmmo" }
+	for index, spot in placed do
+		local kind = hiddenKinds[((index - 1) % #hiddenKinds) + 1]
+		table.insert(pickupPads, {
+			-- Ground floor, tucked into a corner of the interior.
+			position = spot + Vector3.new(rng:NextNumber(-14, 14), 6, rng:NextNumber(-14, 14)),
 			kind = kind,
 		})
 	end
@@ -2234,6 +2408,7 @@ local PickupService = require(script.Parent:WaitForChild("PickupService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
+local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local EffectService = require(script.Parent:WaitForChild("EffectService"))
@@ -2284,6 +2459,9 @@ local function buildArena(spec: Config.MapSpec)
 		PickupService.Build(build.pickupPads)
 	end
 	MatchService.SpawnMapVehicles()
+
+	-- Elephants, and therefore poop.
+	WildlifeService.Populate(spec.Size)
 end
 
 --[[ Push the scoreboard and the clock to everybody's screen. ]]
@@ -2813,6 +2991,14 @@ local function colourFor(kind: string): Color3
 		return Config.Pickups.Fries.Color
 	elseif kind == "Shield" then
 		return Config.Pickups.Shield.Color
+	elseif kind == "Health" then
+		return Config.Pickups.Health.Color
+	elseif kind == "Invincibility" then
+		return Config.Pickups.Invincibility.Color
+	elseif kind == "PoopAmmo" then
+		return Config.Pickups.PoopAmmo.Color
+	elseif kind == "DroneAmmo" then
+		return Config.Pickups.DroneAmmo.Color
 	end
 	return Config.Pickups.Ammo.Color
 end
@@ -2824,6 +3010,14 @@ local function labelFor(kind: string): string
 		return Config.Pickups.Fries.DisplayName
 	elseif kind == "Shield" then
 		return Config.Pickups.Shield.DisplayName
+	elseif kind == "Health" then
+		return Config.Pickups.Health.DisplayName
+	elseif kind == "Invincibility" then
+		return Config.Pickups.Invincibility.DisplayName
+	elseif kind == "PoopAmmo" then
+		return Config.Pickups.PoopAmmo.DisplayName
+	elseif kind == "DroneAmmo" then
+		return Config.Pickups.DroneAmmo.DisplayName
 	end
 	return Config.Pickups.Ammo.DisplayName
 end
@@ -2843,10 +3037,33 @@ local function grant(player: Player, kind: string)
 	elseif kind == "Ammo" then
 		for name, slot in state.weapons do
 			local spec = Config.Weapons[name]
-			if spec then
+			-- Poop and drones are scavenged, not resupplied by a crate.
+			if spec and not spec.AmmoFromPickupsOnly then
 				slot.ammo = spec.MagSize
 				slot.reloadingUntil = 0
 			end
+		end
+	elseif kind == "Health" then
+		-- Straight back to full.
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.Health = humanoid.MaxHealth
+		end
+	elseif kind == "Invincibility" then
+		-- Twenty seconds of nothing being able to touch you.
+		state.burgerUntil = now + Config.Pickups.Invincibility.Duration
+	elseif kind == "PoopAmmo" then
+		local slot = state.weapons.Poop
+		local spec = Config.Weapons.Poop
+		if slot and spec then
+			slot.ammo = math.min(spec.MagSize, slot.ammo + 2)
+		end
+	elseif kind == "DroneAmmo" then
+		local slot = state.weapons.Drone
+		local spec = Config.Weapons.Drone
+		if slot and spec then
+			slot.ammo = math.min(spec.MagSize, slot.ammo + 1)
 		end
 	end
 
@@ -3156,6 +3373,7 @@ local Debris = game:GetService("Debris")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
@@ -3177,6 +3395,8 @@ type Projectile = {
 	bornAt: number,
 	-- Grenades only.
 	fuseAt: number?,
+	-- Drones only: who it is chasing.
+	target: BasePart?,
 	stuck: boolean,
 	dead: boolean,
 	-- Everything this projectile is not allowed to hit (the shooter, their car).
@@ -3260,6 +3480,15 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 		local victim = Players:GetPlayerFromCharacter(character)
 		if victim and victim ~= projectile.owner then
 			DamageService.ApplyDamage(victim, spec.Damage, projectile.owner, spec.DisplayName)
+
+			-- Poop does barely any damage; the point is that they cannot see.
+			if spec.Splat then
+				Remotes.Event("PlayEffect"):FireClient(victim, {
+					effect = "Splat",
+					duration = Config.Wildlife.SplatDuration,
+				})
+				Remotes.Event("Notify"):FireClient(projectile.owner, "Direct hit. Disgusting.")
+			end
 			return
 		end
 	end
@@ -3295,6 +3524,22 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 		projectile.velocity += GRAVITY * deltaTime
 	end
 
+	-- A drone steers itself. It does not fall, and it does not give up.
+	if kind == "Homing" then
+		local target = projectile.target
+		if target and target.Parent then
+			local toTarget = target.Position - projectile.position
+			if toTarget.Magnitude > 0.1 then
+				local wanted = toTarget.Unit * projectile.velocity.Magnitude
+				-- Turn toward the target at a limited rate, so it arcs round
+				-- rather than snapping onto them instantly.
+				local turnRate = (spec.HomingTurnRate or 3) * deltaTime
+				projectile.velocity = (projectile.velocity + (wanted - projectile.velocity) * math.min(1, turnRate)).Unit
+					* projectile.velocity.Magnitude
+			end
+		end
+	end
+
 	local remainingTravel = projectile.velocity * deltaTime
 	local params = Util.RayParams(projectile.ignore)
 
@@ -3314,7 +3559,7 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 		local hitPoint = result.Position
 		applyDirectHit(projectile, result.Instance)
 
-		if kind == "Rocket" then
+		if kind == "Rocket" or kind == "Homing" then
 			detonate(projectile, hitPoint, 1)
 			retire(projectile)
 			return
@@ -3411,6 +3656,43 @@ function ProjectileService.Spawn(
 	local speed = spec.Speed or 300
 	local isDiamond = spec.CanMegaDetonate == true
 
+	--[[
+		A drone locks on at launch: the enemy nearest to where you aimed.
+		After that it is on its own — it will follow them round corners until
+		it catches them or its battery dies.
+	]]
+	local lockedTarget: BasePart? = nil
+	if spec.Kind == "Homing" then
+		local bestAngle = 50
+		for _, other in Players:GetPlayers() do
+			if other == owner then
+				continue
+			end
+			if other.Team and owner.Team and other.Team == owner.Team then
+				continue
+			end
+			local character = other.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
+				local toTarget = root.Position - origin
+				if toTarget.Magnitude <= spec.Range then
+					local angle = Util.AngleBetween(direction, toTarget)
+					if angle < bestAngle then
+						bestAngle = angle
+						lockedTarget = root
+					end
+				end
+			end
+		end
+
+		if lockedTarget then
+			Remotes.Event("Notify"):FireClient(owner, "Drone locked on.")
+		else
+			Remotes.Event("Notify"):FireClient(owner, "Drone launched — no lock.")
+		end
+	end
+
 	local projectile: Projectile = {
 		owner = owner,
 		weaponName = weaponName,
@@ -3420,7 +3702,11 @@ function ProjectileService.Spawn(
 		velocity = direction.Unit * speed,
 		piercesLeft = spec.Pierces or 0,
 		bornAt = os.clock(),
-		fuseAt = if spec.FuseTime then os.clock() + spec.FuseTime else nil,
+		fuseAt = if spec.Kind == "Homing"
+			then os.clock() + (spec.HomingLifetime or 12)
+			elseif spec.FuseTime and spec.FuseTime > 0 then os.clock() + spec.FuseTime
+			else nil,
+		target = lockedTarget,
 		stuck = false,
 		dead = false,
 		ignore = ignore,
@@ -3723,7 +4009,16 @@ local function buildChassis(
 	-- Line mode constrains one axis only, leaving gravity to do its job, so
 	-- ramps and jumps still behave.
 	drive.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
-	drive.RelativeTo = Enum.ActuatorRelativeTo.Attachment0
+	-- WORLD space, with the direction recomputed every frame from the
+	-- chassis, rather than a fixed direction in the attachment's frame.
+	--
+	-- Attachment-relative was reported driving the truck straight up: forward
+	-- launched it into the sky, reverse slammed it into the ground. Whatever
+	-- the attachment's orientation was actually doing, this removes the
+	-- question — the direction is computed, flattened, and inspectable, so
+	-- the drive axis is horizontal by construction and a car cannot be
+	-- driven vertically at all.
+	drive.RelativeTo = Enum.ActuatorRelativeTo.World
 	drive.LineDirection = Vector3.new(0, 0, -1)
 	drive.LineVelocity = 0
 	-- THE ONE THAT ACTUALLY MATTERS.
@@ -4334,6 +4629,13 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local throttle = if seat.Occupant then seat.Throttle else 0
 	local steer = if seat.Occupant then seat.Steer else 0
 
+	-- On a phone there is no W key, so the on-screen pedals send their value
+	-- here and it overrides the seat's own throttle when pressed.
+	local pedal = model:GetAttribute("Pedal")
+	if seat.Occupant and typeof(pedal) == "number" and math.abs(pedal) > 0.01 then
+		throttle = math.clamp(pedal, -1, 1)
+	end
+
 	-- Mud drags you down. We look at what is actually under the wheels
 	-- rather than trusting a flag.
 	local speedFactor = 1
@@ -4343,6 +4645,13 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local ground = workspace:Raycast(chassis.Position, Vector3.new(0, -14, 0), groundParams)
 	if ground and (ground.Instance.Name == "Mud" or ground.Material == Enum.Material.Mud) then
 		speedFactor = Config.MudSpeedFactor
+	end
+
+	-- Boost chevrons. Driving over one flings you forward, which is what
+	-- makes the jump beyond it worth hitting.
+	local boosted = false
+	if ground and ground.Instance:GetAttribute("Boost") then
+		boosted = true
 	end
 
 	-- Turbo, held by the driver.
@@ -4367,6 +4676,12 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local difference = target - current
 	local step = rate * deltaTime
 	current = if math.abs(difference) <= step then target else current + math.sign(difference) * step
+
+	-- A boost pad overrides the gradual wind-up entirely: you leave it fast.
+	if boosted and throttle >= 0 then
+		current = math.max(current, Config.Boost.Speed)
+	end
+
 	state.currentSpeed = current
 
 	-- An empty car rolls to a stop and then stops asking for anything.
@@ -4377,8 +4692,16 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		return
 	end
 
+	-- The drive axis: the chassis's forward, flattened onto the horizontal.
+	-- Flattening is what guarantees the car drives along the ground instead
+	-- of nosing into the sky when it tips on a ramp.
+	local look = chassis.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
+
 	drive.Enabled = true
 	turn.Enabled = true
+	drive.LineDirection = flat
 	drive.LineVelocity = current
 
 	-- Steering bites less the slower you are going, and reverses when you
@@ -4481,6 +4804,14 @@ function VehicleService.SetTurbo(player: Player, on: boolean)
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		humanoid.WalkSpeed = if on then Config.Turbo.SprintWalkSpeed else Config.Turbo.WalkSpeed
+	end
+end
+
+--[[ The on-screen gas and brake pedals, for players without a keyboard. ]]
+function VehicleService.SetPedal(player: Player, value: number)
+	local state = PlayerState.Get(player)
+	if state.vehicle and state.vehicle.Parent and state.seatRole == "Driver" then
+		state.vehicle:SetAttribute("Pedal", math.clamp(value, -1, 1))
 	end
 end
 
@@ -4790,6 +5121,10 @@ local function beginReload(player: Player, weaponName: string)
 	if slot.reloadingUntil > os.clock() or slot.ammo >= spec.MagSize then
 		return
 	end
+	-- Poop and drones do not reload. What you scavenged is what you have.
+	if spec.AmmoFromPickupsOnly then
+		return
+	end
 
 	slot.reloadingUntil = os.clock() + spec.ReloadTime
 	PlayerState.Changed.Fire(player)
@@ -5041,6 +5376,12 @@ function WeaponService.Start()
 		handleMelee(player)
 	end)
 
+	Remotes.Event("SetPedal").OnServerEvent:Connect(function(player, value)
+		if typeof(value) == "number" then
+			VehicleService.SetPedal(player, value)
+		end
+	end)
+
 	-- The client asks once at join for the full gun list, so the weapon wheel
 	-- can build itself without every gun being hard-coded twice.
 	Remotes.Function("GetArsenal").OnServerInvoke = function(_player)
@@ -5074,30 +5415,389 @@ return WeaponService
 ]]></string>
           </Properties>
         </Item>
+        <Item class="ModuleScript" referent="22">
+          <Properties>
+            <string name="Name">WildlifeService</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	WildlifeService — the elephant.
+
+	It walks the map on its own, minds its own business, and leaves a great
+	deal of poop behind it. The poop is the point: walk over a pile to pick it
+	up, then throw it at people.
+
+	The elephant is anchored and moved by script rather than being a physics
+	object. That is deliberate — a two-tonne ragdoll wandering into a firefight
+	would fling players across the map, and an anchored one cannot be shoved
+	into a wall and get stuck there.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Util = require(Shared:WaitForChild("Util"))
+
+local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+
+local WildlifeService = {}
+
+local LEG_HEIGHT = 11
+local BODY_HEIGHT = 12
+
+type Elephant = {
+	model: Model,
+	root: BasePart,
+	position: Vector3,
+	facing: Vector3,
+	target: Vector3,
+	nextPoopAt: number,
+}
+
+local elephants: { Elephant } = {}
+local poopPiles: { BasePart } = {}
+local wanderRadius = 300
+local rng = Random.new()
+
+-- ================================================================ BUILDING ==
+
+local function grey(shade: number): Color3
+	return Color3.fromRGB(120 + shade, 116 + shade, 112 + shade)
+end
+
+--[[ Assemble an elephant out of boxes. It reads as one from twenty studs. ]]
+local function buildElephant(position: Vector3): (Model, BasePart)
+	local model = Instance.new("Model")
+	model.Name = "Elephant"
+
+	local body = Util.Part({
+		Name = "Body",
+		Size = Vector3.new(14, BODY_HEIGHT, 26),
+		CFrame = CFrame.new(position + Vector3.new(0, LEG_HEIGHT + BODY_HEIGHT * 0.5, 0)),
+		Color = grey(0),
+		Material = Enum.Material.SmoothPlastic,
+		-- Players and bullets pass through: it is scenery with a schedule,
+		-- not an obstacle to get wedged against.
+		CanCollide = false,
+		Parent = model,
+	})
+	model.PrimaryPart = body
+
+	local head = Util.Part({
+		Name = "Head",
+		Size = Vector3.new(10, 10, 10),
+		CFrame = body.CFrame * CFrame.new(0, 2, -16),
+		Color = grey(8),
+		CanCollide = false,
+		Parent = model,
+	})
+	Util.Weld(body, head)
+
+	-- Trunk, in tapering segments so it hangs.
+	local previous = head
+	for segment = 1, 5 do
+		local thickness = 4.2 - segment * 0.5
+		local piece = Util.Part({
+			Name = "Trunk",
+			Size = Vector3.new(thickness, thickness, 4),
+			CFrame = head.CFrame * CFrame.new(0, -4 - segment * 2.2, -4 - segment * 0.9),
+			Color = grey(6),
+			CanCollide = false,
+			Parent = model,
+		})
+		Util.Weld(previous, piece)
+		previous = piece
+	end
+
+	-- Ears.
+	for _, side in { -1, 1 } do
+		local ear = Util.Part({
+			Name = "Ear",
+			Size = Vector3.new(1, 9, 9),
+			CFrame = head.CFrame * CFrame.new(side * 5.5, 1, 1),
+			Color = grey(14),
+			CanCollide = false,
+			Parent = model,
+		})
+		Util.Weld(head, ear)
+	end
+
+	-- Tusks.
+	for _, side in { -1, 1 } do
+		local tusk = Util.Part({
+			Name = "Tusk",
+			Size = Vector3.new(1.4, 1.4, 8),
+			CFrame = head.CFrame * CFrame.new(side * 3, -4, -5),
+			Color = Color3.fromRGB(240, 235, 215),
+			CanCollide = false,
+			Parent = model,
+		})
+		Util.Weld(head, tusk)
+	end
+
+	-- Legs.
+	for _, corner in {
+		Vector3.new(-5, 0, -9),
+		Vector3.new(5, 0, -9),
+		Vector3.new(-5, 0, 9),
+		Vector3.new(5, 0, 9),
+	} do
+		local leg = Util.Part({
+			Name = "Leg",
+			Size = Vector3.new(4.5, LEG_HEIGHT, 4.5),
+			CFrame = body.CFrame * CFrame.new(corner.X, -BODY_HEIGHT * 0.5 - LEG_HEIGHT * 0.5, corner.Z),
+			Color = grey(-6),
+			CanCollide = false,
+			Parent = model,
+		})
+		Util.Weld(body, leg)
+	end
+
+	local tail = Util.Part({
+		Name = "Tail",
+		Size = Vector3.new(1.2, 1.2, 7),
+		CFrame = body.CFrame * CFrame.new(0, 3, 15),
+		Color = grey(-4),
+		CanCollide = false,
+		Parent = model,
+	})
+	Util.Weld(body, tail)
+
+	model.Parent = workspace
+	return model, body
+end
+
+-- ==================================================================== POOP ==
+
+--[[ Give whoever walked into it something to throw. ]]
+local function collectPoop(player: Player, pile: BasePart)
+	local state = PlayerState.Get(player)
+	local slot = state.weapons.Poop
+	local spec = Config.Weapons.Poop
+	if not slot or not spec then
+		return
+	end
+
+	slot.ammo = math.min(spec.MagSize, slot.ammo + Config.Wildlife.PoopPerPile)
+	PlayerState.Changed.Fire(player)
+	Remotes.Event("Notify"):FireClient(player, `Picked up poop — press 7 to throw it`)
+
+	local index = table.find(poopPiles, pile)
+	if index then
+		table.remove(poopPiles, index)
+	end
+	pile:Destroy()
+end
+
+--[[ Drop a pile. Three lumps, so it reads as what it is. ]]
+local function dropPoop(position: Vector3)
+	-- Keep a lid on how much is lying around.
+	if #poopPiles >= Config.Wildlife.MaxPoopPiles then
+		local oldest = table.remove(poopPiles, 1)
+		if oldest and oldest.Parent then
+			oldest:Destroy()
+		end
+	end
+
+	local pile = Util.Part({
+		Name = "PoopPile",
+		Size = Vector3.new(4, 3, 4),
+		CFrame = CFrame.new(position + Vector3.new(0, 1.5, 0)),
+		Shape = Enum.PartType.Ball,
+		Color = Color3.fromRGB(92, 64, 38),
+		Material = Enum.Material.Sand,
+		CanCollide = false,
+		Parent = workspace,
+	})
+
+	for lump = 1, 2 do
+		local extra = Util.Part({
+			Name = "Lump",
+			Size = Vector3.new(3.2 - lump * 0.6, 2.4, 3.2 - lump * 0.6),
+			CFrame = pile.CFrame * CFrame.new(rng:NextNumber(-1.5, 1.5), lump * 1.3, rng:NextNumber(-1.5, 1.5)),
+			Shape = Enum.PartType.Ball,
+			Color = Color3.fromRGB(84, 58, 34),
+			Material = Enum.Material.Sand,
+			CanCollide = false,
+			Parent = pile,
+		})
+		Util.Weld(pile, extra)
+	end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromScale(6, 1.6)
+	billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 220
+	billboard.Parent = pile
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = "POOP"
+	label.TextColor3 = Color3.fromRGB(210, 180, 140)
+	label.TextStrokeTransparency = 0.3
+	label.TextScaled = true
+	label.Font = Enum.Font.LuckiestGuy
+	label.Parent = billboard
+
+	pile.Touched:Connect(function(hit)
+		if not pile.Parent then
+			return
+		end
+		local character = hit:FindFirstAncestorOfClass("Model")
+		local player = if character then Players:GetPlayerFromCharacter(character) else nil
+		if player then
+			collectPoop(player, pile)
+		end
+	end)
+
+	table.insert(poopPiles, pile)
+	Debris:AddItem(pile, Config.Wildlife.PoopLifetime)
+end
+
+-- ================================================================ WANDERING ==
+
+local function pickTarget(): Vector3
+	return Vector3.new(
+		rng:NextNumber(-wanderRadius, wanderRadius),
+		0,
+		rng:NextNumber(-wanderRadius, wanderRadius)
+	)
+end
+
+--[[ Walk one elephant a frame's worth, and drop poop when it is due. ]]
+local function stepElephant(elephant: Elephant, deltaTime: number)
+	if not elephant.model.Parent then
+		return
+	end
+
+	local toTarget = elephant.target - elephant.position
+	toTarget = Vector3.new(toTarget.X, 0, toTarget.Z)
+
+	if toTarget.Magnitude < 25 then
+		elephant.target = pickTarget()
+		return
+	end
+
+	local direction = toTarget.Unit
+	-- Ease the turn, so it swings round rather than pivoting on the spot.
+	elephant.facing = (elephant.facing + (direction - elephant.facing) * math.min(1, deltaTime * 2)).Unit
+	elephant.position += elephant.facing * Config.Wildlife.ElephantSpeed * deltaTime
+
+	-- Sit it on whatever the ground turns out to be.
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { elephant.model }
+	local ground = workspace:Raycast(
+		elephant.position + Vector3.new(0, 120, 0),
+		Vector3.new(0, -400, 0),
+		params
+	)
+	local groundY = if ground then ground.Position.Y else 0
+	elephant.position = Vector3.new(elephant.position.X, groundY, elephant.position.Z)
+
+	local stand = elephant.position + Vector3.new(0, LEG_HEIGHT + BODY_HEIGHT * 0.5, 0)
+	elephant.model:PivotTo(CFrame.lookAt(stand, stand + elephant.facing))
+
+	if os.clock() >= elephant.nextPoopAt then
+		elephant.nextPoopAt = os.clock() + Config.Wildlife.PoopInterval * rng:NextNumber(0.7, 1.4)
+		-- Out the back, where you would expect.
+		dropPoop(elephant.position - elephant.facing * 16)
+	end
+end
+
+local function step(deltaTime: number)
+	for index = #elephants, 1, -1 do
+		local elephant = elephants[index]
+		if not elephant.model.Parent then
+			table.remove(elephants, index)
+		else
+			stepElephant(elephant, deltaTime)
+		end
+	end
+end
+
+-- =================================================================== PUBLIC ==
+
+--[[ Put elephants on the current map. ]]
+function WildlifeService.Populate(mapSize: number)
+	WildlifeService.Clear()
+	wanderRadius = mapSize * 0.4
+
+	for _ = 1, Config.Wildlife.ElephantCount do
+		local start = pickTarget()
+		local model, root = buildElephant(start)
+		table.insert(elephants, {
+			model = model,
+			root = root,
+			position = start,
+			facing = Vector3.new(0, 0, 1),
+			target = pickTarget(),
+			nextPoopAt = os.clock() + rng:NextNumber(2, Config.Wildlife.PoopInterval),
+		})
+	end
+end
+
+function WildlifeService.Clear()
+	for _, elephant in elephants do
+		if elephant.model.Parent then
+			elephant.model:Destroy()
+		end
+	end
+	table.clear(elephants)
+
+	for _, pile in poopPiles do
+		if pile.Parent then
+			pile:Destroy()
+		end
+	end
+	table.clear(poopPiles)
+end
+
+--[[ How many elephants are currently walking about. Used by the tests. ]]
+function WildlifeService.Count(): number
+	return #elephants
+end
+
+function WildlifeService.PoopCount(): number
+	return #poopPiles
+end
+
+RunService.Heartbeat:Connect(step)
+
+return WildlifeService
+]]></string>
+          </Properties>
+        </Item>
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="22">
+  <Item class="SoundService" referent="23">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterGui" referent="23">
+  <Item class="StarterGui" referent="24">
     <Properties>
       <string name="Name">StarterGui</string>
       <bool name="ResetPlayerGuiOnSpawn">false</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="24">
+  <Item class="StarterPlayer" referent="25">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="25">
+    <Item class="StarterPlayerScripts" referent="26">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="26">
+      <Item class="LocalScript" referent="27">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
@@ -5210,9 +5910,13 @@ Remotes.Event("MatchState").OnClientEvent:Connect(function(payload)
 		payload.scores or { 0, 0 },
 		payload.mapName or "—"
 	)
-	-- The ballot only belongs on screen while voting is actually open.
+	-- The ballot only belongs on screen while voting is actually open, and
+	-- the cursor has to come free to click it.
 	if payload.phase ~= "Voting" then
 		Hud.HideVote()
+		Controls.SetMouseFree(false)
+	else
+		Controls.SetMouseFree(true)
 	end
 end)
 
@@ -5238,6 +5942,8 @@ Remotes.Event("PlayEffect").OnClientEvent:Connect(function(payload)
 	end
 	if payload.effect == "Wiener" then
 		Hud.ShowWiener(payload.team or "NOBODY", payload.duration or 8)
+	elseif payload.effect == "Splat" then
+		Hud.Splat(payload.duration or 4)
 	end
 end)
 
@@ -5266,11 +5972,11 @@ end)
 print("[Nuclear Mud Arena] Client ready. WASD drives, F mega-detonates.")
 ]]></string>
         </Properties>
-        <Item class="Folder" referent="27">
+        <Item class="Folder" referent="28">
           <Properties>
             <string name="Name">modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="28">
+          <Item class="ModuleScript" referent="29">
             <Properties>
               <string name="Name">Controls</string>
               <string name="Source"><![CDATA[--!strict
@@ -5328,6 +6034,10 @@ local zoomStage = 0
 local defaultFov = 70
 local nextLocalFire = 0
 local lockedTarget: BasePart? = nil
+
+-- Defined further down, next to the rest of the look handling, but declared
+-- here so the per-frame loop above can reach it.
+local updateLook: () -> ()
 
 --[[
 	The gun that is actually in play right now.
@@ -5457,7 +6167,9 @@ local function currentAimDirection(): (Vector3?, Vector3?)
 	local rawDirection = camera.CFrame.LookVector
 	local spec = arsenal[effectiveWeaponName()]
 
-	if spec and spec.AutoAim then
+	-- Auto-aim is always on for touch players. Aiming precisely with a thumb
+	-- on glass is not a fair fight against a mouse.
+	if spec and (spec.AutoAim or UserInputService.TouchEnabled) then
 		local target = findAutoAimTarget(origin, rawDirection)
 		lockedTarget = target
 		if target then
@@ -5579,7 +6291,7 @@ local slotChoice: { [number]: string } = {}
 
 local function refreshWeaponBar()
 	local names: { [number]: string } = {}
-	for slot = 1, 6 do
+	for slot = 1, 7 do
 		local chosen = slotChoice[slot]
 		if not chosen then
 			local list = slotOrder[slot]
@@ -5621,7 +6333,14 @@ end
 -- ===================================================================== INPUT ==
 
 local function onInputBegan(input: InputObject, processed: boolean)
-	if processed then
+	-- Mouse buttons are handled even when Roblox says a GUI consumed the
+	-- click. The HUD covers a lot of the screen, and a click landing on a
+	-- label rather than the world is not a reason to refuse to shoot — which
+	-- is what "left click does nothing" turned out to be.
+	local isMouseButton = input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.MouseButton2
+
+	if processed and not isMouseButton then
 		return
 	end
 
@@ -5664,6 +6383,8 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		selectSlot(5)
 	elseif input.KeyCode == Enum.KeyCode.Six then
 		selectSlot(6)
+	elseif input.KeyCode == Enum.KeyCode.Seven then
+		selectSlot(7)
 	end
 end
 
@@ -5687,6 +6408,7 @@ local function onHeartbeat()
 	end
 
 	Hud.SetLocked(lockedTarget ~= nil)
+	updateLook()
 
 	-- If we are working a mounted gun, tell the server where to point it.
 	local character = player.Character
@@ -5701,6 +6423,65 @@ local function onHeartbeat()
 			Remotes.Event("SetAimDirection"):FireServer(origin + aim * 300)
 		end
 	end
+end
+
+-- ============================================================== LOOK & AIM ==
+
+--[[ While the vote panel is up the cursor has to be free to click it. ]]
+local mouseFree = false
+
+function Controls.SetMouseFree(free: boolean)
+	mouseFree = free
+end
+
+--[[
+	Pin the cursor to the middle of the screen and turn the character to face
+	wherever the camera is looking.
+
+	This is the "the person and the screen should look where the cursor is"
+	behaviour: aim is the centre of the screen, your body follows it, and
+	there is no loose cursor to drift over a HUD element and eat your clicks.
+]]
+function updateLook()
+	if UserInputService.TouchEnabled then
+		return
+	end
+
+	if mouseFree then
+		if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			UserInputService.MouseIconEnabled = true
+		end
+		return
+	end
+
+	-- Roblox resets this, so it is re-asserted every frame.
+	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	UserInputService.MouseIconEnabled = false
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root or not root:IsA("BasePart") then
+		return
+	end
+	if humanoid.Health <= 0 then
+		return
+	end
+	-- In a vehicle the seat decides which way you face; do not fight it.
+	if humanoid.SeatPart then
+		humanoid.AutoRotate = true
+		return
+	end
+
+	humanoid.AutoRotate = false
+
+	local look = camera.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	if flat.Magnitude < 0.01 then
+		return
+	end
+	root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
 end
 
 -- ==================================================================== TOUCH ==
@@ -5757,6 +6538,35 @@ local function buildTouchButton()
 	mega.Activated:Connect(function()
 		Remotes.Event("MegaDetonate"):FireServer()
 	end)
+
+	--[[ Gas and brake, for players with no keyboard. ]]
+	local function pedal(text: string, colour: Color3, position: UDim2, value: number)
+		local button = Instance.new("TextButton")
+		button.Size = UDim2.fromOffset(96, 96)
+		button.Position = position
+		button.BackgroundColor3 = colour
+		button.BackgroundTransparency = 0.25
+		button.Text = text
+		button.TextColor3 = Color3.new(0, 0, 0)
+		button.TextSize = 18
+		button.Font = Enum.Font.GothamBold
+		button.Parent = gui
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(1, 0)
+		corner.Parent = button
+
+		button.MouseButton1Down:Connect(function()
+			Remotes.Event("SetPedal"):FireServer(value)
+		end)
+		button.MouseButton1Up:Connect(function()
+			Remotes.Event("SetPedal"):FireServer(0)
+		end)
+		return button
+	end
+
+	pedal("GAS", Color3.fromRGB(120, 220, 130), UDim2.new(0, 30, 1, -150), 1)
+	pedal("BRAKE", Color3.fromRGB(230, 120, 110), UDim2.new(0, 140, 1, -150), -1)
 
 	local turbo = Instance.new("TextButton")
 	turbo.Size = UDim2.fromOffset(90, 90)
@@ -5841,7 +6651,7 @@ return Controls
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="29">
+          <Item class="ModuleScript" referent="30">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--!strict
@@ -5872,6 +6682,7 @@ local shieldTrack: Frame
 local turboText: TextLabel
 local statusText: TextLabel
 local zoomText: TextLabel
+local scope: Frame
 local weaponBar: Frame
 local slotChips: { [number]: TextLabel } = {}
 local weaponLabel: TextLabel
@@ -6094,6 +6905,69 @@ function Hud.Build()
 		Visible = false,
 		ZIndex = 22,
 	})
+
+	-- The scope. Black surround, a round lens, crosshair and mil-dots — so
+	-- zooming in actually looks like looking down a sniper sight rather than
+	-- just narrowing the camera.
+	scope = makeFrame(screen, {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 1,
+		Visible = false,
+		ZIndex = 8,
+	})
+
+	-- Two heavy bars close the view down to a letterbox, and the ring sits
+	-- between them, which reads as a scope without needing any image assets.
+	for _, side in { -1, 1 } do
+		local bar = makeFrame(scope, {
+			Size = UDim2.new(0.5, -170, 1, 0),
+			Position = if side == -1 then UDim2.fromScale(0, 0) else UDim2.new(0.5, 170, 0, 0),
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BackgroundTransparency = 0.05,
+			ZIndex = 8,
+		})
+		bar.Name = "ScopeBlind"
+	end
+
+	local lens = makeFrame(scope, {
+		Size = UDim2.fromOffset(340, 340),
+		Position = UDim2.new(0.5, -170, 0.5, -170),
+		BackgroundTransparency = 1,
+		ZIndex = 9,
+	})
+	local lensCorner = Instance.new("UICorner")
+	lensCorner.CornerRadius = UDim.new(1, 0)
+	lensCorner.Parent = lens
+
+	local ring = Instance.new("UIStroke")
+	ring.Color = Color3.new(0, 0, 0)
+	ring.Thickness = 10
+	ring.Parent = lens
+
+	-- Crosshair.
+	for _, vertical in { true, false } do
+		local hair = makeFrame(lens, {
+			Size = if vertical then UDim2.new(0, 2, 1, 0) else UDim2.new(1, 0, 0, 2),
+			Position = if vertical then UDim2.new(0.5, -1, 0, 0) else UDim2.new(0, 0, 0.5, -1),
+			BackgroundColor3 = Color3.fromRGB(20, 24, 20),
+			BackgroundTransparency = 0.25,
+			ZIndex = 10,
+		})
+		hair.Name = "Hair"
+	end
+
+	-- Mil-dots down the vertical, for holding over at range.
+	for step = 1, 3 do
+		local dot = makeFrame(lens, {
+			Size = UDim2.fromOffset(6, 2),
+			Position = UDim2.new(0.5, -3, 0.5, step * 26),
+			BackgroundColor3 = Color3.fromRGB(20, 24, 20),
+			BackgroundTransparency = 0.25,
+			ZIndex = 10,
+		})
+		dot.Name = "MilDot"
+	end
 
 	-- Magnification, sitting just under the crosshair where your eye is.
 	zoomText = makeLabel(screen, {
@@ -6398,12 +7272,82 @@ function Hud.SetLoadout(names: { [number]: string }, activeSlot: number)
 	end
 end
 
---[[ Show the current magnification, or nothing when hipfiring. ]]
+--[[ Show the current magnification, and raise the scope with it. ]]
 function Hud.SetZoom(magnification: number)
 	if not zoomText then
 		return
 	end
 	zoomText.Text = if magnification > 0 then `{magnification}×` else ""
+	if scope then
+		scope.Visible = magnification > 0
+	end
+	if crosshair then
+		-- The scope has its own crosshair; two would be confusing.
+		crosshair.Visible = magnification <= 0
+	end
+end
+
+--[[
+	Poop, across the screen.
+
+	Blobs rather than a flat colour, so it reads as something thrown at you
+	and you can still just about see between them.
+]]
+function Hud.Splat(duration: number)
+	if not screen then
+		return
+	end
+
+	local splat = makeFrame(screen, {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.fromRGB(74, 52, 30),
+		BackgroundTransparency = 0.35,
+		ZIndex = 30,
+	})
+
+	local blobRng = Random.new()
+	for _ = 1, 16 do
+		local blob = makeFrame(splat, {
+			Size = UDim2.fromOffset(blobRng:NextInteger(70, 240), blobRng:NextInteger(70, 240)),
+			Position = UDim2.fromScale(blobRng:NextNumber(-0.05, 0.95), blobRng:NextNumber(-0.05, 0.9)),
+			BackgroundColor3 = Color3.fromRGB(
+				blobRng:NextInteger(56, 96),
+				blobRng:NextInteger(38, 66),
+				blobRng:NextInteger(20, 40)
+			),
+			BackgroundTransparency = blobRng:NextNumber(0, 0.2),
+			ZIndex = 31,
+		})
+		local blobCorner = Instance.new("UICorner")
+		blobCorner.CornerRadius = UDim.new(1, 0)
+		blobCorner.Parent = blob
+	end
+
+	local label = makeLabel(splat, {
+		Size = UDim2.new(1, 0, 0, 60),
+		Position = UDim2.new(0, 0, 0.5, -30),
+		Text = "SPLAT",
+		TextSize = 52,
+		Font = Enum.Font.LuckiestGuy,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(230, 200, 160),
+		ZIndex = 32,
+	})
+	local _ = label
+
+	task.delay(duration, function()
+		local fade = TweenService:Create(splat, TweenInfo.new(0.5), { BackgroundTransparency = 1 })
+		fade:Play()
+		for _, child in splat:GetChildren() do
+			if child:IsA("Frame") then
+				TweenService:Create(child, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
+			elseif child:IsA("TextLabel") then
+				TweenService:Create(child, TweenInfo.new(0.5), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+			end
+		end
+		fade.Completed:Wait()
+		splat:Destroy()
+	end)
 end
 
 --[[ Report control health on screen. Green when fine, red when not. ]]
@@ -6439,7 +7383,7 @@ return Hud
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="30">
+  <Item class="Workspace" referent="31">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

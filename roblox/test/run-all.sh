@@ -3,7 +3,7 @@
 cd "$(dirname "$0")/.." || exit 1
 LUAU="${LUAU:-luau}"
 fail=0
-for suite in maptest servertest clienttest drivetest; do
+for suite in maptest servertest clienttest drivetest shoottest; do
   echo "=============== $suite ==============="
   python3 "test/run-$suite.py" > "/tmp/$suite.luau" || { echo "assembly failed"; fail=1; continue; }
   "$LUAU" "/tmp/$suite.luau" || fail=1

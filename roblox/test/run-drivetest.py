@@ -115,8 +115,12 @@ local function simulate(model, dt)
 
 	if drive and drive._props.Enabled and forceAvailable(drive) > 0 then
 		local speed = drive._props.LineVelocity or 0
-		local localDir = drive._props.LineDirection or Vector3.new(0, 0, -1)
-		local worldDir = cf:VectorToWorld(localDir)
+		local dir = drive._props.LineDirection or Vector3.new(0, 0, -1)
+		-- RelativeTo decides whose frame that direction is in.
+		local relative = drive._props.RelativeTo
+		local worldDir = if relative and relative.Name == "World"
+			then dir
+			else cf:VectorToWorld(dir)
 		cf = CFrame.new(cf.Position + worldDir * speed * dt) * cf.Rotation
 	end
 
@@ -164,8 +168,17 @@ local function runCar(throttle, steer, turbo, seconds)
 end
 
 DUMP("Driving a car forward for 2 seconds at full throttle:")
-local distance = runCar(1, 0, false, 2)
+local distance, endCF = runCar(1, 0, false, 2)
 check("car moves forward", distance > 20, string.format("travelled %.0f studs", distance))
+
+-- The reported bug: forward launched the truck into the sky and reverse
+-- drove it into the ground. Motion must be HORIZONTAL.
+local rise = math.abs(endCF.Position.Y - 5)
+check("car does not fly upward", rise < 2, string.format("vertical drift %.2f studs", rise))
+
+local horizontal = (endCF.Position - Vector3.new(0, endCF.Position.Y, 0)).Magnitude
+check("motion is along the ground", horizontal > rise * 10,
+	string.format("%.0f studs across vs %.2f up", horizontal, rise))
 
 DUMP("")
 DUMP("An empty car, same 2 seconds:")
@@ -174,8 +187,10 @@ check("empty car stays put", idle < 0.5, string.format("moved %.2f studs", idle)
 
 DUMP("")
 DUMP("Reverse:")
-local back = runCar(-1, 0, false, 2)
+local back, backCF = runCar(-1, 0, false, 2)
 check("reverse moves the car", back > 20, string.format("travelled %.0f studs", back))
+local backRise = math.abs(backCF.Position.Y - 5)
+check("reverse does not dive", backRise < 2, string.format("vertical drift %.2f studs", backRise))
 
 DUMP("")
 DUMP("Turbo:")
