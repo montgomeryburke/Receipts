@@ -299,6 +299,13 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
+	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+		-- Same key whether you are driving or on foot: go faster.
+		Remotes.Event("SetTurbo"):FireServer(true)
+		Hud.SetTurbo(true)
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.R then
 		Remotes.Event("Reload"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F then
@@ -326,6 +333,9 @@ local function onInputEnded(input: InputObject)
 		firing = false
 	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
 		setZoom(false)
+	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+		Remotes.Event("SetTurbo"):FireServer(false)
+		Hud.SetTurbo(false)
 	end
 end
 
@@ -407,6 +417,30 @@ local function buildTouchButton()
 
 	mega.Activated:Connect(function()
 		Remotes.Event("MegaDetonate"):FireServer()
+	end)
+
+	local turbo = Instance.new("TextButton")
+	turbo.Size = UDim2.fromOffset(90, 90)
+	turbo.Position = UDim2.new(1, -150, 1, -290)
+	turbo.BackgroundColor3 = Color3.fromRGB(255, 200, 80)
+	turbo.BackgroundTransparency = 0.25
+	turbo.Text = "TURBO"
+	turbo.TextColor3 = Color3.new(0, 0, 0)
+	turbo.TextSize = 18
+	turbo.Font = Enum.Font.GothamBold
+	turbo.Parent = gui
+
+	local turboCorner = Instance.new("UICorner")
+	turboCorner.CornerRadius = UDim.new(1, 0)
+	turboCorner.Parent = turbo
+
+	turbo.MouseButton1Down:Connect(function()
+		Remotes.Event("SetTurbo"):FireServer(true)
+		Hud.SetTurbo(true)
+	end)
+	turbo.MouseButton1Up:Connect(function()
+		Remotes.Event("SetTurbo"):FireServer(false)
+		Hud.SetTurbo(false)
 	end)
 end
 

@@ -19,6 +19,7 @@ local EVENT_NAMES = {
 	"RequestVehicle",
 	"CastVote",
 	"SetAimDirection",
+	"SetTurbo",
 
 	-- Server -> Client
 	"HudUpdate",

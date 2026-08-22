@@ -550,10 +550,15 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		end
 	end
 
+	-- One tank, one plane, one torpedo and two turret trucks, always. They
+	-- respawn on these same pads a while after they are wrecked.
 	local vehiclePads = {}
-	for index, kind in { "TurretTruck", "Tank", "Plane", "Torpedo", "TurretTruck", "Plane" } do
-		local angle = (index / 6) * math.pi * 2
-		local position = Vector3.new(math.cos(angle) * half * 0.55, 4, math.sin(angle) * half * 0.55)
+	local bigVehicles = { "Tank", "Plane", "Torpedo", "TurretTruck", "TurretTruck" }
+	for index, kind in bigVehicles do
+		local angle = (index / #bigVehicles) * math.pi * 2
+		-- Pulled in towards the middle so they are a short drive apart rather
+		-- than a long walk.
+		local position = Vector3.new(math.cos(angle) * half * 0.38, 4, math.sin(angle) * half * 0.38)
 		table.insert(vehiclePads, { position = position, kind = kind })
 
 		Util.Part({

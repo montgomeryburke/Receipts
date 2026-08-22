@@ -20,8 +20,10 @@ local Hud = {}
 
 local screen: ScreenGui
 local healthFill: Frame
+local healthText: TextLabel
 local shieldFill: Frame
 local shieldTrack: Frame
+local turboText: TextLabel
 local weaponLabel: TextLabel
 local ammoLabel: TextLabel
 local statsLabel: TextLabel
@@ -119,6 +121,25 @@ function Hud.Build()
 		Text = "HEALTH",
 		TextSize = 13,
 		TextColor3 = Color3.fromRGB(170, 180, 190),
+	})
+
+	-- The number, sitting right on the bar so it is readable at a glance and
+	-- never leaves the screen.
+	healthText = makeLabel(screen, {
+		Size = UDim2.fromOffset(280, 18),
+		Position = UDim2.new(0, 24, 1, -78),
+		Text = "100%",
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 3,
+	})
+
+	turboText = makeLabel(screen, {
+		Size = UDim2.fromOffset(280, 18),
+		Position = UDim2.new(0, 24, 1, -116),
+		Text = "",
+		TextSize = 14,
+		TextColor3 = Color3.fromRGB(255, 210, 100),
 	})
 	local _healthTrack, healthBarFill = makeBar(screen, UDim2.new(0, 24, 1, -78), Color3.fromRGB(230, 70, 60))
 	healthFill = healthBarFill
@@ -244,6 +265,23 @@ function Hud.SetHealth(current: number, maximum: number)
 	end
 	local fraction = if maximum > 0 then math.clamp(current / maximum, 0, 1) else 0
 	healthFill.Size = UDim2.fromScale(fraction, 1)
+
+	local percent = math.floor(fraction * 100 + 0.5)
+	healthText.Text = `{percent}%`
+
+	-- Green when healthy, amber when hurt, red when about to die.
+	healthFill.BackgroundColor3 = if fraction > 0.6
+		then Color3.fromRGB(80, 200, 110)
+		elseif fraction > 0.3 then Color3.fromRGB(230, 170, 60)
+		else Color3.fromRGB(230, 70, 60)
+end
+
+--[[ Tell the player their turbo is lit. ]]
+function Hud.SetTurbo(on: boolean)
+	if not turboText then
+		return
+	end
+	turboText.Text = if on then "TURBO  ▲▲▲" else ""
 end
 
 function Hud.SetShield(current: number, maximum: number)

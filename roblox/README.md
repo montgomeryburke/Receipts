@@ -22,6 +22,7 @@ need to touch anything else.
 | --- | --- |
 | **E** | Get into a vehicle (walk up to it first) |
 | **WASD** | Drive / fly / steer the torpedo |
+| **Left Shift** | **Turbo** — faster in a vehicle, sprint on foot |
 | **Left mouse** | Fire (hold for automatic guns) |
 | **Right mouse** | Zoom, on guns with a scope |
 | **R** | Reload |
@@ -33,7 +34,14 @@ Slots: 1 sidearms, 2 automatics, 3 shotguns, 4 snipers, 5 the diamond gun,
 
 ## The vehicles
 
-**Walk up to any vehicle and press E to get in.** The seat sits on the roof of
+**Walk up to any vehicle and press E to get in.** Every vehicle has a floating
+name above it readable from across the map, so you can see where they are.
+
+One **tank**, one **plane**, one **torpedo** and **two turret trucks** are always
+on the map, and they respawn on their pads after being wrecked. A car — a truck
+or a Lamborghini, chosen at random — spawns beside you every time you respawn.
+
+**Hold Left Shift for turbo.** The seat sits on the roof of
 the chassis, well above jumping height, so pressing E is the way aboard — there
 is nothing to climb.
 

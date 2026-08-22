@@ -309,6 +309,41 @@ Config.Vehicles = {
 
 Config.MudSpeedFactor = 0.55
 
+--[[
+	Turbo. Hold Left Shift.
+
+	In a vehicle it multiplies your speed; on foot it makes you sprint. Same
+	key either way, so it always just means "go faster".
+]]
+Config.Turbo = {
+	Multiplier = 1.9,
+	WalkSpeed = 16,
+	SprintWalkSpeed = 30,
+}
+
+--[[
+	The two cars that spawn beside you. Which one you get is a coin flip.
+
+	The truck is slower but heavy and sits high; the Lamborghini is quick and
+	low. Both use the same tier speeds, so the choice is feel, not advantage.
+]]
+Config.CarBodies = {
+	{
+		Name = "Truck",
+		Size = Vector3.new(11, 5, 20),
+		RideHeight = 4,
+		SpeedBias = 0.92,
+		Color = Color3.fromRGB(120, 100, 80),
+	},
+	{
+		Name = "Lamborghini",
+		Size = Vector3.new(10, 2.6, 19),
+		RideHeight = 2,
+		SpeedBias = 1.15,
+		Color = Color3.fromRGB(240, 190, 30),
+	},
+}
+
 -- ================================================================= PICKUPS ==
 
 Config.Pickups = {
@@ -474,6 +509,10 @@ export type ConfigType = {
 	Mega: { Multiplier: number, FreeChargesPerLife: number, CraterDepth: number },
 
 	CarTiers: { CarTier },
+	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
+	CarBodies: {
+		{ Name: string, Size: Vector3, RideHeight: number, SpeedBias: number, Color: Color3 }
+	},
 	Vehicles: { [string]: VehicleSpec },
 	MudSpeedFactor: number,
 

@@ -349,6 +349,41 @@ Config.Vehicles = {
 
 Config.MudSpeedFactor = 0.55
 
+--[[
+	Turbo. Hold Left Shift.
+
+	In a vehicle it multiplies your speed; on foot it makes you sprint. Same
+	key either way, so it always just means "go faster".
+]]
+Config.Turbo = {
+	Multiplier = 1.9,
+	WalkSpeed = 16,
+	SprintWalkSpeed = 30,
+}
+
+--[[
+	The two cars that spawn beside you. Which one you get is a coin flip.
+
+	The truck is slower but heavy and sits high; the Lamborghini is quick and
+	low. Both use the same tier speeds, so the choice is feel, not advantage.
+]]
+Config.CarBodies = {
+	{
+		Name = "Truck",
+		Size = Vector3.new(11, 5, 20),
+		RideHeight = 4,
+		SpeedBias = 0.92,
+		Color = Color3.fromRGB(120, 100, 80),
+	},
+	{
+		Name = "Lamborghini",
+		Size = Vector3.new(10, 2.6, 19),
+		RideHeight = 2,
+		SpeedBias = 1.15,
+		Color = Color3.fromRGB(240, 190, 30),
+	},
+}
+
 -- ================================================================= PICKUPS ==
 
 Config.Pickups = {
@@ -514,6 +549,10 @@ export type ConfigType = {
 	Mega: { Multiplier: number, FreeChargesPerLife: number, CraterDepth: number },
 
 	CarTiers: { CarTier },
+	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
+	CarBodies: {
+		{ Name: string, Size: Vector3, RideHeight: number, SpeedBias: number, Color: Color3 }
+	},
 	Vehicles: { [string]: VehicleSpec },
 	MudSpeedFactor: number,
 
@@ -565,6 +604,7 @@ local EVENT_NAMES = {
 	"RequestVehicle",
 	"CastVote",
 	"SetAimDirection",
+	"SetTurbo",
 
 	-- Server -> Client
 	"HudUpdate",
@@ -2069,10 +2109,15 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		end
 	end
 
+	-- One tank, one plane, one torpedo and two turret trucks, always. They
+	-- respawn on these same pads a while after they are wrecked.
 	local vehiclePads = {}
-	for index, kind in { "TurretTruck", "Tank", "Plane", "Torpedo", "TurretTruck", "Plane" } do
-		local angle = (index / 6) * math.pi * 2
-		local position = Vector3.new(math.cos(angle) * half * 0.55, 4, math.sin(angle) * half * 0.55)
+	local bigVehicles = { "Tank", "Plane", "Torpedo", "TurretTruck", "TurretTruck" }
+	for index, kind in bigVehicles do
+		local angle = (index / #bigVehicles) * math.pi * 2
+		-- Pulled in towards the middle so they are a short drive apart rather
+		-- than a long walk.
+		local position = Vector3.new(math.cos(angle) * half * 0.38, 4, math.sin(angle) * half * 0.38)
 		table.insert(vehiclePads, { position = position, kind = kind })
 
 		Util.Part({
@@ -2425,7 +2470,13 @@ function MatchService.Start()
 		end
 	end)
 
-	Players.PlayerAdded:Connect(function(player)
+	--[[
+		Set a player up. Pulled out of the PlayerAdded handler because in
+		Studio the local player can already be in the game by the time this
+		script runs — in which case PlayerAdded never fires for them, and
+		without this they would never be assigned a team or given a car.
+	]]
+	local function setUpPlayer(player: Player)
 		TeamService.Assign(player)
 
 		player.CharacterAdded:Connect(function()
@@ -2444,7 +2495,16 @@ function MatchService.Start()
 				deployPlayer(player, true)
 			end)
 		end
-	end)
+	end
+
+	Players.PlayerAdded:Connect(setUpPlayer)
+
+	-- Anybody already here before this script got going. Called directly
+	-- rather than deferred: there is nothing to wait for, and running it now
+	-- means a player who is already present is set up before the first round.
+	for _, player in Players:GetPlayers() do
+		setUpPlayer(player)
+	end
 
 	Players.PlayerRemoving:Connect(function(player)
 		votes[player] = nil
@@ -3493,6 +3553,9 @@ local CHASSIS_PHYSICS = PhysicalProperties.new(4.5, 0.3, 0.2, 1, 1)
 --[[ Every vehicle currently alive in the world, so we can drive them each frame. ]]
 local active: { [Model]: any } = {}
 
+-- Its own random stream, so picking a car body cannot shift map generation.
+local bodyPicker = Random.new()
+
 -- ============================================================ PART HELPERS ==
 
 local function noCollide(a: BasePart, b: BasePart)
@@ -3538,16 +3601,18 @@ local function hinge(
 end
 
 --[[
-	One wheel, optionally steerable.
+	One wheel.
 
-	A steerable wheel gets an extra part in the middle — the knuckle — so the
-	wheel can spin and swing at the same time without those two jobs fighting.
+	These are welded on and purely for looks. An earlier version drove them
+	with hinge motors, which is the "proper" way and also the way that gives
+	you a vehicle that silently does nothing if a single constraint axis is
+	off by ninety degrees. Driving is now done by setting the chassis velocity
+	directly — see driveWheeled — which is arcade-y, completely predictable,
+	and cannot fail quietly.
 ]]
-local function addWheel(chassis: BasePart, offset: Vector3, steerable: boolean, model: Model)
-	local worldPosition = (chassis.CFrame * CFrame.new(offset)).Position
-
+local function addWheel(chassis: BasePart, offset: Vector3, model: Model)
 	local wheel = Util.Part({
-		Name = if steerable then "SteerWheel" else "DriveWheel",
+		Name = "Wheel",
 		Size = Vector3.new(WHEEL_WIDTH, WHEEL_DIAMETER, WHEEL_DIAMETER),
 		-- A cylinder's flat faces point along its own X, which is already the
 		-- car's left-right axis, so no extra rotation is needed here.
@@ -3559,37 +3624,8 @@ local function addWheel(chassis: BasePart, offset: Vector3, steerable: boolean, 
 		CustomPhysicalProperties = WHEEL_PHYSICS,
 		Parent = model,
 	})
-
-	if not steerable then
-		local motor = hinge(chassis, wheel, worldPosition, nil, Enum.ActuatorType.Motor)
-		motor.Name = "DriveMotor"
-		return
-	end
-
-	-- Knuckle: an invisible stub that swings left and right on a vertical axle.
-	local knuckle = Util.Part({
-		Name = "Knuckle",
-		Size = Vector3.new(1, 1, 1),
-		CFrame = chassis.CFrame * CFrame.new(offset),
-		Transparency = 1,
-		CanCollide = false,
-		Anchored = false,
-		Massless = true,
-		Parent = model,
-	})
-
-	local steer = hinge(chassis, knuckle, worldPosition, "up", Enum.ActuatorType.Servo)
-	steer.Name = "SteerServo"
-	steer.ServoMaxTorque = 90000
-	steer.AngularSpeed = 8
-	steer.LimitsEnabled = true
-	steer.UpperAngle = 40
-	steer.LowerAngle = -40
-
-	local motor = hinge(knuckle, wheel, worldPosition, nil, Enum.ActuatorType.Motor)
-	motor.Name = "DriveMotor"
-
-	noCollide(wheel, chassis)
+	Util.Weld(chassis, wheel)
+	return wheel
 end
 
 -- ================================================================== CHASSIS ==
@@ -3618,14 +3654,47 @@ local function buildChassis(
 	})
 	model.PrimaryPart = chassis
 
+	-- The two constraints that actually move the car.
+	--
+	-- This matters more than it looks: the moment a player sits in a
+	-- VehicleSeat, Roblox hands network ownership of the whole vehicle to
+	-- that player's computer, and physics is simulated there. Anything the
+	-- server writes straight onto the part's velocity gets overwritten by the
+	-- owning client on the very next frame — the car twitches and goes
+	-- nowhere. Constraint *properties*, on the other hand, replicate, and the
+	-- owning client simulates them. So we steer the constraints, not the part.
+	local driveRoot = Util.Attachment(chassis, Vector3.zero, "DriveRoot")
+
+	local drive = Instance.new("LinearVelocity")
+	drive.Name = "DriveVelocity"
+	drive.Attachment0 = driveRoot
+	-- Line mode constrains one axis only, leaving gravity to do its job, so
+	-- ramps and jumps still behave.
+	drive.VelocityConstraintMode = Enum.VelocityConstraintMode.Line
+	drive.RelativeTo = Enum.ActuatorRelativeTo.Attachment0
+	drive.LineDirection = Vector3.new(0, 0, -1)
+	drive.LineVelocity = 0
+	drive.MaxAxesForce = Vector3.new(math.huge, math.huge, math.huge)
+	drive.Enabled = false
+	drive.Parent = chassis
+
+	local turn = Instance.new("AngularVelocity")
+	turn.Name = "TurnVelocity"
+	turn.Attachment0 = driveRoot
+	turn.RelativeTo = Enum.ActuatorRelativeTo.World
+	turn.AngularVelocity = Vector3.zero
+	turn.MaxTorque = 900000
+	turn.Enabled = false
+	turn.Parent = chassis
+
 	local halfBase = wheelbase * 0.5
 	local halfTrack = track * 0.5
 	local axleDrop = -bodySize.Y * 0.5
 
-	addWheel(chassis, Vector3.new(-halfTrack, axleDrop, -halfBase), true, model)
-	addWheel(chassis, Vector3.new(halfTrack, axleDrop, -halfBase), true, model)
-	addWheel(chassis, Vector3.new(-halfTrack, axleDrop, halfBase), false, model)
-	addWheel(chassis, Vector3.new(halfTrack, axleDrop, halfBase), false, model)
+	addWheel(chassis, Vector3.new(-halfTrack, axleDrop, -halfBase), model)
+	addWheel(chassis, Vector3.new(halfTrack, axleDrop, -halfBase), model)
+	addWheel(chassis, Vector3.new(-halfTrack, axleDrop, halfBase), model)
+	addWheel(chassis, Vector3.new(halfTrack, axleDrop, halfBase), model)
 
 	return model, chassis
 end
@@ -3692,6 +3761,32 @@ local function addDriverSeat(chassis: BasePart, model: Model, offset: Vector3): 
 	Util.Weld(chassis, seat)
 	addSitPrompt(seat, "Drive", model.Name)
 	return seat
+end
+
+--[[
+	A floating name over a vehicle, readable from right across the map.
+
+	The big vehicles sit on pads a couple of hundred studs apart, which is a
+	very long walk if you cannot see where they are.
+]]
+local function addVehicleLabel(chassis: BasePart, text: string, colour: Color3)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "VehicleLabel"
+	billboard.Size = UDim2.fromScale(14, 3)
+	billboard.StudsOffset = Vector3.new(0, 9, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 1200
+	billboard.Parent = chassis
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = colour
+	label.TextStrokeTransparency = 0.25
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.Parent = billboard
 end
 
 --[[ A passenger seat that does not drive — used by gunners. ]]
@@ -3790,21 +3885,27 @@ end
 
 -- ================================================================ BUILDERS ==
 
---[[ A plain car. Tier decides how fast and how mean it looks. ]]
+--[[
+	A car. Tier decides how fast it is; the body style is a coin flip between
+	a truck and a Lamborghini, so what pulls up beside you varies.
+]]
 function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Player?): Model
 	local tier = Config.CarTiers[math.clamp(tierIndex, 1, #Config.CarTiers)]
+	local body = Config.CarBodies[bodyPicker:NextInteger(1, #Config.CarBodies)]
 
 	local model, chassis = buildChassis(
-		`Car_{tier.Name}`,
+		`{body.Name}_{tier.Name}`,
 		position,
-		Vector3.new(10, CHASSIS_HEIGHT, 18),
-		tier.Color,
+		body.Size,
+		-- The tier colour tints the body so you can still read how fast
+		-- somebody's car is at a glance.
+		body.Color:Lerp(tier.Color, 0.45),
 		14,
 		10
 	)
-	local seat = addDriverSeat(chassis, model, Vector3.new(0, CHASSIS_HEIGHT * 0.5 + 0.5, 1))
-
+	local seat = addDriverSeat(chassis, model, Vector3.new(0, body.Size.Y * 0.5 + 0.5, 1))
 	bindSeat(seat, model, "Driver")
+	addVehicleLabel(chassis, `{body.Name} · {tier.Name}`, Color3.fromRGB(230, 240, 250))
 
 	model:SetAttribute("Health", 260)
 	model:SetAttribute("MaxHealth", 260)
@@ -3818,7 +3919,7 @@ function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Pl
 		kind = "Car",
 		chassis = chassis,
 		seat = seat,
-		maxSpeed = tier.MaxSpeed,
+		maxSpeed = tier.MaxSpeed * body.SpeedBias,
 		torque = tier.Torque,
 		turnSpeed = tier.TurnSpeed,
 	}
@@ -3843,6 +3944,8 @@ function VehicleService.SpawnTurretTruck(position: Vector3): Model
 
 	bindSeat(seat, model, "Driver")
 	bindSeat(gunnerSeat, model, "Gunner")
+
+	addVehicleLabel(chassis, "Turret Truck · 2 seats", Color3.fromRGB(180, 230, 140))
 
 	model:SetAttribute("Health", spec.Health)
 	model:SetAttribute("MaxHealth", spec.Health)
@@ -3899,6 +4002,8 @@ function VehicleService.SpawnTank(position: Vector3): Model
 
 	bindSeat(seat, model, "Driver")
 	bindSeat(gunnerSeat, model, "Gunner")
+
+	addVehicleLabel(chassis, "Tank", Color3.fromRGB(150, 220, 150))
 
 	model:SetAttribute("Health", spec.Health)
 	model:SetAttribute("MaxHealth", spec.Health)
@@ -3993,6 +4098,8 @@ function VehicleService.SpawnPlane(position: Vector3): Model
 	orientation.Parent = body
 
 	bindSeat(seat, model, "Driver")
+
+	addVehicleLabel(body, "Plane", Color3.fromRGB(160, 210, 255))
 
 	model:SetAttribute("Health", spec.Health)
 	model:SetAttribute("MaxHealth", spec.Health)
@@ -4089,6 +4196,8 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 
 	bindSeat(saddle, model, "Driver")
 
+	addVehicleLabel(body, "Rideable Torpedo", Color3.fromRGB(255, 140, 140))
+
 	model:SetAttribute("Health", spec.Health)
 	model:SetAttribute("MaxHealth", spec.Health)
 	model:SetAttribute("VehicleKind", "Torpedo")
@@ -4122,23 +4231,36 @@ end
 
 -- ================================================================= DRIVING ==
 
---[[ Point a wheeled vehicle's motors and steering at what the driver is holding. ]]
+--[[
+	Drive a wheeled vehicle.
+
+	We set constraint targets, never the part's velocity directly — see the
+	note in buildChassis for why that distinction decides whether the car
+	moves at all.
+]]
 local function driveWheeled(model: Model, state: any)
 	local seat = state.seat :: VehicleSeat
-	local throttle = seat.Throttle
-	local steer = seat.Steer
+	local chassis = state.chassis :: BasePart
+
+	local drive = chassis:FindFirstChild("DriveVelocity") :: LinearVelocity?
+	local turn = chassis:FindFirstChild("TurnVelocity") :: AngularVelocity?
+	if not drive or not turn then
+		return
+	end
 
 	-- No driver means no power, so an empty car does not creep away.
 	if not seat.Occupant then
-		throttle = 0
-		steer = 0
+		drive.Enabled = false
+		turn.Enabled = false
+		return
 	end
 
-	-- Mud drags you down, which is the whole point of the mud.
-	-- We look at what is actually under the wheels rather than trusting a
-	-- flag, because nothing was ever setting that flag.
+	local throttle = seat.Throttle
+	local steer = seat.Steer
+
+	-- Mud drags you down. We look at what is actually under the wheels
+	-- rather than trusting a flag.
 	local speedFactor = 1
-	local chassis = state.chassis :: BasePart
 	local groundParams = RaycastParams.new()
 	groundParams.FilterType = Enum.RaycastFilterType.Exclude
 	groundParams.FilterDescendantsInstances = { model }
@@ -4147,16 +4269,18 @@ local function driveWheeled(model: Model, state: any)
 		speedFactor = Config.MudSpeedFactor
 	end
 
-	for _, descendant in model:GetDescendants() do
-		if descendant:IsA("HingeConstraint") then
-			if descendant.Name == "DriveMotor" then
-				descendant.AngularVelocity = throttle * state.maxSpeed * speedFactor
-				descendant.MotorMaxTorque = state.torque
-			elseif descendant.Name == "SteerServo" then
-				descendant.TargetAngle = -steer * state.turnSpeed
-			end
-		end
+	-- Turbo, held by the driver.
+	if model:GetAttribute("Turbo") == true then
+		speedFactor *= Config.Turbo.Multiplier
 	end
+
+	drive.Enabled = true
+	turn.Enabled = true
+	drive.LineVelocity = throttle * state.maxSpeed * speedFactor
+
+	-- You can only steer while you are actually rolling, like a real car.
+	local rolling = math.abs(throttle) > 0.05
+	turn.AngularVelocity = Vector3.new(0, if rolling then -steer * math.rad(state.turnSpeed) else 0, 0)
 end
 
 --[[
@@ -4230,6 +4354,27 @@ local function driveTorpedo(model: Model, state: any, deltaTime: number)
 		* CFrame.Angles(pitch * turnRate * deltaTime, -steer * turnRate * deltaTime, 0)
 	state.orientation.CFrame = state.heading
 	state.velocity.VectorVelocity = state.heading.LookVector * runSpeed
+end
+
+--[[
+	Turn a player's turbo on or off.
+
+	Works on whatever they are currently driving; on foot it just makes them
+	run faster, so the same key always means "go faster".
+]]
+function VehicleService.SetTurbo(player: Player, on: boolean)
+	local state = PlayerState.Get(player)
+
+	if state.vehicle and state.vehicle.Parent and state.seatRole == "Driver" then
+		state.vehicle:SetAttribute("Turbo", on)
+		return
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = if on then Config.Turbo.SprintWalkSpeed else Config.Turbo.WalkSpeed
+	end
 end
 
 --[[ Hurt a vehicle. At zero health it explodes and takes its riders with it. ]]
@@ -4709,6 +4854,10 @@ function WeaponService.Start()
 
 	Remotes.Event("SetAimDirection").OnServerEvent:Connect(function(player, worldTarget)
 		handleAim(player, worldTarget)
+	end)
+
+	Remotes.Event("SetTurbo").OnServerEvent:Connect(function(player, on)
+		VehicleService.SetTurbo(player, on == true)
 	end)
 
 	-- The client asks once at join for the full gun list, so the weapon wheel
@@ -5206,6 +5355,13 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
+	if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+		-- Same key whether you are driving or on foot: go faster.
+		Remotes.Event("SetTurbo"):FireServer(true)
+		Hud.SetTurbo(true)
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.R then
 		Remotes.Event("Reload"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F then
@@ -5233,6 +5389,9 @@ local function onInputEnded(input: InputObject)
 		firing = false
 	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
 		setZoom(false)
+	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
+		Remotes.Event("SetTurbo"):FireServer(false)
+		Hud.SetTurbo(false)
 	end
 end
 
@@ -5315,6 +5474,30 @@ local function buildTouchButton()
 	mega.Activated:Connect(function()
 		Remotes.Event("MegaDetonate"):FireServer()
 	end)
+
+	local turbo = Instance.new("TextButton")
+	turbo.Size = UDim2.fromOffset(90, 90)
+	turbo.Position = UDim2.new(1, -150, 1, -290)
+	turbo.BackgroundColor3 = Color3.fromRGB(255, 200, 80)
+	turbo.BackgroundTransparency = 0.25
+	turbo.Text = "TURBO"
+	turbo.TextColor3 = Color3.new(0, 0, 0)
+	turbo.TextSize = 18
+	turbo.Font = Enum.Font.GothamBold
+	turbo.Parent = gui
+
+	local turboCorner = Instance.new("UICorner")
+	turboCorner.CornerRadius = UDim.new(1, 0)
+	turboCorner.Parent = turbo
+
+	turbo.MouseButton1Down:Connect(function()
+		Remotes.Event("SetTurbo"):FireServer(true)
+		Hud.SetTurbo(true)
+	end)
+	turbo.MouseButton1Up:Connect(function()
+		Remotes.Event("SetTurbo"):FireServer(false)
+		Hud.SetTurbo(false)
+	end)
 end
 
 -- ===================================================================== START ==
@@ -5381,8 +5564,10 @@ local Hud = {}
 
 local screen: ScreenGui
 local healthFill: Frame
+local healthText: TextLabel
 local shieldFill: Frame
 local shieldTrack: Frame
+local turboText: TextLabel
 local weaponLabel: TextLabel
 local ammoLabel: TextLabel
 local statsLabel: TextLabel
@@ -5480,6 +5665,25 @@ function Hud.Build()
 		Text = "HEALTH",
 		TextSize = 13,
 		TextColor3 = Color3.fromRGB(170, 180, 190),
+	})
+
+	-- The number, sitting right on the bar so it is readable at a glance and
+	-- never leaves the screen.
+	healthText = makeLabel(screen, {
+		Size = UDim2.fromOffset(280, 18),
+		Position = UDim2.new(0, 24, 1, -78),
+		Text = "100%",
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 3,
+	})
+
+	turboText = makeLabel(screen, {
+		Size = UDim2.fromOffset(280, 18),
+		Position = UDim2.new(0, 24, 1, -116),
+		Text = "",
+		TextSize = 14,
+		TextColor3 = Color3.fromRGB(255, 210, 100),
 	})
 	local _healthTrack, healthBarFill = makeBar(screen, UDim2.new(0, 24, 1, -78), Color3.fromRGB(230, 70, 60))
 	healthFill = healthBarFill
@@ -5605,6 +5809,23 @@ function Hud.SetHealth(current: number, maximum: number)
 	end
 	local fraction = if maximum > 0 then math.clamp(current / maximum, 0, 1) else 0
 	healthFill.Size = UDim2.fromScale(fraction, 1)
+
+	local percent = math.floor(fraction * 100 + 0.5)
+	healthText.Text = `{percent}%`
+
+	-- Green when healthy, amber when hurt, red when about to die.
+	healthFill.BackgroundColor3 = if fraction > 0.6
+		then Color3.fromRGB(80, 200, 110)
+		elseif fraction > 0.3 then Color3.fromRGB(230, 170, 60)
+		else Color3.fromRGB(230, 70, 60)
+end
+
+--[[ Tell the player their turbo is lit. ]]
+function Hud.SetTurbo(on: boolean)
+	if not turboText then
+		return
+	end
+	turboText.Text = if on then "TURBO  ▲▲▲" else ""
 end
 
 function Hud.SetShield(current: number, maximum: number)

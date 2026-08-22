@@ -305,7 +305,13 @@ function MatchService.Start()
 		end
 	end)
 
-	Players.PlayerAdded:Connect(function(player)
+	--[[
+		Set a player up. Pulled out of the PlayerAdded handler because in
+		Studio the local player can already be in the game by the time this
+		script runs — in which case PlayerAdded never fires for them, and
+		without this they would never be assigned a team or given a car.
+	]]
+	local function setUpPlayer(player: Player)
 		TeamService.Assign(player)
 
 		player.CharacterAdded:Connect(function()
@@ -324,7 +330,16 @@ function MatchService.Start()
 				deployPlayer(player, true)
 			end)
 		end
-	end)
+	end
+
+	Players.PlayerAdded:Connect(setUpPlayer)
+
+	-- Anybody already here before this script got going. Called directly
+	-- rather than deferred: there is nothing to wait for, and running it now
+	-- means a player who is already present is set up before the first round.
+	for _, player in Players:GetPlayers() do
+		setUpPlayer(player)
+	end
 
 	Players.PlayerRemoving:Connect(function(player)
 		votes[player] = nil
