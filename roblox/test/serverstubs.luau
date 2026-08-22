@@ -3,6 +3,26 @@
 -- is captured rather than run, so we can inspect what Start() did before it.
 
 SPAWNED = {}
+DELAYED = {}
+RUN_SPAWNED = function()
+	local pending = SPAWNED
+	SPAWNED = {}
+	for _, item in pending do
+		local ok, err = pcall(item.fn, table.unpack(item.args, 1, item.args.n))
+		if not ok then
+			table.insert(WARNINGS, "spawned thread errored: " .. tostring(err))
+		end
+	end
+	return #pending
+end
+RUN_DELAYED = function()
+	local pending = DELAYED
+	DELAYED = {}
+	for _, item in pending do
+		pcall(item.fn)
+	end
+	return #pending
+end
 WARNINGS = {}
 PRINTS = {}
 
@@ -34,10 +54,15 @@ ADVANCE = function(seconds) virtualNow += seconds end
 
 task = {
 	spawn = function(fn, ...)
-		-- Captured, not run: the match loop would never return.
-		table.insert(SPAWNED, fn)
+		-- Captured, not run: the match loop would never return. The arguments
+		-- are captured too — dropping them meant every signal listener ran
+		-- with nil for everything and failed inside its own pcall.
+		table.insert(SPAWNED, { fn = fn, args = table.pack(...) })
 	end,
-	delay = function(_, fn) end,
+	-- Recorded rather than dropped, so a test can fast-forward a timer.
+	delay = function(seconds, fn)
+		table.insert(DELAYED, { at = seconds, fn = fn })
+	end,
 	wait = function() end,
 	defer = function() end,
 }
@@ -140,7 +165,6 @@ Instance = { new = function(class)
 	props.TouchEnded = SIGNAL()
 	props.Changed = SIGNAL()
 	props.HealthChanged = SIGNAL()
-	props.FindFirstAncestorOfClass = function() return nil end
 	props.GetPlayers = props.GetPlayers or nil
 	return inst
 end }

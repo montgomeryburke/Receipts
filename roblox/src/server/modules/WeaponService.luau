@@ -21,6 +21,7 @@ local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
+local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 
 local WeaponService = {}
 
@@ -76,6 +77,11 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	drawTracer(origin, endPoint, spec.Color)
 
 	if not result then
+		return
+	end
+
+	-- Shooting a giant animal does not hurt it, but it does annoy it.
+	if WildlifeService.RegisterHit(result.Instance) then
 		return
 	end
 
@@ -218,6 +224,11 @@ local function handleFire(player: Player, requestedDirection: any)
 	local weaponName = equippedWeaponName(player)
 	local spec = Config.Weapons[weaponName]
 	if not spec then
+		return
+	end
+
+	-- Riding an animal means no guns. The animal is the weapon.
+	if WildlifeService.IsRiding(player) then
 		return
 	end
 

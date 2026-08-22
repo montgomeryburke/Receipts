@@ -33,8 +33,8 @@ def strip(s):
 
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes']
-SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'ProjectileService',
-          'WeaponService', 'TeamService', 'PickupService', 'EffectService', 'WildlifeService']
+SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
+          'ProjectileService', 'WeaponService', 'TeamService', 'PickupService', 'EffectService']
 
 parts = [read(HERE, 'stubs.luau'), read(HERE, 'serverstubs.luau'), '''
 local Players = game:GetService("Players")
@@ -159,7 +159,7 @@ check("turbo is handled", turboOk, "")
 DUMP("")
 DUMP("Elephants and poop:")
 WildlifeService.Populate(700)
-check("elephants spawn", WildlifeService.Count() == Config.Wildlife.ElephantCount,
+check("animals spawn", WildlifeService.Count() == Config.Beast.Count,
 	string.format("%d walking about", WildlifeService.Count()))
 
 -- Run a while so they walk and drop something.
@@ -167,8 +167,17 @@ for _ = 1, 60 * 12 do
 	ADVANCE(1 / 60)
 	RunService.Heartbeat._fire(1 / 60)
 end
-check("elephants poop", WildlifeService.PoopCount() > 0,
-	string.format("%d piles", WildlifeService.PoopCount()))
+-- Only if an elephant happens to be among them; the species are random.
+local hasElephant = false
+for _, id in WildlifeService.SpeciesPresent() do
+	if id == "Elephant" then hasElephant = true end
+end
+if hasElephant then
+	check("elephants poop", WildlifeService.PoopCount() > 0,
+		string.format("%d piles", WildlifeService.PoopCount()))
+else
+	DUMP("  skip  no elephant in this spawn, nothing to poop")
+end
 
 -- ------------------------------------------------------------------ drone
 DUMP("")
@@ -181,6 +190,102 @@ local beforeDrone = liveProjectiles()
 fireRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0, -1))
 check("drone launches", liveProjectiles() > beforeDrone,
 	string.format("%d in flight", liveProjectiles() - beforeDrone))
+
+-- ------------------------------------------------------- the giant animals
+DUMP("")
+DUMP("Giant animals:")
+WildlifeService.Populate(700)
+local present = WildlifeService.SpeciesPresent()
+check("animals spawn", #present == Config.Beast.Count, table.concat(present, ", "))
+
+local distinct = {}
+local allDifferent = true
+for _, id in present do
+	if distinct[id] then allDifferent = false end
+	distinct[id] = true
+end
+check("all different species", allDifferent, "")
+
+-- Shooting one should annoy it, not kill it.
+local beastPart
+for _, child in workspace:GetChildren() do
+	if child:GetAttribute("IsBeast") then
+		beastPart = child:FindFirstChild("Body")
+		break
+	end
+end
+check("an animal has a body to shoot", beastPart ~= nil, "")
+if beastPart then
+	check("bullets register but do not kill", WildlifeService.RegisterHit(beastPart), "")
+	check("animal survives being shot", #WildlifeService.SpeciesPresent() == Config.Beast.Count,
+		string.format("%d still standing", #WildlifeService.SpeciesPresent()))
+end
+
+-- Riding takes your guns away.
+DUMP("")
+DUMP("Riding:")
+local ridingState = PlayerState.Get(shooter)
+ridingState.equipped = "Pistol"
+ridingState.weapons.Pistol.ammo = 12
+ridingState.weapons.Pistol.nextFireAt = 0
+ridingState.seatRole = "Beast"
+local tracersBefore = countInWorkspace("Tracer")
+fireRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0, -1))
+check("guns are disabled while riding", countInWorkspace("Tracer") == tracersBefore,
+	"no shot fired")
+ridingState.seatRole = nil
+
+-- Only the mega-detonation kills one, and what comes back is different.
+DUMP("")
+DUMP("Mega-detonation:")
+local before = WildlifeService.SpeciesPresent()
+local victimSpecies = before[1]
+local victimPosition
+for _, child in workspace:GetChildren() do
+	if child:GetAttribute("IsBeast") and child:GetAttribute("Species") == victimSpecies then
+		victimPosition = child:FindFirstChild("Body")._props.CFrame.Position
+		break
+	end
+end
+
+DamageService.MegaBlast.Fire(victimPosition, 140, shooter)
+-- Signals hand each listener its own thread; run them.
+RUN_SPAWNED()
+-- At least the one at the centre. Two animals standing close together can
+-- both be caught, which is fine.
+check("mega blast bursts the animal", #WildlifeService.SpeciesPresent() < Config.Beast.Count,
+	string.format("%d left of %d", #WildlifeService.SpeciesPresent(), Config.Beast.Count))
+
+-- Fast-forward the respawn timer.
+RUN_DELAYED()
+local after = WildlifeService.SpeciesPresent()
+check("it comes back", #after == Config.Beast.Count, table.concat(after, ", "))
+check("the burst species is gone", (function()
+	for _, id in after do
+		if id == victimSpecies then return false end
+	end
+	return true
+end)(), string.format("%s did not return", tostring(victimSpecies)))
+
+local cameBackSame = false
+for _, id in after do
+	local wasThere = false
+	for _, old in before do
+		if old == id then wasThere = true end
+	end
+	if not wasThere then cameBackSame = false end
+end
+local replacement
+for _, id in after do
+	local matched = false
+	for _, old in before do
+		if old == id then matched = true end
+	end
+	if not matched then replacement = id end
+end
+check("it comes back as a DIFFERENT animal", replacement ~= nil and replacement ~= victimSpecies,
+	string.format("%s became %s", tostring(victimSpecies), tostring(replacement)))
+local _ = cameBackSame
 
 DUMP("")
 DUMP(if failures == 0 then "SHOOTING WORKS" else failures .. " FAILURES")

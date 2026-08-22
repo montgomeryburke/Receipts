@@ -25,6 +25,15 @@ local DamageService = {}
 DamageService.Killed = Signal.new()
 
 --[[
+	Fired as (position, radius, attacker) for a mega-detonation only.
+
+	Announced rather than acted on, so that the things which care about huge
+	explosions — the giant animals, which shrug off everything smaller — can
+	listen without this module having to know they exist.
+]]
+DamageService.MegaBlast = Signal.new()
+
+--[[
 	Hurt a player.
 
 	Shields soak damage first and health takes the remainder, so a full shield
@@ -109,8 +118,13 @@ function DamageService.Explode(
 	radius: number,
 	maxDamage: number,
 	attacker: Player?,
-	vehicleMultiplier: number?
+	vehicleMultiplier: number?,
+	isMega: boolean?
 )
+	if isMega then
+		DamageService.MegaBlast.Fire(position, radius, attacker)
+	end
+
 	-- The visible bang. BlastPressure does the ragdoll-throwing; the numbers
 	-- below do the actual damage, so nobody dies to physics alone.
 	local explosion = Instance.new("Explosion")

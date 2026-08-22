@@ -24,6 +24,7 @@ local Util = require(Shared:WaitForChild("Util"))
 
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
+local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 
 local ProjectileService = {}
 
@@ -109,7 +110,13 @@ local function detonate(projectile: Projectile, position: Vector3, scale: number
 	local damage = (spec.BlastDamage or 0) * scale
 
 	if radius > 0 then
-		DamageService.Explode(position, radius, damage, projectile.owner, spec.VehicleDamageMultiplier)
+		DamageService.Explode(
+			position, radius, damage,
+			projectile.owner, spec.VehicleDamageMultiplier,
+			-- Only a mega-detonation counts as one, and only that is big
+			-- enough to put a giant animal down.
+			scale > 1
+		)
 		-- A big enough blast leaves a mark in the mud.
 		if scale > 1 then
 			DamageService.Crater(position, radius * 0.5)
@@ -120,6 +127,11 @@ end
 --[[ Direct damage to whatever the projectile physically ran into. ]]
 local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 	local spec = projectile.spec
+
+	-- Giant animals shrug off anything that is not a mega-detonation.
+	if WildlifeService.RegisterHit(hitPart) then
+		return
+	end
 
 	local humanoid, character = Util.HumanoidFromHit(hitPart)
 	if humanoid and character then

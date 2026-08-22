@@ -317,6 +317,68 @@ Config.Wildlife = {
 }
 
 --[[
+	THE GIANT ANIMALS.
+
+	King Kong sized, wandering the map. Bullets do not kill them — each
+	species has its own way of shrugging a hit off — but a diamond bullet's
+	mega-detonation bursts them into a red cloud, and whatever comes back
+	somewhere else is a different animal.
+
+	You can climb on one and ride it. You cannot use a gun while you do; the
+	animal IS the weapon.
+]]
+Config.Beasts = {
+	{
+		Id = "Cat", Name = "Giant Cat",
+		Colour = Color3.fromRGB(180, 150, 110),
+		Speed = 24, RideSpeed = 52, TrampleDamage = 55,
+		-- Sits down and washes the sore bit.
+		Reaction = "Lick",
+	},
+	{
+		Id = "Elephant", Name = "Giant Elephant",
+		Colour = Color3.fromRGB(122, 118, 114),
+		Speed = 16, RideSpeed = 38, TrampleDamage = 90,
+		-- Startled. Leaves rather a lot behind.
+		Reaction = "Poop",
+	},
+	{
+		Id = "Dog", Name = "Giant Dog",
+		Colour = Color3.fromRGB(150, 108, 62),
+		Speed = 30, RideSpeed = 58, TrampleDamage = 50,
+		-- Shakes itself off, ears flapping.
+		Reaction = "Shake",
+	},
+	{
+		Id = "Fish", Name = "Giant Fish",
+		Colour = Color3.fromRGB(90, 150, 190),
+		Speed = 9, RideSpeed = 30, TrampleDamage = 40,
+		-- It is a fish, on land, and it is not happy about it.
+		Reaction = "Flop",
+	},
+	{
+		Id = "Gorilla", Name = "Giant Gorilla",
+		Colour = Color3.fromRGB(64, 60, 62),
+		Speed = 22, RideSpeed = 48, TrampleDamage = 80,
+		-- Stands up and beats its chest at whoever shot it.
+		Reaction = "ChestBeat",
+	},
+}
+
+Config.Beast = {
+	-- How many are wandering at once.
+	Count = 3,
+	-- Seconds a reaction lasts, during which it stops walking.
+	ReactionDuration = 4,
+	-- Seconds before a burst animal comes back as something else.
+	RespawnDelay = 10,
+	-- Anything this close in front of a moving animal gets flattened.
+	TrampleRadius = 16,
+	-- Overall size multiplier. King Kong, not a big dog.
+	Scale = 3.2,
+}
+
+--[[
 	Boost arrows: chevrons painted on the approach to every jump. Drive over
 	them and you are flung up to this speed, which is what turns a ramp into
 	serious air.
@@ -632,6 +694,17 @@ export type ConfigType = {
 		MaxPoopPiles: number, SplatDuration: number,
 	},
 	Boost: { Speed: number, Lift: number },
+	Beasts: {
+		{
+			Id: string, Name: string, Colour: Color3,
+			Speed: number, RideSpeed: number,
+			TrampleDamage: number, Reaction: string,
+		}
+	},
+	Beast: {
+		Count: number, ReactionDuration: number, RespawnDelay: number,
+		TrampleRadius: number, Scale: number,
+	},
 
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },

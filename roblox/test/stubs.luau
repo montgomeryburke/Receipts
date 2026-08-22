@@ -145,6 +145,10 @@ BrickColor = { new = function(name) return { Name = name } end }
 ColorSequence = { new = function(...) return { ... } end }
 ColorSequenceKeypoint = { new = function(...) return { ... } end }
 NumberSequence = { new = function(...) return { ... } end }
+NumberSequenceKeypoint = { new = function(...) return { ... } end }
+Ray = { new = function(...) return { ... } end }
+Region3 = { new = function(...) return { ... } end }
+Rect = { new = function(...) return { ... } end }
 NumberRange = { new = function(...) return { ... } end }
 UDim = { new = function(...) return { ... } end }
 UDim2 = { new = function(...) return {} end, fromScale = function() return {} end, fromOffset = function() return {} end }
@@ -242,6 +246,21 @@ Inst.__newindex = function(self, k, v)
 	self._props[k] = v
 end
 
+-- A Humanoid needs the methods game code actually calls on it, or damage
+-- silently blows up inside the test rather than being measured.
+local function fitOutHumanoid(inst)
+	local props = rawget(inst, "_props")
+	props.Health = props.Health or 100
+	props.MaxHealth = props.MaxHealth or 100
+	props.WalkSpeed = props.WalkSpeed or 16
+	props.TakeDamage = function(self, amount)
+		local p = rawget(self, "_props")
+		p.Health = math.max(0, p.Health - amount)
+	end
+	props.MoveTo = function() end
+	props.Move = function() end
+end
+
 local function newInstance(class)
 	STATS.created += 1
 	STATS.byClass[class] = (STATS.byClass[class] or 0) + 1
@@ -255,6 +274,23 @@ local function newInstance(class)
 	if class == "Part" or class == "SpawnLocation" or class == "Seat" or class == "VehicleSeat" then
 		table.insert(STATS.parts, self)
 	end
+	if class == "Humanoid" then
+		fitOutHumanoid(self)
+	end
+
+	-- Small no-op methods that game code calls on visual instances. Missing
+	-- ones abort whatever thread they are in, which hides real behaviour
+	-- behind an error that has nothing to do with the thing being tested.
+	local props = rawget(self, "_props")
+	if class == "ParticleEmitter" then
+		props.Emit = function() end
+	elseif class == "Sound" then
+		props.Play = function() end
+		props.Stop = function() end
+	elseif class == "Explosion" then
+		props.Hit = SIGNAL and SIGNAL() or nil
+	end
+
 	return self
 end
 
@@ -271,6 +307,24 @@ function Inst:FindFirstChildOfClass(c)
 	return nil
 end
 function Inst:WaitForChild(n) return self:FindFirstChild(n) or newInstance("Folder") end
+-- Walks the real parent chain. A stub that always returned nil made every
+-- "which model does this part belong to" lookup fail silently.
+function Inst:FindFirstAncestorOfClass(class)
+	local node = rawget(self, "_parent")
+	while node do
+		if rawget(node, "_class") == class then return node end
+		node = rawget(node, "_parent")
+	end
+	return nil
+end
+function Inst:FindFirstAncestor(name)
+	local node = rawget(self, "_parent")
+	while node do
+		if rawget(node, "_props").Name == name then return node end
+		node = rawget(node, "_parent")
+	end
+	return nil
+end
 function Inst:GetChildren() return self._children end
 function Inst:PivotTo(cf)
 	local primary = self._props.PrimaryPart
