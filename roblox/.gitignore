@@ -1,4 +1,4 @@
 sourcemap.json
-*.rbxl
+# the binary place file is shipped, so it is not ignored
 *.rbxl.lock
 *.rbxlx.lock

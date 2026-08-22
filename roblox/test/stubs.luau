@@ -184,9 +184,11 @@ STATS = { created = 0, byClass = {}, parts = {} }
 
 local Inst = {}
 Inst.__index = function(self, k)
-	local v = rawget(Inst, k)
-	if v then return v end
-	return rawget(self, "_props") and self._props[k] or nil
+	-- Properties win over class methods, so a harness can override
+	-- WaitForChild the way a real instance's own children would.
+	local props = rawget(self, "_props")
+	if props and props[k] ~= nil then return props[k] end
+	return rawget(Inst, k)
 end
 Inst.__newindex = function(self, k, v)
 	if k == "Parent" then

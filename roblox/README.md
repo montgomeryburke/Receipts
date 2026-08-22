@@ -58,6 +58,23 @@ The server owns every decision that matters: what got hit, who took damage,
 what you own. The client only ever *asks*. That is what stops somebody editing
 their own copy of the game and giving themselves infinite damage.
 
+## Checking it works without opening Studio
+
+Roblox Studio cannot be driven from a terminal, so `test/` runs the real code
+against stand-ins for the Roblox API using the plain Luau interpreter.
+
+**Does opening the place produce a world?**
+
+```sh
+python3 test/run-servertest.py                  > /tmp/a.luau && luau /tmp/a.luau
+python3 test/run-servertest.py --block-datastore > /tmp/b.luau && luau /tmp/b.luau
+```
+
+Both must print `ARENA: true`. The second simulates an **unpublished** place,
+where Roblox refuses DataStore access — the exact case that once killed the
+server script before it built the arena and left players falling through an
+empty sky.
+
 ## Checking a map change without opening Studio
 
 Roblox Studio cannot be driven from a terminal, so `test/` stitches the real

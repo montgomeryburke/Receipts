@@ -32,8 +32,31 @@ local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
 local MonetizationService = {}
 
--- Receipts already paid out, so a Roblox retry cannot double-grant.
-local receiptStore = DataStoreService:GetDataStore("NuclearMudArena_Receipts_v1")
+--[[
+	Receipts already paid out, so a Roblox retry cannot double-grant.
+
+	This is fetched lazily rather than at the top of the file, and that detail
+	matters enormously: Roblox Studio refuses DataStore access in a place that
+	has never been published, and a refusal at the top of a module kills the
+	whole server script before anything else gets to run. Asking for it only
+	when a real purchase arrives means an unpublished test place still works.
+]]
+local receiptStore: GlobalDataStore? = nil
+
+local function getReceiptStore(): GlobalDataStore?
+	if receiptStore then
+		return receiptStore
+	end
+	local ok, store = pcall(function()
+		return DataStoreService:GetDataStore("NuclearMudArena_Receipts_v1")
+	end)
+	if ok and store then
+		receiptStore = store
+		return store
+	end
+	warn("[Monetization] DataStore unavailable — is the place published?")
+	return nil
+end
 
 --[[ Does this player own a pass? In free mode, everybody owns everything. ]]
 function MonetizationService.OwnsPass(player: Player, passKey: string): boolean
@@ -101,9 +124,15 @@ function MonetizationService.Start()
 
 		local receiptKey = `receipt_{receiptInfo.PurchaseId}`
 
+		local store = getReceiptStore()
+		if not store then
+			-- No way to record the receipt means no safe way to grant it.
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+
 		-- Already paid out? Say yes and stop.
 		local readSuccess, alreadyGranted = pcall(function()
-			return receiptStore:GetAsync(receiptKey)
+			return store:GetAsync(receiptKey)
 		end)
 		if readSuccess and alreadyGranted then
 			return Enum.ProductPurchaseDecision.PurchaseGranted
@@ -127,7 +156,7 @@ function MonetizationService.Start()
 		-- Record the receipt BEFORE telling Roblox it is done. If this write
 		-- fails we must not confirm, or a retry would pay out twice.
 		local writeSuccess = pcall(function()
-			receiptStore:SetAsync(receiptKey, true)
+			store:SetAsync(receiptKey, true)
 		end)
 		if not writeSuccess then
 			return Enum.ProductPurchaseDecision.NotProcessedYet
