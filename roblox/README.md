@@ -58,6 +58,20 @@ The server owns every decision that matters: what got hit, who took damage,
 what you own. The client only ever *asks*. That is what stops somebody editing
 their own copy of the game and giving themselves infinite damage.
 
+## Checking a map change without opening Studio
+
+Roblox Studio cannot be driven from a terminal, so `test/` stitches the real
+map generator together with stand-ins for the Roblox API and runs it under the
+plain Luau interpreter:
+
+```sh
+python3 test/run-maptest.py > /tmp/maptest.luau && luau /tmp/maptest.luau
+```
+
+It builds all ten maps and reports part counts, spawn counts and any broken
+geometry. It cannot tell you whether a map is *fun* — only that it exists and
+is not malformed.
+
 ## Rebuilding the place file after editing `src/`
 
 You need [Rojo](https://rojo.space):

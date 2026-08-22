@@ -8,6 +8,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -35,6 +36,40 @@ local currentMapSpec: Config.MapSpec? = nil
 -- Map voting.
 local ballot: { Config.MapSpec } = {}
 local votes: { [Player]: number } = {}
+
+-- The one car each player currently owns.
+local playerCars: { [Player]: Model } = {}
+
+--[[ The two team colours, for painting the spawn pads. ]]
+local function teamColours(): { BrickColor }
+	local colours = {}
+	for index, spec in Config.Teams do
+		colours[index] = spec.Color
+	end
+	return colours
+end
+
+--[[
+	Tear down whatever arena is standing and put a new one up.
+
+	This is deliberately separate from starting a round, because the world
+	must never be empty: an arena exists from the moment the server boots,
+	long before the first round begins.
+]]
+local function buildArena(spec: Config.MapSpec)
+	currentMapSpec = spec
+
+	ProjectileService.ClearAll()
+	VehicleService.ClearAll()
+	PickupService.Clear()
+
+	currentMap = MapService.Build(spec, teamColours())
+	local build = currentMap
+	if build then
+		PickupService.Build(build.pickupPads)
+	end
+	MatchService.SpawnMapVehicles()
+end
 
 --[[ Push the scoreboard and the clock to everybody's screen. ]]
 local function broadcast()
@@ -72,14 +107,15 @@ local function deployPlayer(player: Player, keepProgress: boolean)
 	root.CFrame = CFrame.new(spot + Vector3.new(0, 5, 0))
 
 	-- A car of your own, parked next to you, at whatever tier your keys earned.
+	-- The last one goes first, so dying twenty times does not leave twenty
+	-- abandoned cars sitting on the map.
+	local previous = playerCars[player]
+	if previous and previous.Parent then
+		previous:Destroy()
+	end
+
 	local state = PlayerState.Get(player)
-	local car = VehicleService.SpawnCar(state.carTier, spot + Vector3.new(14, 0, 0), player)
-	-- Wrecks clear themselves so the map does not fill up with dead cars.
-	task.delay(Config.Match.RoundDuration, function()
-		if car and car.Parent then
-			car:Destroy()
-		end
-	end)
+	playerCars[player] = VehicleService.SpawnCar(state.carTier, spot + Vector3.new(14, 0, 0), player)
 end
 
 --[[ Everybody gets put back on the field. ]]
@@ -96,7 +132,7 @@ local function deployAll()
 end
 
 --[[ Park one of each big toy on its pad, and put it back when it is wrecked. ]]
-local function spawnMapVehicles()
+function MatchService.SpawnMapVehicles()
 	local build = currentMap
 	if not build then
 		return
@@ -175,19 +211,7 @@ local function tallyVotes(): Config.MapSpec
 end
 
 local function runRound()
-	local chosen = tallyVotes()
-	currentMapSpec = chosen
-
-	ProjectileService.ClearAll()
-	VehicleService.ClearAll()
-
-	currentMap = MapService.Build(chosen)
-	local build = currentMap
-	if build then
-		PickupService.Build(build.pickupPads)
-	end
-	spawnMapVehicles()
-
+	-- The arena is already standing; a round is just the clock and the score.
 	scores = { 0, 0 }
 	phase = "Playing"
 	phaseEndsAt = os.clock() + Config.Match.RoundDuration
@@ -217,17 +241,23 @@ local function runIntermission()
 		task.wait(0.5)
 	end
 
+	-- Wreckage and bullets go; the arena itself stays standing until the
+	-- next one is built, so there is never a moment with no world.
 	ProjectileService.ClearAll()
-	VehicleService.ClearAll()
-	PickupService.Clear()
-	MapService.Clear()
-	currentMap = nil
 end
 
---[[ The loop itself. It never stops for as long as the server is up. ]]
+--[[
+	The loop itself. It never stops for as long as the server is up.
+
+	Order matters: we fight on the arena that is already standing, and only
+	vote for the next map afterwards. Voting first would mean twenty seconds
+	of everybody staring at an empty sky.
+]]
 local function loop()
 	while true do
 		if #Players:GetPlayers() < Config.Match.MinPlayers then
+			-- Nobody here yet. The arena still exists, so anyone who does
+			-- turn up can drive around it while they wait.
 			phase = "Warmup"
 			phaseEndsAt = os.clock() + 1
 			broadcast()
@@ -235,9 +265,10 @@ local function loop()
 			continue
 		end
 
-		runVoting()
 		runRound()
 		runIntermission()
+		runVoting()
+		buildArena(tallyVotes())
 	end
 end
 
@@ -280,22 +311,47 @@ function MatchService.Start()
 		player.CharacterAdded:Connect(function()
 			-- Give the character a moment to finish assembling before moving it.
 			task.wait(0.35)
-			if phase == "Playing" then
-				-- Respawning mid-round keeps your keys, so a good run is not
-				-- wiped out by one unlucky rocket.
-				deployPlayer(player, true)
-			end
+			-- Deploy whatever phase we are in, so you always land on the map
+			-- with a car — including while waiting for a round to start.
+			-- Respawning keeps your keys, so one unlucky rocket does not wipe
+			-- out a good run.
+			deployPlayer(player, true)
 		end)
 
 		if player.Character then
-			task.wait(0.35)
-			deployPlayer(player, true)
+			task.spawn(function()
+				task.wait(0.35)
+				deployPlayer(player, true)
+			end)
 		end
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
 		votes[player] = nil
+		local car = playerCars[player]
+		if car and car.Parent then
+			car:Destroy()
+		end
+		playerCars[player] = nil
 	end)
+
+	-- A safety net. Fly a plane over the boundary wall and you would otherwise
+	-- fall forever; this notices and respawns you instead.
+	RunService.Heartbeat:Connect(function()
+		for _, player in Players:GetPlayers() do
+			local character = player.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			if root and root:IsA("BasePart") and root.Position.Y < -120 then
+				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				if humanoid and humanoid.Health > 0 then
+					humanoid.Health = 0
+				end
+			end
+		end
+	end)
+
+	-- The world exists before anybody can possibly join it.
+	buildArena(Config.Maps[rng:NextInteger(1, #Config.Maps)])
 
 	task.spawn(loop)
 end

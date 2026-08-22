@@ -1408,13 +1408,16 @@ return EffectService
 --[[
 	MapService — builds the whole arena out of code.
 
-	Nothing here is hand-modelled, which means you never have to open the
-	3D editor to change a map: edit the numbers in Config.Maps and you get a
-	different arena.
+	Nothing here is hand-modelled, so changing a map means changing numbers in
+	Config.Maps rather than opening the 3D editor.
 
-	The rule every piece obeys: YOU CAN DRIVE ON IT. No stairs anywhere, no
-	kerbs to catch a wheel, every roof reachable by ramp, every jump built
-	wide enough to hit at speed.
+	Two rules every piece obeys:
+
+	  1. YOU CAN DRIVE IT. Doorways are wide and tall enough to take a truck,
+	     every roof has a ramp, and no vehicle route has a step in it.
+	  2. YOU CAN WALK IT. Buildings are hollow, with hallways and real
+	     staircases inside, so a player on foot has somewhere to fight that
+	     is not just open mud.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -1431,8 +1434,14 @@ export type MapBuild = {
 	pickupPads: { { position: Vector3, kind: string } },
 }
 
-local RAMP_THICKNESS = 3
-local ROAD_Y = 0.5
+local SLAB = 3 -- thickness of floors and ramps
+local FLOOR_HEIGHT = 18 -- tall enough to drive a truck through a storey
+local DOOR_WIDTH = 22 -- wide enough for a truck
+local DOOR_HEIGHT = 14
+local WALL_THICKNESS = 2
+local STAIR_STEPS = 14
+
+-- ============================================================ BASIC PIECES ==
 
 --[[
 	A sloped slab connecting two points. This one function builds every ramp,
@@ -1440,20 +1449,15 @@ local ROAD_Y = 0.5
 ]]
 local function ramp(from: Vector3, to: Vector3, width: number, color: Color3, parent: Instance): Part
 	local delta = to - from
-	local length = delta.Magnitude
-	if length < 0.1 then
-		length = 0.1
-	end
+	local length = math.max(delta.Magnitude, 0.1)
 	local mid = from + delta * 0.5
 
-	-- CFrame.lookAt points the part's -Z at the target, and Size.Z runs along
+	-- CFrame.lookAt points the part's -Z at the target and Size.Z runs along
 	-- that axis, so a part sized (width, thickness, length) becomes the ramp.
-	local orientation = CFrame.lookAt(mid, to)
-
 	return Util.Part({
 		Name = "Ramp",
-		Size = Vector3.new(width, RAMP_THICKNESS, length),
-		CFrame = orientation,
+		Size = Vector3.new(width, SLAB, length),
+		CFrame = CFrame.lookAt(mid, to),
 		Color = color,
 		Material = Enum.Material.Concrete,
 		Parent = parent,
@@ -1461,44 +1465,206 @@ local function ramp(from: Vector3, to: Vector3, width: number, color: Color3, pa
 end
 
 --[[
-	A building you can drive up. It is a solid block with a ramp that
-	switchbacks around the outside to a flat roof — so the roof is a
-	legitimate fighting position you can arrive at in a truck.
+	A staircase. Built from real steps rather than a slope, because indoors
+	you want somewhere to fight, not a ski jump — and stairs read as stairs.
+	Vehicles use the outside ramp instead.
 ]]
-local function building(origin: Vector3, footprint: number, floors: number, color: Color3, parent: Instance)
-	local floorHeight = 14
-	local height = floors * floorHeight
+local function staircase(bottom: Vector3, direction: Vector3, rise: number, width: number, color: Color3, parent: Instance)
+	local flat = Vector3.new(direction.X, 0, direction.Z)
+	flat = if flat.Magnitude < 0.01 then Vector3.new(0, 0, 1) else flat.Unit
+
+	local stepRise = rise / STAIR_STEPS
+	local stepRun = 3.2
+
+	for index = 1, STAIR_STEPS do
+		local centre = bottom
+			+ flat * (index * stepRun)
+			+ Vector3.new(0, index * stepRise - stepRise * 0.5, 0)
+
+		local step = Util.Part({
+			Name = "Step",
+			Size = Vector3.new(width, stepRise, stepRun),
+			CFrame = CFrame.lookAt(centre, centre + flat),
+			Color = color,
+			Material = Enum.Material.Concrete,
+			Parent = parent,
+		})
+		local _ = step
+	end
+end
+
+--[[
+	A wall with a doorway punched through the middle of it: a panel either
+	side and a lintel across the top.
+]]
+local function wallWithDoor(
+	centre: Vector3,
+	facing: Vector3,
+	length: number,
+	height: number,
+	color: Color3,
+	parent: Instance
+)
+	local flat = Vector3.new(facing.X, 0, facing.Z)
+	flat = if flat.Magnitude < 0.01 then Vector3.new(0, 0, 1) else flat.Unit
+	-- The wall runs at right angles to the way it faces.
+	local along = Vector3.new(-flat.Z, 0, flat.X)
+
+	local sideLength = math.max((length - DOOR_WIDTH) * 0.5, 0.5)
+	local orientation = CFrame.lookAt(centre, centre + flat)
+
+	for _, side in { -1, 1 } do
+		local offset = side * (DOOR_WIDTH * 0.5 + sideLength * 0.5)
+		local panelCentre = centre + along * offset + Vector3.new(0, height * 0.5, 0)
+		Util.Part({
+			Name = "Wall",
+			Size = Vector3.new(sideLength, height, WALL_THICKNESS),
+			CFrame = CFrame.lookAt(panelCentre, panelCentre + flat),
+			Color = color,
+			Material = Enum.Material.Brick,
+			Parent = parent,
+		})
+	end
+
+	-- Lintel over the door.
+	if height > DOOR_HEIGHT then
+		local lintelHeight = height - DOOR_HEIGHT
+		local lintelCentre = centre + Vector3.new(0, DOOR_HEIGHT + lintelHeight * 0.5, 0)
+		Util.Part({
+			Name = "Lintel",
+			Size = Vector3.new(DOOR_WIDTH, lintelHeight, WALL_THICKNESS),
+			CFrame = CFrame.lookAt(lintelCentre, lintelCentre + flat),
+			Color = color,
+			Material = Enum.Material.Brick,
+			Parent = parent,
+		})
+	end
+
+	local _ = orientation
+end
+
+--[[
+	One floor slab with a square hole cut in one corner for the stairwell.
+	Built from two rectangles, because that is how you make a hole without
+	needing modelling tools.
+]]
+local function floorWithStairwell(centre: Vector3, footprint: number, holeSize: number, color: Color3, parent: Instance)
 	local half = footprint * 0.5
 
-	-- The solid mass of the building.
+	-- The big piece: full width, stopping short of the stairwell strip.
 	Util.Part({
-		Name = "BuildingCore",
-		Size = Vector3.new(footprint, height, footprint),
-		CFrame = CFrame.new(origin + Vector3.new(0, height * 0.5, 0)),
+		Name = "Floor",
+		Size = Vector3.new(footprint, SLAB, footprint - holeSize),
+		CFrame = CFrame.new(centre + Vector3.new(0, 0, -holeSize * 0.5)),
 		Color = color,
-		Material = Enum.Material.Brick,
+		Material = Enum.Material.Concrete,
 		Parent = parent,
 	})
 
-	-- A lip around the roof so you can take cover up there without rolling off.
-	local lipHeight = 4
+	-- The remaining strip, minus the corner that stays open.
+	Util.Part({
+		Name = "Floor",
+		Size = Vector3.new(footprint - holeSize, SLAB, holeSize),
+		CFrame = CFrame.new(centre + Vector3.new(-holeSize * 0.5, 0, half - holeSize * 0.5)),
+		Color = color,
+		Material = Enum.Material.Concrete,
+		Parent = parent,
+	})
+end
+
+-- ================================================================ BUILDINGS ==
+
+--[[
+	A building you can drive into, walk through, climb, and fight on top of.
+
+	Ground floor and every floor above it are hollow, with doorways on all
+	four sides and a partition down the middle making two hallways. A
+	staircase in one corner connects the floors on foot; a switchback ramp
+	around the outside gets vehicles to the roof.
+]]
+local function building(origin: Vector3, footprint: number, floors: number, color: Color3, parent: Instance)
+	local half = footprint * 0.5
+	local height = floors * FLOOR_HEIGHT
+	local holeSize = 24
+
+	-- Ground slab, so the inside is a floor and not open mud.
+	Util.Part({
+		Name = "Floor",
+		Size = Vector3.new(footprint, SLAB, footprint),
+		CFrame = CFrame.new(origin + Vector3.new(0, SLAB * 0.5, 0)),
+		Color = color:Lerp(Color3.fromRGB(60, 60, 60), 0.3),
+		Material = Enum.Material.Concrete,
+		Parent = parent,
+	})
+
+	for floor = 0, floors - 1 do
+		local baseY = floor * FLOOR_HEIGHT + SLAB
+
+		-- Four walls, each with a doorway wide enough to drive through.
+		for _, facing in { Vector3.new(0, 0, 1), Vector3.new(0, 0, -1), Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0) } do
+			wallWithDoor(
+				origin + facing * half + Vector3.new(0, baseY, 0),
+				facing,
+				footprint,
+				FLOOR_HEIGHT,
+				color,
+				parent
+			)
+		end
+
+		-- An interior partition, offset from centre, making a long hallway on
+		-- one side and rooms on the other. Left open at both ends.
+		local partitionLength = footprint * 0.45
+		Util.Part({
+			Name = "Partition",
+			Size = Vector3.new(WALL_THICKNESS, FLOOR_HEIGHT, partitionLength),
+			CFrame = CFrame.new(origin + Vector3.new(-footprint * 0.12, baseY + FLOOR_HEIGHT * 0.5, 0)),
+			Color = color:Lerp(Color3.fromRGB(230, 230, 230), 0.25),
+			Material = Enum.Material.Brick,
+			Parent = parent,
+		})
+
+		-- The ceiling of this floor is the floor of the next, with a hole in
+		-- the corner for the stairs to come up through.
+		local ceilingY = baseY + FLOOR_HEIGHT
+		floorWithStairwell(
+			origin + Vector3.new(0, ceilingY, 0),
+			footprint,
+			holeSize,
+			color:Lerp(Color3.fromRGB(60, 60, 60), 0.3),
+			parent
+		)
+
+		-- Stairs up through that hole, tucked into the corner it leaves open.
+		staircase(
+			origin + Vector3.new(half - holeSize * 0.5, baseY, half - holeSize),
+			Vector3.new(0, 0, 1),
+			FLOOR_HEIGHT,
+			holeSize * 0.7,
+			color:Lerp(Color3.fromRGB(200, 200, 200), 0.3),
+			parent
+		)
+	end
+
+	-- Roof lip, so the roof is cover rather than a slide.
+	local roofY = floors * FLOOR_HEIGHT + SLAB
 	for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
 		Util.Part({
 			Name = "RoofLip",
 			Size = Vector3.new(
 				if side.X ~= 0 then 2 else footprint,
-				lipHeight,
+				4,
 				if side.Z ~= 0 then 2 else footprint
 			),
-			CFrame = CFrame.new(origin + side * half + Vector3.new(0, height + lipHeight * 0.5, 0)),
+			CFrame = CFrame.new(origin + side * half + Vector3.new(0, roofY + 2, 0)),
 			Color = color:Lerp(Color3.new(0, 0, 0), 0.25),
 			Material = Enum.Material.Brick,
 			Parent = parent,
 		})
 	end
 
-	-- The switchback ramp: one straight run per building side, climbing as it
-	-- wraps, with a flat landing at each corner so you do not clip the turn.
+	-- The vehicle route: a ramp that switchbacks around the outside, with a
+	-- flat landing at every corner so you do not clip the turn.
 	local rampWidth = 16
 	local outset = half + rampWidth * 0.5
 	local corners = {
@@ -1509,83 +1675,67 @@ local function building(origin: Vector3, footprint: number, floors: number, colo
 	}
 
 	local runs = floors * 2
-	local rise = height / runs
+	local rise = roofY / runs
+	local rampColor = color:Lerp(Color3.fromRGB(90, 90, 90), 0.4)
+
 	for index = 0, runs - 1 do
 		local fromCorner = corners[(index % 4) + 1]
 		local toCorner = corners[((index + 1) % 4) + 1]
-		local fromY = index * rise
-		local toY = (index + 1) * rise
 
 		ramp(
-			origin + fromCorner + Vector3.new(0, fromY, 0),
-			origin + toCorner + Vector3.new(0, toY, 0),
+			origin + fromCorner + Vector3.new(0, index * rise, 0),
+			origin + toCorner + Vector3.new(0, (index + 1) * rise, 0),
 			rampWidth,
-			color:Lerp(Color3.fromRGB(90, 90, 90), 0.4),
+			rampColor,
 			parent
 		)
 
-		-- Flat landing pad at the corner you are turning on.
 		Util.Part({
 			Name = "RampLanding",
-			Size = Vector3.new(rampWidth, RAMP_THICKNESS, rampWidth),
-			CFrame = CFrame.new(origin + toCorner + Vector3.new(0, toY, 0)),
-			Color = color:Lerp(Color3.fromRGB(90, 90, 90), 0.4),
+			Size = Vector3.new(rampWidth, SLAB, rampWidth),
+			CFrame = CFrame.new(origin + toCorner + Vector3.new(0, (index + 1) * rise, 0)),
+			Color = rampColor,
 			Material = Enum.Material.Concrete,
 			Parent = parent,
 		})
 	end
 
-	-- Bridge the top of the ramp onto the roof itself.
+	-- Bridge the top of the ramp onto the roof.
 	local topCorner = corners[(runs % 4) + 1]
 	ramp(
-		origin + topCorner + Vector3.new(0, height, 0),
-		origin + topCorner * 0.45 + Vector3.new(0, height + RAMP_THICKNESS * 0.5, 0),
+		origin + topCorner + Vector3.new(0, roofY, 0),
+		origin + topCorner * 0.4 + Vector3.new(0, roofY + SLAB * 0.5, 0),
 		rampWidth,
-		color:Lerp(Color3.fromRGB(90, 90, 90), 0.4),
+		rampColor,
 		parent
 	)
 end
 
---[[
-	A stunt jump: a launch ramp, a gap, and a wide landing ramp angled to
-	catch you. Hit it fast enough and you clear the gap; hit it slow and you
-	land in the middle, which is funny for everyone else.
-]]
+-- =================================================================== PIECES ==
+
+--[[ A stunt jump: launch ramp, a real gap, and a landing ramp to catch you. ]]
 local function stuntJump(origin: Vector3, direction: Vector3, scale: number, color: Color3, parent: Instance)
 	local flat = Vector3.new(direction.X, 0, direction.Z)
-	if flat.Magnitude < 0.01 then
-		flat = Vector3.new(0, 0, 1)
-	end
-	flat = flat.Unit
+	flat = if flat.Magnitude < 0.01 then Vector3.new(0, 0, 1) else flat.Unit
 
 	local launchLength = 40 * scale
 	local launchHeight = 16 * scale
 	local gap = 70 * scale
 	local width = 26
 
-	-- Up ramp.
-	ramp(
-		origin,
-		origin + flat * launchLength + Vector3.new(0, launchHeight, 0),
-		width,
-		color,
-		parent
-	)
+	ramp(origin, origin + flat * launchLength + Vector3.new(0, launchHeight, 0), width, color, parent)
 
-	-- A lip at the top so the car actually leaves the ground cleanly.
-	-- Built with lookAt so it lines up with the ramp on diagonal jumps too,
-	-- instead of sitting across it at an angle.
+	-- A kicker at the top so the car leaves the ground cleanly.
 	local lipCentre = origin + flat * (launchLength + 4) + Vector3.new(0, launchHeight + 1, 0)
 	Util.Part({
 		Name = "JumpLip",
-		Size = Vector3.new(width, RAMP_THICKNESS, 8),
+		Size = Vector3.new(width, SLAB, 8),
 		CFrame = CFrame.lookAt(lipCentre, lipCentre + flat) * CFrame.Angles(math.rad(-18), 0, 0),
 		Color = color,
 		Material = Enum.Material.DiamondPlate,
 		Parent = parent,
 	})
 
-	-- Landing ramp on the far side of the gap, sloping down to meet you.
 	local landingStart = origin + flat * (launchLength + gap)
 	ramp(
 		landingStart + Vector3.new(0, launchHeight * 0.75, 0),
@@ -1596,19 +1746,72 @@ local function stuntJump(origin: Vector3, direction: Vector3, scale: number, col
 	)
 end
 
---[[ A patch of mud. Slows wheels down and takes craters when things explode. ]]
+--[[ Roads. They give the map a shape you can learn and drive along fast. ]]
+local function streets(size: number, parent: Instance)
+	local half = size * 0.5
+	local spacing = 190
+	local roadWidth = 44
+	local roadColor = Color3.fromRGB(58, 58, 62)
+
+	local lanes = math.floor(size / spacing)
+	local start = -(lanes - 1) * spacing * 0.5
+
+	for index = 0, lanes - 1 do
+		local offset = start + index * spacing
+
+		-- One road running each way, crossing at the junctions.
+		Util.Part({
+			Name = "Street",
+			Size = Vector3.new(roadWidth, 1, size),
+			CFrame = CFrame.new(offset, 0.6, 0),
+			Color = roadColor,
+			Material = Enum.Material.Asphalt,
+			Parent = parent,
+		})
+		Util.Part({
+			Name = "Street",
+			Size = Vector3.new(size, 1, roadWidth),
+			CFrame = CFrame.new(0, 0.6, offset),
+			Color = roadColor,
+			Material = Enum.Material.Asphalt,
+			Parent = parent,
+		})
+
+		-- Centre lines, so the roads read as roads at speed.
+		Util.Part({
+			Name = "Line",
+			Size = Vector3.new(1.5, 1, size),
+			CFrame = CFrame.new(offset, 1.15, 0),
+			Color = Color3.fromRGB(210, 190, 90),
+			Material = Enum.Material.SmoothPlastic,
+			CanCollide = false,
+			Parent = parent,
+		})
+		Util.Part({
+			Name = "Line",
+			Size = Vector3.new(size, 1, 1.5),
+			CFrame = CFrame.new(0, 1.15, offset),
+			Color = Color3.fromRGB(210, 190, 90),
+			Material = Enum.Material.SmoothPlastic,
+			CanCollide = false,
+			Parent = parent,
+		})
+	end
+
+	local _ = half
+end
+
 local function mudPatch(origin: Vector3, size: number, parent: Instance)
 	Util.Part({
 		Name = "Mud",
 		Size = Vector3.new(size, 2, size),
-		CFrame = CFrame.new(origin + Vector3.new(0, ROAD_Y, 0)),
+		CFrame = CFrame.new(origin + Vector3.new(0, 0.5, 0)),
 		Color = Color3.fromRGB(86, 64, 42),
 		Material = Enum.Material.Mud,
 		Parent = parent,
 	})
 end
 
---[[ Low cover you can shoot over and ram through. ]]
 local function cover(origin: Vector3, rng: Random, color: Color3, parent: Instance)
 	local block = Util.Part({
 		Name = "Cover",
@@ -1619,15 +1822,35 @@ local function cover(origin: Vector3, rng: Random, color: Color3, parent: Instan
 		Parent = parent,
 	})
 	block.CFrame = block.CFrame + Vector3.new(0, block.Size.Y * 0.5, 0)
-	-- Tagged so explosions know they are allowed to blow this up.
 	block:SetAttribute("Destructible", true)
 end
 
 --[[
-	Build one map and hand back everywhere the rest of the game needs to know
-	about: team spawns, vehicle pads and pickup pads.
+	A real SpawnLocation for a team.
+
+	Using Roblox's own spawn system rather than teleporting people around is
+	what stops anybody ever appearing in mid-air: the engine will not place a
+	character until it has one of these to place them on.
 ]]
-function MapService.Build(mapConfig: any): MapBuild
+local function teamSpawn(position: Vector3, teamColor: BrickColor, parent: Instance)
+	local pad = Instance.new("SpawnLocation")
+	pad.Name = "TeamSpawn"
+	pad.Size = Vector3.new(14, 1, 14)
+	pad.CFrame = CFrame.new(position)
+	pad.Anchored = true
+	pad.CanCollide = true
+	pad.TeamColor = teamColor
+	pad.Neutral = false
+	pad.BrickColor = teamColor
+	pad.Material = Enum.Material.Neon
+	pad.Duration = 0
+	pad.Parent = parent
+	return pad
+end
+
+-- ==================================================================== BUILD ==
+
+function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	MapService.Clear()
 
 	local model = Instance.new("Model")
@@ -1635,10 +1858,10 @@ function MapService.Build(mapConfig: any): MapBuild
 
 	local size = mapConfig.Size
 	local half = size * 0.5
-	-- Same seed every time, so a map always looks the way players remember it.
+	-- The same seed every time, so a map looks the way players remember it.
 	local rng = Random.new(#mapConfig.Id * 7919)
 
-	-- The floor. One big slab, perfectly flat, so nothing snags a wheel.
+	-- The floor. One flat slab, so nothing snags a wheel.
 	Util.Part({
 		Name = "Ground",
 		Size = Vector3.new(size, 4, size),
@@ -1648,8 +1871,10 @@ function MapService.Build(mapConfig: any): MapBuild
 		Parent = model,
 	})
 
+	streets(size, model)
+
 	-- Walls, so nobody drives off the edge of the world.
-	local wallHeight = 120
+	local wallHeight = 160
 	for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
 		Util.Part({
 			Name = "Boundary",
@@ -1666,42 +1891,36 @@ function MapService.Build(mapConfig: any): MapBuild
 		})
 	end
 
-	-- Mud. The southern-mudding half of the game.
-	local mudCount = math.floor(mapConfig.MudFraction * 26)
-	for _ = 1, mudCount do
+	for _ = 1, math.floor(mapConfig.MudFraction * 26) do
 		mudPatch(Util.RandomFlatPoint(half * 0.85, rng), rng:NextNumber(50, 130), model)
 	end
 
-	-- Buildings, spaced out on a loose grid so their ramps never overlap.
-	local buildingCount = mapConfig.Buildings
+	-- Buildings, spaced so their outside ramps never overlap.
 	local placed: { Vector3 } = {}
 	local attempts = 0
-	while #placed < buildingCount and attempts < buildingCount * 30 do
+	while #placed < mapConfig.Buildings and attempts < mapConfig.Buildings * 30 do
 		attempts += 1
 		local spot = Util.RandomFlatPoint(half * 0.72, rng)
-		local footprint = rng:NextNumber(45, 85)
 		local clear = true
 		for _, other in placed do
-			if (other - spot).Magnitude < 150 then
+			if (other - spot).Magnitude < 165 then
 				clear = false
 				break
 			end
 		end
 		if clear then
 			table.insert(placed, spot)
-			building(spot, footprint, rng:NextInteger(2, 5), mapConfig.Theme, model)
+			building(spot, rng:NextNumber(50, 88), rng:NextInteger(2, 5), mapConfig.Theme, model)
 		end
 	end
 
-	-- Sky bridges between nearby roofs, so the rooftops are a connected level
-	-- rather than a set of islands.
+	-- Sky bridges, so the rooftops are one connected level instead of islands.
 	for index = 1, #placed - 1 do
 		local a, b = placed[index], placed[index + 1]
-		if (a - b).Magnitude < 260 then
-			local bridgeY = 40
+		if (a - b).Magnitude < 280 then
 			ramp(
-				a + Vector3.new(0, bridgeY, 0),
-				b + Vector3.new(0, bridgeY, 0),
+				a + Vector3.new(0, 44, 0),
+				b + Vector3.new(0, 44, 0),
 				14,
 				Color3.fromRGB(120, 116, 108),
 				model
@@ -1709,42 +1928,38 @@ function MapService.Build(mapConfig: any): MapBuild
 		end
 	end
 
-	-- Stunt jumps.
 	for _ = 1, mapConfig.Jumps do
-		local spot = Util.RandomFlatPoint(half * 0.8, rng)
 		local heading = CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0).LookVector
-		stuntJump(spot, heading, rng:NextNumber(0.8, 2.2), Color3.fromRGB(150, 120, 60), model)
+		stuntJump(Util.RandomFlatPoint(half * 0.8, rng), heading, rng:NextNumber(0.8, 2.2), Color3.fromRGB(150, 120, 60), model)
 	end
 
-	-- Standalone ramps that just launch you somewhere useful.
 	for _ = 1, mapConfig.Ramps do
 		local spot = Util.RandomFlatPoint(half * 0.85, rng)
 		local heading = CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0).LookVector
 		ramp(spot, spot + heading * rng:NextNumber(30, 60) + Vector3.new(0, rng:NextNumber(8, 22), 0), 18, Color3.fromRGB(130, 110, 70), model)
 	end
 
-	-- Cover.
 	for _ = 1, 30 do
 		cover(Util.RandomFlatPoint(half * 0.88, rng), rng, mapConfig.Theme, model)
 	end
 
-	-- Team spawns: opposite ends of the map, spread along a line.
+	-- Team spawns at opposite ends, with real SpawnLocations on them.
 	local teamSpawns: { [number]: { Vector3 } } = { {}, {} }
 	for teamIndex = 1, 2 do
 		local zSign = if teamIndex == 1 then -1 else 1
-		for slot = 1, 10 do
-			local x = -half * 0.5 + (slot - 1) * (half / 9)
-			table.insert(teamSpawns[teamIndex], Vector3.new(x, 6, zSign * half * 0.86))
+		local colour = teamColors[teamIndex] or BrickColor.new("Medium stone grey")
+		for slot = 1, 6 do
+			local x = -half * 0.35 + (slot - 1) * (half * 0.7 / 5)
+			local position = Vector3.new(x, 4, zSign * half * 0.86)
+			table.insert(teamSpawns[teamIndex], position)
+			teamSpawn(position, colour, model)
 		end
 	end
 
-	-- Vehicle pads. The big toys sit here and come back after they are wrecked.
 	local vehiclePads = {}
-	local vehicleKinds = { "TurretTruck", "Tank", "Plane", "Torpedo", "TurretTruck", "Plane" }
-	for index, kind in vehicleKinds do
-		local angle = (index / #vehicleKinds) * math.pi * 2
-		local radius = half * 0.55
-		local position = Vector3.new(math.cos(angle) * radius, 4, math.sin(angle) * radius)
+	for index, kind in { "TurretTruck", "Tank", "Plane", "Torpedo", "TurretTruck", "Plane" } do
+		local angle = (index / 6) * math.pi * 2
+		local position = Vector3.new(math.cos(angle) * half * 0.55, 4, math.sin(angle) * half * 0.55)
 		table.insert(vehiclePads, { position = position, kind = kind })
 
 		Util.Part({
@@ -1757,14 +1972,12 @@ function MapService.Build(mapConfig: any): MapBuild
 		})
 	end
 
-	-- Pickup pads.
 	local pickupPads = {}
 	local pickupKinds = { "Burger", "Fries", "Shield", "Ammo", "Burger", "Fries", "Shield", "Ammo" }
 	for index, kind in pickupKinds do
 		local angle = (index / #pickupKinds) * math.pi * 2 + 0.4
-		local radius = half * 0.3
 		table.insert(pickupPads, {
-			position = Vector3.new(math.cos(angle) * radius, 4, math.sin(angle) * radius),
+			position = Vector3.new(math.cos(angle) * half * 0.3, 4, math.sin(angle) * half * 0.3),
 			kind = kind,
 		})
 	end
@@ -1778,7 +1991,6 @@ function MapService.Build(mapConfig: any): MapBuild
 	}
 end
 
---[[ Tear the current arena down before building the next one. ]]
 function MapService.Clear()
 	local existing = workspace:FindFirstChild("Arena")
 	if existing then
@@ -1803,6 +2015,7 @@ return MapService
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -1830,6 +2043,40 @@ local currentMapSpec: Config.MapSpec? = nil
 -- Map voting.
 local ballot: { Config.MapSpec } = {}
 local votes: { [Player]: number } = {}
+
+-- The one car each player currently owns.
+local playerCars: { [Player]: Model } = {}
+
+--[[ The two team colours, for painting the spawn pads. ]]
+local function teamColours(): { BrickColor }
+	local colours = {}
+	for index, spec in Config.Teams do
+		colours[index] = spec.Color
+	end
+	return colours
+end
+
+--[[
+	Tear down whatever arena is standing and put a new one up.
+
+	This is deliberately separate from starting a round, because the world
+	must never be empty: an arena exists from the moment the server boots,
+	long before the first round begins.
+]]
+local function buildArena(spec: Config.MapSpec)
+	currentMapSpec = spec
+
+	ProjectileService.ClearAll()
+	VehicleService.ClearAll()
+	PickupService.Clear()
+
+	currentMap = MapService.Build(spec, teamColours())
+	local build = currentMap
+	if build then
+		PickupService.Build(build.pickupPads)
+	end
+	MatchService.SpawnMapVehicles()
+end
 
 --[[ Push the scoreboard and the clock to everybody's screen. ]]
 local function broadcast()
@@ -1867,14 +2114,15 @@ local function deployPlayer(player: Player, keepProgress: boolean)
 	root.CFrame = CFrame.new(spot + Vector3.new(0, 5, 0))
 
 	-- A car of your own, parked next to you, at whatever tier your keys earned.
+	-- The last one goes first, so dying twenty times does not leave twenty
+	-- abandoned cars sitting on the map.
+	local previous = playerCars[player]
+	if previous and previous.Parent then
+		previous:Destroy()
+	end
+
 	local state = PlayerState.Get(player)
-	local car = VehicleService.SpawnCar(state.carTier, spot + Vector3.new(14, 0, 0), player)
-	-- Wrecks clear themselves so the map does not fill up with dead cars.
-	task.delay(Config.Match.RoundDuration, function()
-		if car and car.Parent then
-			car:Destroy()
-		end
-	end)
+	playerCars[player] = VehicleService.SpawnCar(state.carTier, spot + Vector3.new(14, 0, 0), player)
 end
 
 --[[ Everybody gets put back on the field. ]]
@@ -1891,7 +2139,7 @@ local function deployAll()
 end
 
 --[[ Park one of each big toy on its pad, and put it back when it is wrecked. ]]
-local function spawnMapVehicles()
+function MatchService.SpawnMapVehicles()
 	local build = currentMap
 	if not build then
 		return
@@ -1970,19 +2218,7 @@ local function tallyVotes(): Config.MapSpec
 end
 
 local function runRound()
-	local chosen = tallyVotes()
-	currentMapSpec = chosen
-
-	ProjectileService.ClearAll()
-	VehicleService.ClearAll()
-
-	currentMap = MapService.Build(chosen)
-	local build = currentMap
-	if build then
-		PickupService.Build(build.pickupPads)
-	end
-	spawnMapVehicles()
-
+	-- The arena is already standing; a round is just the clock and the score.
 	scores = { 0, 0 }
 	phase = "Playing"
 	phaseEndsAt = os.clock() + Config.Match.RoundDuration
@@ -2012,17 +2248,23 @@ local function runIntermission()
 		task.wait(0.5)
 	end
 
+	-- Wreckage and bullets go; the arena itself stays standing until the
+	-- next one is built, so there is never a moment with no world.
 	ProjectileService.ClearAll()
-	VehicleService.ClearAll()
-	PickupService.Clear()
-	MapService.Clear()
-	currentMap = nil
 end
 
---[[ The loop itself. It never stops for as long as the server is up. ]]
+--[[
+	The loop itself. It never stops for as long as the server is up.
+
+	Order matters: we fight on the arena that is already standing, and only
+	vote for the next map afterwards. Voting first would mean twenty seconds
+	of everybody staring at an empty sky.
+]]
 local function loop()
 	while true do
 		if #Players:GetPlayers() < Config.Match.MinPlayers then
+			-- Nobody here yet. The arena still exists, so anyone who does
+			-- turn up can drive around it while they wait.
 			phase = "Warmup"
 			phaseEndsAt = os.clock() + 1
 			broadcast()
@@ -2030,9 +2272,10 @@ local function loop()
 			continue
 		end
 
-		runVoting()
 		runRound()
 		runIntermission()
+		runVoting()
+		buildArena(tallyVotes())
 	end
 end
 
@@ -2075,22 +2318,47 @@ function MatchService.Start()
 		player.CharacterAdded:Connect(function()
 			-- Give the character a moment to finish assembling before moving it.
 			task.wait(0.35)
-			if phase == "Playing" then
-				-- Respawning mid-round keeps your keys, so a good run is not
-				-- wiped out by one unlucky rocket.
-				deployPlayer(player, true)
-			end
+			-- Deploy whatever phase we are in, so you always land on the map
+			-- with a car — including while waiting for a round to start.
+			-- Respawning keeps your keys, so one unlucky rocket does not wipe
+			-- out a good run.
+			deployPlayer(player, true)
 		end)
 
 		if player.Character then
-			task.wait(0.35)
-			deployPlayer(player, true)
+			task.spawn(function()
+				task.wait(0.35)
+				deployPlayer(player, true)
+			end)
 		end
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
 		votes[player] = nil
+		local car = playerCars[player]
+		if car and car.Parent then
+			car:Destroy()
+		end
+		playerCars[player] = nil
 	end)
+
+	-- A safety net. Fly a plane over the boundary wall and you would otherwise
+	-- fall forever; this notices and respawns you instead.
+	RunService.Heartbeat:Connect(function()
+		for _, player in Players:GetPlayers() do
+			local character = player.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			if root and root:IsA("BasePart") and root.Position.Y < -120 then
+				local humanoid = character:FindFirstChildOfClass("Humanoid")
+				if humanoid and humanoid.Health > 0 then
+					humanoid.Health = 0
+				end
+			end
+		end
+	end)
+
+	-- The world exists before anybody can possibly join it.
+	buildArena(Config.Maps[rng:NextInteger(1, #Config.Maps)])
 
 	task.spawn(loop)
 end
