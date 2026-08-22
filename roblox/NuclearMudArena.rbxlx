@@ -3630,6 +3630,51 @@ local function buildChassis(
 	return model, chassis
 end
 
+--[[
+	Put a "press E" prompt on a seat.
+
+	Without this you cannot get into anything. The seat sits on top of the
+	chassis at about 8.5 studs, and a Roblox character jumps roughly 7.2 —
+	so there is no way to climb aboard by walking into it. Walk up, press E.
+]]
+local function addSitPrompt(seat: Seat | VehicleSeat, actionText: string, vehicleName: string)
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "SitPrompt"
+	prompt.ActionText = actionText
+	prompt.ObjectText = vehicleName
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 16
+	-- The car body is between you and the seat, so line of sight would stop
+	-- the prompt appearing exactly where you need it.
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = seat
+
+	prompt.Triggered:Connect(function(player)
+		local character = player.Character
+		if not character then
+			return
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if not humanoid or humanoid.Health <= 0 then
+			return
+		end
+		-- Already sitting somewhere? Get out rather than teleporting across.
+		if humanoid.SeatPart then
+			return
+		end
+		-- Seat and VehicleSeat both have Sit, but Roblox makes them siblings
+		-- rather than parent and child, so the call has to be narrowed first.
+		if seat:IsA("VehicleSeat") then
+			seat:Sit(humanoid)
+		else
+			seat:Sit(humanoid)
+		end
+	end)
+
+	return prompt
+end
+
 --[[ The driver's seat. Sitting in it is what gives us Throttle and Steer. ]]
 local function addDriverSeat(chassis: BasePart, model: Model, offset: Vector3): VehicleSeat
 	local seat = Instance.new("VehicleSeat")
@@ -3645,6 +3690,7 @@ local function addDriverSeat(chassis: BasePart, model: Model, offset: Vector3): 
 	seat.TurnSpeed = 0
 	seat.Parent = model
 	Util.Weld(chassis, seat)
+	addSitPrompt(seat, "Drive", model.Name)
 	return seat
 end
 
@@ -3659,6 +3705,7 @@ local function addPassengerSeat(attachTo: BasePart, model: Model, offset: Vector
 	seat.Massless = true
 	seat.Parent = model
 	Util.Weld(attachTo, seat)
+	addSitPrompt(seat, if name == "GunnerSeat" then "Man the gun" else "Sit", model.Name)
 	return seat
 end
 
@@ -4007,6 +4054,7 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 	saddle.TurnSpeed = 0
 	saddle.Parent = model
 	Util.Weld(body, saddle)
+	addSitPrompt(saddle, "Ride it", "Torpedo")
 
 	local fins = Util.Part({
 		Name = "Fins",

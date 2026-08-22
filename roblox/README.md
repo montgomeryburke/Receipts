@@ -20,6 +20,7 @@ need to touch anything else.
 
 | Input | Does |
 | --- | --- |
+| **E** | Get into a vehicle (walk up to it first) |
 | **WASD** | Drive / fly / steer the torpedo |
 | **Left mouse** | Fire (hold for automatic guns) |
 | **Right mouse** | Zoom, on guns with a scope |
@@ -31,6 +32,10 @@ Slots: 1 sidearms, 2 automatics, 3 shotguns, 4 snipers, 5 the diamond gun,
 6 explosives (grenades, sticky bombs, RPG).
 
 ## The vehicles
+
+**Walk up to any vehicle and press E to get in.** The seat sits on the roof of
+the chassis, well above jumping height, so pressing E is the way aboard — there
+is nothing to climb.
 
 Cars spawn next to you and get faster as you collect keys — one key per
 elimination. The big vehicles sit on marked pads around the map and come back
