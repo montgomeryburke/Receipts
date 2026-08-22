@@ -35,6 +35,10 @@ export type State = {
 	friesUntil: number,
 	spawnProtectedUntil: number,
 	nextMeleeAt: number,
+	-- Points scored this round, and the multiplier ticking down on them.
+	points: number,
+	multiplierUntil: number,
+	multiplierAmount: number,
 	kills: number,
 	deaths: number,
 	-- The vehicle this player is sitting in, if any.
@@ -82,6 +86,9 @@ function PlayerState.Reset(player: Player, keepProgress: boolean)
 		friesUntil = 0,
 		spawnProtectedUntil = os.clock() + Config.Combat.SpawnProtection,
 		nextMeleeAt = 0,
+		points = if previous then previous.points else 0,
+		multiplierUntil = if keepProgress and previous then previous.multiplierUntil else 0,
+		multiplierAmount = if keepProgress and previous then previous.multiplierAmount else 1,
 		kills = if previous then previous.kills else 0,
 		deaths = if previous then previous.deaths else 0,
 		vehicle = nil,
@@ -117,6 +124,24 @@ function PlayerState.BarrelCount(player: Player): number
 		return Config.Pickups.Fries.Barrels
 	end
 	return 1
+end
+
+--[[ The multiplier on this player's points right now, or 1. ]]
+function PlayerState.PointMultiplier(player: Player): number
+	local state = PlayerState.Get(player)
+	if os.clock() < state.multiplierUntil then
+		return state.multiplierAmount
+	end
+	return 1
+end
+
+--[[ Score, with whatever multiplier is running applied. ]]
+function PlayerState.AwardPoints(player: Player, base: number): number
+	local state = PlayerState.Get(player)
+	local earned = math.floor(base * PlayerState.PointMultiplier(player))
+	state.points += earned
+	PlayerState.Changed.Fire(player)
+	return earned
 end
 
 --[[ Shields grow back once nobody has shot you for a few seconds. ]]

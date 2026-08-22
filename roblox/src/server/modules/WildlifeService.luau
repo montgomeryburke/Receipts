@@ -1,20 +1,16 @@
 --!strict
 --[[
-	WildlifeService — the giant animals.
+	WildlifeService — everything on the map that is alive and is not a player.
 
-	King Kong sized cats, elephants, dogs, fish and gorillas wander the map.
-	Bullets do not kill them; each species has its own way of shrugging a hit
-	off. Only a diamond bullet's mega-detonation puts one down, and when it
-	goes it bursts into a red cloud and something *different* turns up
-	elsewhere a few seconds later.
+	  Zombies    roam, come for you, and hit you if they reach you.
+	  Civilians  wander, and say something regrettable when shot.
+	  Targets    stand still with a bullseye on them, for practice.
 
-	You can climb on one and ride it. You cannot use a gun while you do — the
-	animal is the weapon, and it flattens whatever it runs over.
+	All three are worth points, all three come back a few seconds after they
+	go down, and all three carry a target ring so you can pick them out.
 
-	The animals are anchored and moved by script rather than being physics
-	objects. A forty-stud ragdoll shouldering its way through a firefight
-	would fling everybody into orbit, and an anchored one cannot wedge itself
-	in a doorway and stay there for the rest of the round.
+	Poop is still here too: elephants are gone, but a pile that gets shot
+	turns into a tower with a staircase round it.
 ]]
 
 local Players = game:GetService("Players")
@@ -32,252 +28,301 @@ local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
 local WildlifeService = {}
 
-type Species = typeof(Config.Beasts[1])
-
-type Beast = {
+type Dweller = {
+	kind: string,
 	model: Model,
-	body: BasePart,
-	head: BasePart?,
-	seat: VehicleSeat,
-	species: Species,
+	root: BasePart,
 	position: Vector3,
 	facing: Vector3,
 	target: Vector3,
+	health: number,
+	maxHealth: number,
 	standHeight: number,
-	-- "Wander" normally; a species-specific reaction when shot.
-	mood: string,
-	moodUntil: number,
-	nextPoopAt: number,
-	lastTrampleAt: number,
+	nextAttackAt: number,
+	dead: boolean,
 }
 
-local beasts: { Beast } = {}
+local dwellers: { Dweller } = {}
 local poopPiles: { BasePart } = {}
 local wanderRadius = 300
 local rng = Random.new()
 
-local S = Config.Beast.Scale
+-- ================================================================ FURNITURE ==
+
+--[[ The bullseye ring that marks anything worth shooting. ]]
+local function addBullseye(attachTo: BasePart, height: number)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "Bullseye"
+	billboard.Size = UDim2.fromOffset(70, 70)
+	billboard.StudsOffset = Vector3.new(0, height, 0)
+	billboard.AlwaysOnTop = false
+	billboard.MaxDistance = 500
+	billboard.Parent = attachTo
+
+	-- Concentric rings, red and white, drawn out of nested frames.
+	local shades = {
+		Color3.fromRGB(220, 40, 40),
+		Color3.fromRGB(245, 245, 245),
+		Color3.fromRGB(220, 40, 40),
+		Color3.fromRGB(245, 245, 245),
+	}
+	local parent: Instance = billboard
+	for index, shade in shades do
+		local ring = Instance.new("Frame")
+		ring.Size = if index == 1 then UDim2.fromScale(1, 1) else UDim2.fromScale(0.72, 0.72)
+		ring.Position = if index == 1 then UDim2.fromScale(0, 0) else UDim2.fromScale(0.14, 0.14)
+		ring.BackgroundColor3 = shade
+		ring.BorderSizePixel = 0
+		ring.Parent = parent
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(1, 0)
+		corner.Parent = ring
+
+		parent = ring
+	end
+end
+
+--[[ A floating line of speech above someone's head. ]]
+local function say(attachTo: BasePart, text: string, colour: Color3, seconds: number)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromScale(18, 3)
+	billboard.StudsOffset = Vector3.new(0, 6, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 400
+	billboard.Parent = attachTo
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = colour
+	label.TextStrokeTransparency = 0.25
+	label.TextScaled = true
+	label.Font = Enum.Font.LuckiestGuy
+	label.Parent = billboard
+
+	Debris:AddItem(billboard, seconds)
+end
+
+--[[ A green cloud, for the obvious reason. ]]
+local function fart(position: Vector3)
+	local anchor = Util.Part({
+		Name = "Fart",
+		Size = Vector3.new(0.5, 0.5, 0.5),
+		CFrame = CFrame.new(position),
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = workspace,
+	})
+
+	local cloud = Instance.new("ParticleEmitter")
+	cloud.Color = ColorSequence.new(Color3.fromRGB(150, 200, 90))
+	cloud.Size = NumberSequence.new(3, 9)
+	cloud.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.25),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	cloud.Lifetime = NumberRange.new(0.9, 1.8)
+	cloud.Speed = NumberRange.new(4, 11)
+	cloud.SpreadAngle = Vector2.new(60, 60)
+	cloud.Rate = 0
+	cloud.Parent = anchor
+	cloud:Emit(40)
+
+	Debris:AddItem(anchor, 3)
+end
 
 -- ================================================================= BUILDING ==
 
-local function limb(parent: Instance, anchorTo: BasePart, size: Vector3, offset: CFrame, colour: Color3, name: string): BasePart
-	local part = Util.Part({
-		Name = name,
-		Size = size,
-		CFrame = anchorTo.CFrame * offset,
-		Color = colour,
-		Material = Enum.Material.SmoothPlastic,
-		-- Players and bullets pass through the body: it is a moving landmark
-		-- with a temper, not a wall to get pinned against.
-		CanCollide = false,
-		Parent = parent,
-	})
-	Util.Weld(anchorTo, part)
-	return part
-end
-
---[[ Four legs, a body, a head. The shape that covers cat, dog and elephant. ]]
-local function buildQuadruped(
-	species: Species,
-	position: Vector3,
-	bodySize: Vector3,
-	legLength: number,
-	headSize: number,
-	extras: string
-): (Model, BasePart, BasePart, number)
+--[[ A rough person: torso, head, arms, legs. Colour tells you which kind. ]]
+local function buildPerson(position: Vector3, skin: Color3, clothes: Color3, name: string): (Model, BasePart, number)
 	local model = Instance.new("Model")
-	model.Name = species.Name
+	model.Name = name
 
-	local standHeight = legLength + bodySize.Y * 0.5
-	local colour = species.Colour
+	local standHeight = 5.5
 
-	local body = Util.Part({
-		Name = "Body",
-		Size = bodySize,
+	local torso = Util.Part({
+		Name = "Torso",
+		Size = Vector3.new(2.6, 3.4, 1.5),
 		CFrame = CFrame.new(position + Vector3.new(0, standHeight, 0)),
-		Color = colour,
+		Color = clothes,
+		Material = Enum.Material.Fabric,
+		CanCollide = false,
+		Parent = model,
+	})
+	model.PrimaryPart = torso
+
+	local head = Util.Part({
+		Name = "Head",
+		Size = Vector3.new(1.7, 1.7, 1.7),
+		CFrame = torso.CFrame * CFrame.new(0, 2.6, 0),
+		Color = skin,
 		Material = Enum.Material.SmoothPlastic,
 		CanCollide = false,
 		Parent = model,
 	})
-	model.PrimaryPart = body
+	Util.Weld(torso, head)
 
-	local head = limb(
-		model, body,
-		Vector3.new(headSize, headSize, headSize),
-		CFrame.new(0, bodySize.Y * 0.35, -bodySize.Z * 0.55 - headSize * 0.4),
-		colour:Lerp(Color3.new(1, 1, 1), 0.08),
-		"Head"
+	for _, side in { -1, 1 } do
+		local arm = Util.Part({
+			Name = "Arm",
+			Size = Vector3.new(0.9, 3.2, 0.9),
+			CFrame = torso.CFrame * CFrame.new(side * 1.75, 0, 0),
+			Color = skin,
+			Material = Enum.Material.SmoothPlastic,
+			CanCollide = false,
+			Parent = model,
+		})
+		Util.Weld(torso, arm)
+
+		local leg = Util.Part({
+			Name = "Leg",
+			Size = Vector3.new(1.1, 3.4, 1.1),
+			CFrame = torso.CFrame * CFrame.new(side * 0.7, -3.4, 0),
+			Color = clothes:Lerp(Color3.new(0, 0, 0), 0.4),
+			Material = Enum.Material.Fabric,
+			CanCollide = false,
+			Parent = model,
+		})
+		Util.Weld(torso, leg)
+	end
+
+	model.Parent = workspace
+	return model, torso, standHeight
+end
+
+local function spawnZombie(position: Vector3)
+	local model, torso, standHeight = buildPerson(
+		position,
+		Color3.fromRGB(126, 158, 110),
+		Color3.fromRGB(72, 84, 66),
+		"Zombie"
 	)
+	model:SetAttribute("Dweller", "Zombie")
+	addBullseye(torso, 5)
 
-	-- Legs.
-	for _, corner in {
-		Vector3.new(-1, 0, -1), Vector3.new(1, 0, -1),
-		Vector3.new(-1, 0, 1), Vector3.new(1, 0, 1),
-	} do
-		limb(
-			model, body,
-			Vector3.new(bodySize.X * 0.22, legLength, bodySize.X * 0.22),
-			CFrame.new(
-				corner.X * bodySize.X * 0.34,
-				-bodySize.Y * 0.5 - legLength * 0.5,
-				corner.Z * bodySize.Z * 0.32
-			),
-			colour:Lerp(Color3.new(0, 0, 0), 0.12),
-			"Leg"
-		)
-	end
-
-	if extras == "Cat" then
-		-- Pointed ears and a long tail.
-		for _, side in { -1, 1 } do
-			limb(model, head, Vector3.new(headSize * 0.18, headSize * 0.45, headSize * 0.18),
-				CFrame.new(side * headSize * 0.28, headSize * 0.6, 0), colour, "Ear")
-		end
-		-- Annotated, because `body` is a Part and each tail segment comes
-		-- back as a BasePart.
-		local previous: BasePart = body
-		for segment = 1, 6 do
-			previous = limb(model, previous,
-				Vector3.new(headSize * 0.2, headSize * 0.2, bodySize.Z * 0.18),
-				CFrame.new(0, bodySize.Y * 0.3, bodySize.Z * 0.35 + segment * bodySize.Z * 0.12),
-				colour, "Tail")
-		end
-		-- Whiskers, because it should read as a cat from a distance.
-		for _, side in { -1, 1 } do
-			limb(model, head, Vector3.new(headSize * 0.9, 0.5 * S, 0.5 * S),
-				CFrame.new(side * headSize * 0.5, -headSize * 0.1, -headSize * 0.45),
-				Color3.fromRGB(240, 240, 235), "Whisker")
-		end
-	elseif extras == "Dog" then
-		-- Floppy ears, a snout and a stubby tail.
-		for _, side in { -1, 1 } do
-			limb(model, head, Vector3.new(headSize * 0.16, headSize * 0.55, headSize * 0.4),
-				CFrame.new(side * headSize * 0.5, headSize * 0.15, 0),
-				colour:Lerp(Color3.new(0, 0, 0), 0.2), "Ear")
-		end
-		limb(model, head, Vector3.new(headSize * 0.45, headSize * 0.4, headSize * 0.6),
-			CFrame.new(0, -headSize * 0.15, -headSize * 0.7),
-			colour:Lerp(Color3.new(0, 0, 0), 0.15), "Snout")
-		limb(model, body, Vector3.new(headSize * 0.25, headSize * 0.25, bodySize.Z * 0.3),
-			CFrame.new(0, bodySize.Y * 0.35, bodySize.Z * 0.6), colour, "Tail")
-	elseif extras == "Elephant" then
-		-- Trunk, ears, tusks.
-		local previous = head
-		for segment = 1, 5 do
-			local thickness = headSize * (0.34 - segment * 0.04)
-			previous = limb(model, previous, Vector3.new(thickness, thickness, headSize * 0.3),
-				CFrame.new(0, -headSize * 0.3, -headSize * 0.35), colour, "Trunk")
-		end
-		for _, side in { -1, 1 } do
-			limb(model, head, Vector3.new(headSize * 0.1, headSize * 0.8, headSize * 0.8),
-				CFrame.new(side * headSize * 0.55, headSize * 0.1, headSize * 0.1),
-				colour:Lerp(Color3.new(1, 1, 1), 0.12), "Ear")
-			limb(model, head, Vector3.new(headSize * 0.12, headSize * 0.12, headSize * 0.75),
-				CFrame.new(side * headSize * 0.25, -headSize * 0.35, -headSize * 0.5),
-				Color3.fromRGB(240, 235, 215), "Tusk")
+	-- Arms out in front, so it reads as a zombie at a glance.
+	for _, arm in model:GetChildren() do
+		if arm:IsA("BasePart") and arm.Name == "Arm" then
+			arm.CFrame = arm.CFrame * CFrame.new(0, 1.1, -1.5) * CFrame.Angles(math.rad(-75), 0, 0)
 		end
 	end
 
-	model.Parent = workspace
-	return model, body, head, standHeight
+	table.insert(dwellers, {
+		kind = "Zombie",
+		model = model,
+		root = torso :: BasePart,
+		position = position,
+		facing = Vector3.new(0, 0, 1),
+		target = position,
+		health = Config.Population.ZombieHealth,
+		maxHealth = Config.Population.ZombieHealth,
+		standHeight = standHeight,
+		nextAttackAt = 0,
+		dead = false,
+	})
 end
 
---[[ A fish. No legs, so on land it can only flop, which is the joke. ]]
-local function buildFish(species: Species, position: Vector3): (Model, BasePart, BasePart, number)
+local function spawnCivilian(position: Vector3)
+	local shirts = {
+		Color3.fromRGB(220, 90, 90), Color3.fromRGB(90, 140, 220),
+		Color3.fromRGB(240, 200, 80), Color3.fromRGB(140, 200, 130),
+		Color3.fromRGB(200, 120, 210),
+	}
+	local model, torso, standHeight = buildPerson(
+		position,
+		Color3.fromRGB(226, 186, 150),
+		shirts[rng:NextInteger(1, #shirts)],
+		"Civilian"
+	)
+	model:SetAttribute("Dweller", "Civilian")
+	addBullseye(torso, 5)
+
+	table.insert(dwellers, {
+		kind = "Civilian",
+		model = model,
+		root = torso :: BasePart,
+		position = position,
+		facing = Vector3.new(0, 0, 1),
+		target = position,
+		health = Config.Population.CivilianHealth,
+		maxHealth = Config.Population.CivilianHealth,
+		standHeight = standHeight,
+		nextAttackAt = 0,
+		dead = false,
+	})
+end
+
+--[[ A practice target on a post: board, bullseye, and a stand. ]]
+local function spawnTarget(position: Vector3)
 	local model = Instance.new("Model")
-	model.Name = species.Name
+	model.Name = "PracticeTarget"
+	model:SetAttribute("Dweller", "Target")
 
-	local bodySize = Vector3.new(16 * S, 20 * S, 42 * S)
-	local standHeight = bodySize.Y * 0.5
-
-	local body = Util.Part({
-		Name = "Body",
-		Size = bodySize,
-		CFrame = CFrame.new(position + Vector3.new(0, standHeight, 0)),
-		Color = species.Colour,
-		Material = Enum.Material.SmoothPlastic,
-		CanCollide = false,
+	local post = Util.Part({
+		Name = "Post",
+		Size = Vector3.new(1.2, 12, 1.2),
+		CFrame = CFrame.new(position + Vector3.new(0, 6, 0)),
+		Color = Color3.fromRGB(110, 82, 54),
+		Material = Enum.Material.Wood,
 		Parent = model,
 	})
-	model.PrimaryPart = body
 
-	local head = limb(model, body, Vector3.new(bodySize.X * 0.8, bodySize.Y * 0.8, bodySize.Z * 0.25),
-		CFrame.new(0, 0, -bodySize.Z * 0.55), species.Colour:Lerp(Color3.new(1, 1, 1), 0.1), "Head")
-
-	-- Eyes, enormous and unblinking.
-	for _, side in { -1, 1 } do
-		limb(model, head, Vector3.new(bodySize.X * 0.3, bodySize.X * 0.3, bodySize.X * 0.3),
-			CFrame.new(side * bodySize.X * 0.35, bodySize.Y * 0.2, -bodySize.Z * 0.05),
-			Color3.fromRGB(250, 250, 250), "Eye")
-	end
-
-	-- Tail fin and side fins.
-	limb(model, body, Vector3.new(bodySize.X * 0.25, bodySize.Y * 1.3, bodySize.Z * 0.3),
-		CFrame.new(0, 0, bodySize.Z * 0.62), species.Colour:Lerp(Color3.new(0, 0, 0), 0.15), "TailFin")
-	for _, side in { -1, 1 } do
-		limb(model, body, Vector3.new(bodySize.X * 0.7, bodySize.Y * 0.12, bodySize.Z * 0.28),
-			CFrame.new(side * bodySize.X * 0.55, -bodySize.Y * 0.15, 0),
-			species.Colour:Lerp(Color3.new(0, 0, 0), 0.15), "Fin")
-	end
-	limb(model, body, Vector3.new(bodySize.X * 0.15, bodySize.Y * 0.5, bodySize.Z * 0.4),
-		CFrame.new(0, bodySize.Y * 0.6, 0), species.Colour:Lerp(Color3.new(0, 0, 0), 0.2), "DorsalFin")
-
-	model.Parent = workspace
-	return model, body, head, standHeight
-end
-
---[[ A gorilla: upright, huge arms, small legs. ]]
-local function buildGorilla(species: Species, position: Vector3): (Model, BasePart, BasePart, number)
-	local model = Instance.new("Model")
-	model.Name = species.Name
-
-	local torsoSize = Vector3.new(22 * S, 26 * S, 16 * S)
-	local legLength = 12 * S
-	local standHeight = legLength + torsoSize.Y * 0.5
-
-	local body = Util.Part({
-		Name = "Body",
-		Size = torsoSize,
-		CFrame = CFrame.new(position + Vector3.new(0, standHeight, 0)),
-		Color = species.Colour,
-		Material = Enum.Material.SmoothPlastic,
-		CanCollide = false,
+	local board = Util.Part({
+		Name = "Board",
+		Size = Vector3.new(11, 11, 0.8),
+		CFrame = CFrame.new(position + Vector3.new(0, 15, 0))
+			* CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0),
+		Color = Color3.fromRGB(245, 245, 240),
+		Material = Enum.Material.WoodPlanks,
 		Parent = model,
 	})
-	model.PrimaryPart = body
+	model.PrimaryPart = board
+	Util.Weld(post, board)
 
-	local head = limb(model, body, Vector3.new(12 * S, 11 * S, 12 * S),
-		CFrame.new(0, torsoSize.Y * 0.62, -1 * S), species.Colour:Lerp(Color3.new(1, 1, 1), 0.1), "Head")
-	limb(model, head, Vector3.new(8 * S, 5 * S, 3 * S),
-		CFrame.new(0, -2 * S, -6 * S), Color3.fromRGB(48, 44, 44), "Muzzle")
+	-- Painted rings, front and back, so it works from either side.
+	for _, facing in { 1, -1 } do
+		local radius = 5.0
+		for ring = 1, 4 do
+			Util.Part({
+				Name = "Ring",
+				Size = Vector3.new(radius * 2, radius * 2, 0.2),
+				CFrame = board.CFrame * CFrame.new(0, 0, facing * (0.45 + ring * 0.01)),
+				Shape = Enum.PartType.Cylinder,
+				Color = if ring % 2 == 1 then Color3.fromRGB(220, 40, 40) else Color3.fromRGB(250, 250, 250),
+				Material = Enum.Material.SmoothPlastic,
+				CanCollide = false,
+				Parent = model,
+			})
+			radius *= 0.72
+		end
+	end
 
-	-- Arms down to the floor, as they should be.
-	for _, side in { -1, 1 } do
-		limb(model, body, Vector3.new(7 * S, 26 * S, 7 * S),
-			CFrame.new(side * torsoSize.X * 0.62, -torsoSize.Y * 0.15, 0),
-			species.Colour:Lerp(Color3.new(0, 0, 0), 0.1), "Arm")
-		limb(model, body, Vector3.new(8 * S, legLength, 8 * S),
-			CFrame.new(side * torsoSize.X * 0.28, -torsoSize.Y * 0.5 - legLength * 0.5, 0),
-			species.Colour:Lerp(Color3.new(0, 0, 0), 0.15), "Leg")
+	-- A cylinder lies on its own X, so the rings need standing upright.
+	for _, ring in model:GetChildren() do
+		if ring:IsA("BasePart") and ring.Name == "Ring" then
+			ring.CFrame = ring.CFrame * CFrame.Angles(0, math.rad(90), 0)
+			Util.Weld(board, ring)
+		end
 	end
 
 	model.Parent = workspace
-	return model, body, head, standHeight
-end
 
---[[ Build whichever species this is. ]]
-local function buildSpecies(species: Species, position: Vector3): (Model, BasePart, BasePart?, number)
-	if species.Id == "Fish" then
-		return buildFish(species, position)
-	elseif species.Id == "Gorilla" then
-		return buildGorilla(species, position)
-	elseif species.Id == "Cat" then
-		return buildQuadruped(species, position, Vector3.new(16 * S, 14 * S, 34 * S), 13 * S, 13 * S, "Cat")
-	elseif species.Id == "Dog" then
-		return buildQuadruped(species, position, Vector3.new(15 * S, 15 * S, 30 * S), 14 * S, 13 * S, "Dog")
-	end
-	return buildQuadruped(species, position, Vector3.new(22 * S, 20 * S, 40 * S), 18 * S, 16 * S, "Elephant")
+	table.insert(dwellers, {
+		kind = "Target",
+		model = model,
+		root = board :: BasePart,
+		position = position,
+		facing = Vector3.new(0, 0, 1),
+		target = position,
+		health = Config.Population.TargetHealth,
+		maxHealth = Config.Population.TargetHealth,
+		standHeight = 15,
+		nextAttackAt = 0,
+		dead = false,
+	})
 end
 
 -- ==================================================================== POOP ==
@@ -289,7 +334,6 @@ local function collectPoop(player: Player, pile: BasePart)
 	if not slot or not spec then
 		return
 	end
-
 	slot.ammo = math.min(spec.MagSize, slot.ammo + Config.Wildlife.PoopPerPile)
 	PlayerState.Changed.Fire(player)
 	Remotes.Event("Notify"):FireClient(player, "Picked up poop — press 7 to throw it")
@@ -299,6 +343,90 @@ local function collectPoop(player: Player, pile: BasePart)
 		table.remove(poopPiles, index)
 	end
 	pile:Destroy()
+end
+
+--[[
+	Shoot a pile and it grows into a tower with a staircase wrapped round it.
+
+	Which is ridiculous, and also genuinely useful: the top is a good sniping
+	platform, and the only way up is the stairs.
+]]
+local function raisePoopColumn(pile: BasePart)
+	local base = pile.Position
+	local index = table.find(poopPiles, pile)
+	if index then
+		table.remove(poopPiles, index)
+	end
+	pile:Destroy()
+
+	local model = Instance.new("Model")
+	model.Name = "PoopColumn"
+
+	local height = 84
+	local radius = 7
+
+	local column = Util.Part({
+		Name = "Column",
+		Size = Vector3.new(radius * 2, height, radius * 2),
+		CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)),
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(92, 64, 38),
+		Material = Enum.Material.Sand,
+		Parent = model,
+	})
+	-- Stand the cylinder upright.
+	column.CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
+
+	-- The platform on top.
+	Util.Part({
+		Name = "Platform",
+		Size = Vector3.new(radius * 4, 1.5, radius * 4),
+		CFrame = CFrame.new(base + Vector3.new(0, height, 0)),
+		Color = Color3.fromRGB(104, 74, 44),
+		Material = Enum.Material.Sand,
+		Parent = model,
+	})
+	-- A lip, so you can lie down up there without rolling off.
+	for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
+		Util.Part({
+			Name = "Lip",
+			Size = Vector3.new(
+				if side.X ~= 0 then 1 else radius * 4,
+				3,
+				if side.Z ~= 0 then 1 else radius * 4
+			),
+			CFrame = CFrame.new(base + side * radius * 2 + Vector3.new(0, height + 2, 0)),
+			Color = Color3.fromRGB(84, 58, 34),
+			Material = Enum.Material.Sand,
+			Parent = model,
+		})
+	end
+
+	-- The spiral: one step at a time, round and round.
+	local steps = 64
+	local turns = 3.5
+	for step = 1, steps do
+		local fraction = step / steps
+		local angle = fraction * turns * math.pi * 2
+		local y = fraction * (height - 2)
+		local outward = radius + 3.5
+
+		Util.Part({
+			Name = "SpiralStep",
+			Size = Vector3.new(7, 1, 4.5),
+			CFrame = CFrame.new(base + Vector3.new(math.cos(angle) * outward, y, math.sin(angle) * outward))
+				* CFrame.Angles(0, -angle + math.pi * 0.5, 0),
+			Color = Color3.fromRGB(120, 88, 52),
+			Material = Enum.Material.WoodPlanks,
+			Parent = model,
+		})
+	end
+
+	model.Parent = workspace
+
+	for _, player in Players:GetPlayers() do
+		Remotes.Event("Notify"):FireClient(player, "A poop tower has risen. There are stairs.")
+	end
 end
 
 local function dropPoop(position: Vector3)
@@ -319,20 +447,7 @@ local function dropPoop(position: Vector3)
 		CanCollide = false,
 		Parent = workspace,
 	})
-
-	for lump = 1, 2 do
-		local extra = Util.Part({
-			Name = "Lump",
-			Size = Vector3.new(5 - lump, 3.5, 5 - lump),
-			CFrame = pile.CFrame * CFrame.new(rng:NextNumber(-2, 2), lump * 2, rng:NextNumber(-2, 2)),
-			Shape = Enum.PartType.Ball,
-			Color = Color3.fromRGB(84, 58, 34),
-			Material = Enum.Material.Sand,
-			CanCollide = false,
-			Parent = pile,
-		})
-		Util.Weld(pile, extra)
-	end
+	pile:SetAttribute("Poop", true)
 
 	local billboard = Instance.new("BillboardGui")
 	billboard.Size = UDim2.fromScale(6, 1.6)
@@ -363,227 +478,111 @@ local function dropPoop(position: Vector3)
 	end)
 
 	table.insert(poopPiles, pile)
-	Debris:AddItem(pile, Config.Wildlife.PoopLifetime)
 end
 
--- ================================================================== SPAWNING ==
-
-local function pickTarget(): Vector3
-	return Vector3.new(
-		rng:NextNumber(-wanderRadius, wanderRadius),
-		0,
-		rng:NextNumber(-wanderRadius, wanderRadius)
-	)
-end
-
---[[ Sit a beast on whatever the ground turns out to be beneath it. ]]
-local function groundHeight(position: Vector3, ignore: Instance): number
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { ignore }
-	local hit = workspace:Raycast(position + Vector3.new(0, 200, 0), Vector3.new(0, -600, 0), params)
-	return if hit then hit.Position.Y else 0
-end
-
-local function spawnBeast(species: Species, position: Vector3)
-	local model, body, head, standHeight = buildSpecies(species, position)
-
-	model:SetAttribute("IsBeast", true)
-	model:SetAttribute("Species", species.Id)
-
-	-- A saddle on its back, with a prompt to climb aboard.
-	local seat = Instance.new("VehicleSeat")
-	seat.Name = "BeastSeat"
-	seat.Size = Vector3.new(8, 1, 10)
-	seat.CFrame = body.CFrame * CFrame.new(0, body.Size.Y * 0.5 + 1, 0)
-	seat.Anchored = false
-	seat.Massless = true
-	seat.MaxSpeed = 0
-	seat.Torque = 0
-	seat.TurnSpeed = 0
-	seat.Color = Color3.fromRGB(90, 60, 40)
-	seat.Parent = model
-	Util.Weld(body, seat)
-
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = "Ride it"
-	prompt.ObjectText = species.Name
-	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.HoldDuration = 0
-	prompt.MaxActivationDistance = 40
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = seat
-
-	prompt.Triggered:Connect(function(player)
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid and humanoid.Health > 0 and not humanoid.SeatPart then
-			seat:Sit(humanoid)
-		end
-	end)
-
-	-- Riding one takes your guns away and gives you the animal instead.
-	seat:GetPropertyChangedSignal("Occupant"):Connect(function()
-		local occupant = seat.Occupant
-		if occupant then
-			local character = occupant.Parent
-			local player = if character then Players:GetPlayerFromCharacter(character) else nil
-			if player then
-				local state = PlayerState.Get(player)
-				state.vehicle = model
-				state.seatRole = "Beast"
-				PlayerState.Changed.Fire(player)
-				Remotes.Event("Notify"):FireClient(
-					player,
-					`Riding the {species.Name}. No guns — run them over instead.`
-				)
-			end
-			return
-		end
-		for _, player in Players:GetPlayers() do
-			local state = PlayerState.Get(player)
-			if state.vehicle == model and state.seatRole == "Beast" then
-				state.vehicle = nil
-				state.seatRole = nil
-				PlayerState.Changed.Fire(player)
-			end
-		end
-	end)
-
-	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromScale(20, 4)
-	billboard.StudsOffset = Vector3.new(0, body.Size.Y * 0.9, 0)
-	billboard.AlwaysOnTop = true
-	billboard.MaxDistance = 1500
-	billboard.Parent = body
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Text = species.Name
-	label.TextColor3 = Color3.fromRGB(255, 220, 180)
-	label.TextStrokeTransparency = 0.25
-	label.TextScaled = true
-	label.Font = Enum.Font.LuckiestGuy
-	label.Parent = billboard
-
-	table.insert(beasts, {
-		model = model,
-		body = body,
-		head = head,
-		seat = seat,
-		species = species,
-		position = position,
-		facing = Vector3.new(0, 0, 1),
-		target = pickTarget(),
-		standHeight = standHeight,
-		mood = "Wander",
-		moodUntil = 0,
-		nextPoopAt = os.clock() + rng:NextNumber(3, Config.Wildlife.PoopInterval),
-		lastTrampleAt = 0,
-	})
-end
-
---[[ Come back somewhere else, as something else. ]]
-local function respawnAsDifferent(previous: Species)
-	local choices = {}
-	for _, species in Config.Beasts do
-		if species.Id ~= previous.Id then
-			table.insert(choices, species)
-		end
-	end
-	if #choices == 0 then
-		return
-	end
-
-	local next_ = choices[rng:NextInteger(1, #choices)]
-	local where = pickTarget()
-	spawnBeast(next_, Vector3.new(where.X, groundHeight(where, workspace), where.Z))
-
-	for _, player in Players:GetPlayers() do
-		Remotes.Event("Notify"):FireClient(player, `A {next_.Name} has appeared somewhere.`)
+--[[ Scatter some poop about, since there is no elephant leaving it any more. ]]
+local function seedPoop()
+	for _ = 1, 12 do
+		dropPoop(Vector3.new(
+			rng:NextNumber(-wanderRadius, wanderRadius),
+			2,
+			rng:NextNumber(-wanderRadius, wanderRadius)
+		))
 	end
 end
 
 -- ==================================================================== DEATH ==
 
---[[ The red cloud. Only a mega-detonation gets one of these. ]]
-local function burst(beast: Beast)
-	local position = beast.body.Position
+local function respawnOne(kind: string)
+	local where = Vector3.new(
+		rng:NextNumber(-wanderRadius, wanderRadius),
+		4,
+		rng:NextNumber(-wanderRadius, wanderRadius)
+	)
+	if kind == "Zombie" then
+		spawnZombie(where)
+	elseif kind == "Civilian" then
+		spawnCivilian(where)
+	else
+		spawnTarget(where)
+	end
+end
 
+local function kill(dweller: Dweller, attacker: Player?)
+	if dweller.dead then
+		return
+	end
+	dweller.dead = true
+
+	local points = if dweller.kind == "Zombie" then Config.Population.ZombiePoints
+		elseif dweller.kind == "Civilian" then Config.Population.CivilianPoints
+		else Config.Population.TargetPoints
+
+	if attacker then
+		local earned = PlayerState.AwardPoints(attacker, points)
+		Remotes.Event("Notify"):FireClient(attacker, `+{earned} — {dweller.kind}`)
+	end
+
+	-- A burst of whatever colour suits.
 	local anchor = Util.Part({
-		Name = "RedCloud",
-		Size = Vector3.new(1, 1, 1),
-		CFrame = CFrame.new(position),
+		Name = "Burst",
+		Size = Vector3.new(0.5, 0.5, 0.5),
+		CFrame = CFrame.new(dweller.root.Position),
 		Transparency = 1,
 		CanCollide = false,
 		CanQuery = false,
 		Parent = workspace,
 	})
+	local burst = Instance.new("ParticleEmitter")
+	burst.Color = ColorSequence.new(
+		if dweller.kind == "Zombie" then Color3.fromRGB(110, 160, 90) else Color3.fromRGB(220, 60, 60)
+	)
+	burst.Size = NumberSequence.new(2.5, 0)
+	burst.Lifetime = NumberRange.new(0.5, 1.1)
+	burst.Speed = NumberRange.new(14, 34)
+	burst.SpreadAngle = Vector2.new(180, 180)
+	burst.Rate = 0
+	burst.Parent = anchor
+	burst:Emit(60)
+	Debris:AddItem(anchor, 2.5)
 
-	local cloud = Instance.new("ParticleEmitter")
-	cloud.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(220, 30, 30)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(90, 0, 0)),
-	})
-	cloud.Size = NumberSequence.new(40, 90)
-	cloud.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.1),
-		NumberSequenceKeypoint.new(1, 1),
-	})
-	cloud.Lifetime = NumberRange.new(1.4, 2.6)
-	cloud.Speed = NumberRange.new(18, 46)
-	cloud.SpreadAngle = Vector2.new(180, 180)
-	cloud.Rate = 0
-	cloud.Parent = anchor
-	cloud:Emit(220)
-
-	Debris:AddItem(anchor, 4)
-
-	local species = beast.species
-	beast.model:Destroy()
-
-	task.delay(Config.Beast.RespawnDelay, function()
-		respawnAsDifferent(species)
+	local kind = dweller.kind
+	dweller.model:Destroy()
+	task.delay(Config.Population.RespawnDelay, function()
+		respawnOne(kind)
 	end)
 end
 
 --[[
-	A mega-detonation went off. Anything caught in it bursts.
-
-	Ordinary bullets and grenades do nothing at all — this is the only thing
-	that kills a giant animal.
+	Something was shot. Returns true if this module handled it, so the caller
+	knows not to look for a player or a vehicle as well.
 ]]
-local function onMegaBlast(position: Vector3, radius: number, attacker: Player?)
-	for index = #beasts, 1, -1 do
-		local beast = beasts[index]
-		-- A little wider than the blast itself, because the animals are
-		-- enormous and being clipped by the edge should still count. Not
-		-- much wider: at 2.5x a single shot cleared half the map.
-		if beast.model.Parent and (beast.body.Position - position).Magnitude <= radius * 1.25 then
-			table.remove(beasts, index)
-			if attacker then
-				Remotes.Event("Notify"):FireClient(attacker, `You vaporised the {beast.species.Name}.`)
-			end
-			burst(beast)
-		end
+function WildlifeService.RegisterHit(part: BasePart, damage: number?, attacker: Player?): boolean
+	-- A poop pile that takes a hit grows into a tower.
+	if part:GetAttribute("Poop") then
+		raisePoopColumn(part)
+		return true
 	end
-end
 
--- ================================================================ REACTIONS ==
-
---[[
-	Somebody shot it. Bullets cannot kill it, but they do annoy it, and each
-	species is annoyed in its own way.
-]]
-function WildlifeService.RegisterHit(part: BasePart)
 	local model = part:FindFirstAncestorOfClass("Model")
 	while model do
-		if model:GetAttribute("IsBeast") then
-			for _, beast in beasts do
-				if beast.model == model and beast.mood == "Wander" then
-					beast.mood = beast.species.Reaction
-					beast.moodUntil = os.clock() + Config.Beast.ReactionDuration
+		if model:GetAttribute("Dweller") then
+			for _, dweller in dwellers do
+				if dweller.model == model and not dweller.dead then
+					dweller.health -= (damage or 20)
+
+					if dweller.kind == "Civilian" then
+						local line = Config.CivilianLines[rng:NextInteger(1, #Config.CivilianLines)]
+						say(dweller.root, line, Color3.fromRGB(255, 240, 200), 3)
+						fart(dweller.root.Position - Vector3.new(0, 1.5, 0))
+					elseif dweller.kind == "Zombie" then
+						say(dweller.root, "RRRAAAGH", Color3.fromRGB(160, 220, 130), 1.5)
+					end
+
+					if dweller.health <= 0 then
+						kill(dweller, attacker)
+					end
+					return true
 				end
 			end
 			return true
@@ -593,195 +592,140 @@ function WildlifeService.RegisterHit(part: BasePart)
 	return false
 end
 
---[[ Play out whatever this species does when it has been shot. ]]
-local function playReaction(beast: Beast, deltaTime: number)
-	local now = os.clock()
-	local head = beast.head
-	local wobble = math.sin(now * 9)
+-- ================================================================= MOVEMENT ==
 
-	if beast.mood == "Lick" then
-		-- Sits and washes the sore bit.
-		if head then
-			head.CFrame = beast.body.CFrame
-				* CFrame.new(0, -beast.body.Size.Y * 0.1, -beast.body.Size.Z * 0.5)
-				* CFrame.Angles(math.rad(55 + wobble * 8), 0, 0)
-		end
-	elseif beast.mood == "ChestBeat" then
-		-- Rears up and hammers its chest.
-		beast.model:PivotTo(
-			CFrame.new(beast.position + Vector3.new(0, beast.standHeight + math.abs(wobble) * 6, 0))
-				* CFrame.Angles(0, math.atan2(beast.facing.X, beast.facing.Z), 0)
-		)
-		return
-	elseif beast.mood == "Shake" then
-		-- Shakes itself off, nose to tail.
-		beast.model:PivotTo(
-			CFrame.new(beast.position + Vector3.new(0, beast.standHeight, 0))
-				* CFrame.Angles(0, math.atan2(beast.facing.X, beast.facing.Z), math.rad(wobble * 14))
-		)
-		return
-	elseif beast.mood == "Flop" then
-		-- A fish on dry land, having a very bad time.
-		beast.model:PivotTo(
-			CFrame.new(beast.position + Vector3.new(0, beast.standHeight + math.abs(wobble) * 10, 0))
-				* CFrame.Angles(math.rad(wobble * 25), math.atan2(beast.facing.X, beast.facing.Z), math.rad(wobble * 40))
-		)
-		return
-	elseif beast.mood == "Poop" then
-		-- Startled, and the result is immediate.
-		if now >= beast.nextPoopAt then
-			beast.nextPoopAt = now + 1.2
-			dropPoop(beast.position - beast.facing * 30 * S * 0.4)
-		end
-	end
-
-	local _ = deltaTime
-end
-
--- ================================================================== MOVEMENT ==
-
---[[ Flatten anybody in front of a moving animal. ]]
-local function trample(beast: Beast, speed: number)
-	if speed < 6 then
-		return
-	end
-	local now = os.clock()
-	if now - beast.lastTrampleAt < 0.5 then
-		return
-	end
-
-	local nose = beast.position + beast.facing * (beast.body.Size.Z * 0.5)
-	local rider: Player? = nil
-	local occupant = beast.seat.Occupant
-	if occupant and occupant.Parent then
-		rider = Players:GetPlayerFromCharacter(occupant.Parent)
-	end
+local function nearestPlayer(from: Vector3): (Player?, Vector3?, number)
+	local best: Player? = nil
+	local bestPosition: Vector3? = nil
+	local bestDistance = math.huge
 
 	for _, player in Players:GetPlayers() do
-		if player == rider then
-			continue
-		end
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if root and root:IsA("BasePart") then
-			if (root.Position - nose).Magnitude <= Config.Beast.TrampleRadius * S * 0.5 then
-				beast.lastTrampleAt = now
-				DamageService.ApplyDamage(player, beast.species.TrampleDamage, rider, "Trampled")
-				-- And sent flying.
-				root.AssemblyLinearVelocity = beast.facing * 90 + Vector3.new(0, 60, 0)
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
+			local distance = (root.Position - from).Magnitude
+			if distance < bestDistance then
+				best, bestPosition, bestDistance = player, root.Position, distance
 			end
 		end
 	end
+
+	return best, bestPosition, bestDistance
 end
 
-local function stepBeast(beast: Beast, deltaTime: number)
-	local now = os.clock()
+local function groundHeight(position: Vector3, ignore: Instance): number
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { ignore }
+	local hit = workspace:Raycast(position + Vector3.new(0, 200, 0), Vector3.new(0, -600, 0), params)
+	return if hit then hit.Position.Y else 0
+end
 
-	-- A reaction stops it in its tracks until it wears off.
-	if beast.mood ~= "Wander" then
-		if now >= beast.moodUntil then
-			beast.mood = "Wander"
-		else
-			playReaction(beast, deltaTime)
-			return
-		end
+local function stepDweller(dweller: Dweller, deltaTime: number)
+	-- Targets do not go anywhere.
+	if dweller.kind == "Target" then
+		return
 	end
 
-	local occupant = beast.seat.Occupant
-	local speed = beast.species.Speed
-	local throttle, steer = 0, 0
+	local speed = if dweller.kind == "Zombie"
+		then Config.Population.ZombieSpeed
+		else Config.Population.CivilianSpeed
 
-	if occupant then
-		-- Being ridden: the player drives.
-		speed = beast.species.RideSpeed
-		throttle = beast.seat.Throttle
-		steer = beast.seat.Steer
+	local goal: Vector3
+	if dweller.kind == "Zombie" then
+		-- Zombies come for whoever is closest.
+		local player, position, distance = nearestPlayer(dweller.position)
+		if position and distance < 320 then
+			goal = position
 
-		local pedal = beast.model:GetAttribute("Pedal")
-		if typeof(pedal) == "number" and math.abs(pedal) > 0.01 then
-			throttle = math.clamp(pedal, -1, 1)
-		end
-
-		if math.abs(steer) > 0.01 then
-			local turn = -steer * 1.6 * deltaTime
-			beast.facing = (CFrame.Angles(0, turn, 0) * beast.facing).Unit
+			-- Close enough to swing.
+			if distance <= Config.Population.ZombieReach and player then
+				local now = os.clock()
+				if now >= dweller.nextAttackAt then
+					dweller.nextAttackAt = now + 1.2
+					DamageService.ApplyDamage(player, Config.Population.ZombieDamage, nil, "Zombie")
+					say(dweller.root, "NOM", Color3.fromRGB(200, 90, 90), 1)
+				end
+				return
+			end
+		else
+			goal = dweller.target
 		end
 	else
-		-- Left to itself: wander.
-		throttle = 1
-		local toTarget = beast.target - beast.position
-		toTarget = Vector3.new(toTarget.X, 0, toTarget.Z)
-		if toTarget.Magnitude < 40 then
-			beast.target = pickTarget()
-			return
-		end
-		local direction = toTarget.Unit
-		beast.facing = (beast.facing + (direction - beast.facing) * math.min(1, deltaTime * 1.5)).Unit
+		goal = dweller.target
 	end
 
-	local travelled = speed * throttle * deltaTime
-	beast.position += beast.facing * travelled
-	beast.position = Vector3.new(
-		beast.position.X,
-		groundHeight(beast.position, beast.model),
-		beast.position.Z
+	local toGoal = Vector3.new(goal.X - dweller.position.X, 0, goal.Z - dweller.position.Z)
+	if toGoal.Magnitude < 12 then
+		dweller.target = Vector3.new(
+			rng:NextNumber(-wanderRadius, wanderRadius),
+			0,
+			rng:NextNumber(-wanderRadius, wanderRadius)
+		)
+		return
+	end
+
+	local direction = toGoal.Unit
+	dweller.facing = (dweller.facing + (direction - dweller.facing) * math.min(1, deltaTime * 3)).Unit
+	dweller.position += dweller.facing * speed * deltaTime
+	dweller.position = Vector3.new(
+		dweller.position.X,
+		groundHeight(dweller.position, dweller.model),
+		dweller.position.Z
 	)
 
-	-- A fish cannot walk, so it hops along instead.
-	local bounce = 0
-	if beast.species.Id == "Fish" and math.abs(throttle) > 0.01 then
-		bounce = math.abs(math.sin(now * 6)) * 14
-	end
-
-	local stand = beast.position + Vector3.new(0, beast.standHeight + bounce, 0)
-	beast.model:PivotTo(CFrame.lookAt(stand, stand + beast.facing))
-
-	trample(beast, math.abs(speed * throttle))
-
-	-- Elephants poop as they go, ridden or not.
-	if beast.species.Id == "Elephant" and now >= beast.nextPoopAt then
-		beast.nextPoopAt = now + Config.Wildlife.PoopInterval * rng:NextNumber(0.7, 1.4)
-		dropPoop(beast.position - beast.facing * 30 * S * 0.4)
-	end
+	-- A little bob, so they look like they are walking rather than sliding.
+	local bob = math.abs(math.sin(os.clock() * 7)) * 0.4
+	local stand = dweller.position + Vector3.new(0, dweller.standHeight + bob, 0)
+	dweller.model:PivotTo(CFrame.lookAt(stand, stand + dweller.facing))
 end
 
 local function step(deltaTime: number)
-	for index = #beasts, 1, -1 do
-		local beast = beasts[index]
-		if not beast.model.Parent then
-			table.remove(beasts, index)
+	for index = #dwellers, 1, -1 do
+		local dweller = dwellers[index]
+		if not dweller.model.Parent then
+			table.remove(dwellers, index)
 		else
-			stepBeast(beast, deltaTime)
+			stepDweller(dweller, deltaTime)
 		end
 	end
 end
 
 -- =================================================================== PUBLIC ==
 
---[[ Put the animals on the current map. ]]
 function WildlifeService.Populate(mapSize: number)
 	WildlifeService.Clear()
 	wanderRadius = mapSize * 0.4
 
-	-- Always different species to begin with, so no two look the same.
-	local pool = table.clone(Config.Beasts)
-	for _ = 1, math.min(Config.Beast.Count, #pool) do
-		local pick = rng:NextInteger(1, #pool)
-		local species = pool[pick]
-		table.remove(pool, pick)
-
-		local where = pickTarget()
-		spawnBeast(species, Vector3.new(where.X, groundHeight(where, workspace), where.Z))
+	local function scatter(): Vector3
+		return Vector3.new(
+			rng:NextNumber(-wanderRadius, wanderRadius),
+			4,
+			rng:NextNumber(-wanderRadius, wanderRadius)
+		)
 	end
+
+	for _ = 1, Config.Population.Zombies do
+		spawnZombie(scatter())
+	end
+	for _ = 1, Config.Population.Civilians do
+		spawnCivilian(scatter())
+	end
+	for _ = 1, Config.Population.Targets do
+		spawnTarget(scatter())
+	end
+
+	seedPoop()
 end
 
 function WildlifeService.Clear()
-	for _, beast in beasts do
-		if beast.model.Parent then
-			beast.model:Destroy()
+	for _, dweller in dwellers do
+		if dweller.model.Parent then
+			dweller.model:Destroy()
 		end
 	end
-	table.clear(beasts)
+	table.clear(dwellers)
 
 	for _, pile in poopPiles do
 		if pile.Parent then
@@ -789,32 +733,38 @@ function WildlifeService.Clear()
 		end
 	end
 	table.clear(poopPiles)
+
+	for _, child in workspace:GetChildren() do
+		if child.Name == "PoopColumn" then
+			child:Destroy()
+		end
+	end
 end
 
---[[ Is this player currently riding an animal? Guns are off if so. ]]
-function WildlifeService.IsRiding(player: Player): boolean
-	local state = PlayerState.Get(player)
-	return state.seatRole == "Beast"
+--[[ Nothing is rideable any more, but the weapon code still asks. ]]
+function WildlifeService.IsRiding(_player: Player): boolean
+	return false
 end
 
 function WildlifeService.Count(): number
-	return #beasts
+	return #dwellers
 end
 
 function WildlifeService.PoopCount(): number
 	return #poopPiles
 end
 
---[[ The species currently walking about, for the tests. ]]
-function WildlifeService.SpeciesPresent(): { string }
-	local names = {}
-	for _, beast in beasts do
-		table.insert(names, beast.species.Id)
+--[[ How many of each kind are about, for the tests. ]]
+function WildlifeService.CountOf(kind: string): number
+	local total = 0
+	for _, dweller in dwellers do
+		if dweller.kind == kind and not dweller.dead then
+			total += 1
+		end
 	end
-	return names
+	return total
 end
 
-DamageService.MegaBlast.Connect(onMegaBlast)
 RunService.Heartbeat:Connect(step)
 
 return WildlifeService

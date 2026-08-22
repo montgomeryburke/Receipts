@@ -58,6 +58,14 @@ local Config = {}
 
 Config.FreeMode = true
 
+--[[
+	Endless ammo. Guns never run dry and nothing needs reloading.
+
+	Set this to false if you ever want scarcity back — the magazine sizes and
+	reload times below are all still here and still correct.
+]]
+Config.InfiniteAmmo = true
+
 -- ============================================================ MONETIZATION ==
 -- Ignored entirely while FreeMode is true. Left here so future-you has it ready.
 
@@ -128,6 +136,7 @@ Config.Weapons = {
 		MagSize = 12, ReloadTime = 1.3, Spread = 1.2,
 		Color = Color3.fromRGB(90, 90, 96),
 		Automatic = true,
+		Points = 10,
 	},
 	Revolver = {
 		Slot = 1, Category = "Sidearm", DisplayName = ".44 Revolver",
@@ -135,6 +144,7 @@ Config.Weapons = {
 		MagSize = 6, ReloadTime = 2.1, Spread = 0.8,
 		Color = Color3.fromRGB(150, 130, 90),
 		Automatic = true,
+		Points = 15,
 	},
 	Deagle = {
 		Slot = 1, Category = "Sidearm", DisplayName = "Hand Cannon",
@@ -142,6 +152,7 @@ Config.Weapons = {
 		MagSize = 7, ReloadTime = 2.0, Spread = 1.0,
 		Color = Color3.fromRGB(200, 180, 110),
 		Automatic = true,
+		Points = 15,
 	},
 
 	-- ------------------------------------------------------------ AUTOMATIC
@@ -150,18 +161,21 @@ Config.Weapons = {
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.075, Range = 380,
 		MagSize = 35, ReloadTime = 1.7, Spread = 2.6, Automatic = true,
 		Color = Color3.fromRGB(70, 76, 84),
+		Points = 8,
 	},
 	AssaultRifle = {
 		Slot = 2, Category = "Automatic", DisplayName = "Assault Rifle",
 		Kind = "Hitscan", Damage = 14, Cooldown = 0.11, Range = 700,
 		MagSize = 30, ReloadTime = 2.0, Spread = 1.5, Automatic = true,
 		Color = Color3.fromRGB(60, 68, 58),
+		Points = 10,
 	},
 	MachineGun = {
 		Slot = 2, Category = "Automatic", DisplayName = "Machine Gun",
 		Kind = "Hitscan", Damage = 11, Cooldown = 0.09, Range = 650,
 		MagSize = 80, ReloadTime = 3.4, Spread = 2.2, Automatic = true,
 		Color = Color3.fromRGB(52, 54, 58),
+		Points = 10,
 	},
 	Minigun = {
 		Slot = 2, Category = "Automatic", DisplayName = "Mud Minigun",
@@ -170,6 +184,7 @@ Config.Weapons = {
 		-- Slows you down while you hold the trigger, because it is enormous.
 		MoveSpeedFactor = 0.45,
 		Color = Color3.fromRGB(96, 100, 104),
+		Points = 8,
 	},
 
 	-- ------------------------------------------------------------- SHOTGUNS
@@ -179,12 +194,14 @@ Config.Weapons = {
 		MagSize = 6, ReloadTime = 2.6, Spread = 6.0, Pellets = 9,
 		Color = Color3.fromRGB(120, 84, 52),
 		Automatic = true,
+		Points = 14,
 	},
 	AutoShotgun = {
 		Slot = 3, Category = "Shotgun", DisplayName = "Auto Shotgun",
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.4, Range = 140,
 		MagSize = 8, ReloadTime = 3.0, Spread = 7.5, Pellets = 8, Automatic = true,
 		Color = Color3.fromRGB(90, 70, 60),
+		Points = 12,
 	},
 
 	-- -------------------------------------------------------------- SNIPERS
@@ -202,6 +219,7 @@ Config.Weapons = {
 		Automatic = true,
 		SemiAutoWhenScoped = true,
 		Color = Color3.fromRGB(46, 56, 46),
+		Points = 30,
 	},
 	AntiMaterial = {
 		Slot = 4, Category = "Sniper", DisplayName = "Anti-Truck Rifle",
@@ -214,6 +232,7 @@ Config.Weapons = {
 		-- Wrecks vehicles specifically.
 		VehicleDamageMultiplier = 3,
 		Color = Color3.fromRGB(60, 60, 70),
+		Points = 35,
 	},
 
 	-- ------------------------------------------------------- THE STAR ITEM
@@ -231,6 +250,7 @@ Config.Weapons = {
 		AutoAim = true,
 		Color = Color3.fromRGB(120, 230, 245),
 		Automatic = true,
+		Points = 25,
 	},
 
 	-- --------------------------------------------------------- EXPLOSIVES
@@ -238,23 +258,29 @@ Config.Weapons = {
 		Slot = 6, Category = "Explosive", DisplayName = "Frag Grenade",
 		Kind = "Arcing", Damage = 0, Cooldown = 1.1, Range = 220, Speed = 90,
 		MagSize = 3, ReloadTime = 4.0, Spread = 0.0,
-		FuseTime = 3.0, BlastRadius = 26, BlastDamage = 85,
+		-- Was 26. A literal ten-times radius would be 260 studs, which is a
+		-- third of the map from one grenade; 95 is enormous without being
+		-- absurd. Change this one number if you want it bigger still.
+		FuseTime = 3.0, BlastRadius = 95, BlastDamage = 150,
 		Color = Color3.fromRGB(70, 92, 62),
+		Points = 20,
 	},
 	StickyGrenade = {
 		Slot = 6, Category = "Explosive", DisplayName = "Sticky Bomb",
 		Kind = "Arcing", Damage = 0, Cooldown = 1.3, Range = 200, Speed = 80,
 		MagSize = 2, ReloadTime = 4.5, Spread = 0.0,
-		FuseTime = 2.5, BlastRadius = 30, BlastDamage = 100, Sticky = true,
+		FuseTime = 2.5, BlastRadius = 110, BlastDamage = 170, Sticky = true,
 		Color = Color3.fromRGB(180, 90, 190),
+		Points = 22,
 	},
 	RPG = {
 		Slot = 6, Category = "Explosive", DisplayName = "Rocket Propelled Grenade",
 		Kind = "Rocket", Damage = 0, Cooldown = 2.2, Range = 1400, Speed = 180,
 		MagSize = 1, ReloadTime = 3.2, Spread = 0.0,
-		BlastRadius = 34, BlastDamage = 110,
+		BlastRadius = 90, BlastDamage = 150,
 		VehicleDamageMultiplier = 2,
 		Color = Color3.fromRGB(170, 70, 50),
+		Points = 25,
 	},
 
 	-- ------------------------------------------------------------- UTILITY
@@ -270,6 +296,7 @@ Config.Weapons = {
 		AmmoFromPickupsOnly = true,
 		Color = Color3.fromRGB(92, 64, 38),
 		Automatic = true,
+		Points = 5,
 	},
 	Drone = {
 		Slot = 7, Category = "Utility", DisplayName = "Hunter Drone",
@@ -282,6 +309,33 @@ Config.Weapons = {
 		AmmoFromPickupsOnly = true,
 		AutoAim = true,
 		Color = Color3.fromRGB(120, 205, 255),
+		Points = 30,
+	},
+
+	LandMine = {
+		Slot = 6, Category = "Explosive", DisplayName = "Land Mine",
+		Kind = "Arcing", Damage = 0, Cooldown = 1.0, Range = 90, Speed = 40,
+		MagSize = 4, ReloadTime = 3.0, Spread = 0.0,
+		-- Sits where it lands and waits. A long fuse is what makes it a mine
+		-- rather than a grenade.
+		FuseTime = 40, Sticky = true,
+		BlastRadius = 70, BlastDamage = 190,
+		VehicleDamageMultiplier = 3,
+		Points = 28, Automatic = true,
+		Color = Color3.fromRGB(90, 96, 70),
+	},
+	ClusterBomb = {
+		Slot = 6, Category = "Explosive", DisplayName = "Cluster Bomb",
+		Kind = "Arcing", Damage = 0, Cooldown = 1.6, Range = 240, Speed = 95,
+		MagSize = 2, ReloadTime = 4.5, Spread = 0.0,
+		FuseTime = 2.2,
+		BlastRadius = 60, BlastDamage = 110,
+		-- Bursts into this many smaller bomblets when it goes off.
+		Cluster = 8,
+		ClusterRadius = 34,
+		ClusterDamage = 70,
+		Points = 26, Automatic = true,
+		Color = Color3.fromRGB(200, 140, 60),
 	},
 
 	-- --------------------------------------------------- VEHICLE-MOUNTED
@@ -294,6 +348,7 @@ Config.Weapons = {
 		ZoomLevels = { 2, 4 },
 		VehicleDamageMultiplier = 2, MountedOnly = true, AutoAim = true,
 		Color = Color3.fromRGB(58, 60, 64),
+		Points = 18,
 	},
 	TankCannon = {
 		Slot = 0, Category = "Mounted", DisplayName = "Tank Cannon",
@@ -302,6 +357,7 @@ Config.Weapons = {
 		BlastRadius = 40, BlastDamage = 130,
 		VehicleDamageMultiplier = 3, MountedOnly = true,
 		Color = Color3.fromRGB(74, 84, 66),
+		Points = 25,
 	},
 	PlaneGun = {
 		Slot = 0, Category = "Mounted", DisplayName = "Wing Guns",
@@ -309,11 +365,12 @@ Config.Weapons = {
 		MagSize = 150, ReloadTime = 5.0, Spread = 2.0, Automatic = true,
 		MountedOnly = true,
 		Color = Color3.fromRGB(120, 128, 136),
+		Points = 15,
 	},
 }
 
 --[[ Which guns you spawn holding. Everything else is found on the map. ]]
-Config.StartingLoadout = { "Pistol", "AssaultRifle", "Shotgun", "Sniper", "DiamondGun", "Grenade" }
+Config.StartingLoadout = { "MachineGun", "AssaultRifle", "Shotgun", "Sniper", "DiamondGun", "Grenade", "Pistol" }
 
 --[[
 	Melee, on Q.
@@ -339,9 +396,10 @@ Config.Melee = {
 	it is going.
 ]]
 Config.Driving = {
-	Acceleration = 48,
-	BrakeDeceleration = 95,
-	Coast = 26,
+	-- Punchier than before: they still have weight, but they get going.
+	Acceleration = 72,
+	BrakeDeceleration = 130,
+	Coast = 34,
 	-- Below this fraction of top speed, steering is reduced.
 	SteerGripSpeed = 0.35,
 }
@@ -369,65 +427,46 @@ Config.Wildlife = {
 }
 
 --[[
-	THE GIANT ANIMALS.
+	THE POPULATION.
 
-	King Kong sized, wandering the map. Bullets do not kill them — each
-	species has its own way of shrugging a hit off — but a diamond bullet's
-	mega-detonation bursts them into a red cloud, and whatever comes back
-	somewhere else is a different animal.
+	Zombies roam and come for you. Civilians wander and say something
+	regrettable when shot. Bullseye targets stand around for practice.
 
-	You can climb on one and ride it. You cannot use a gun while you do; the
-	animal IS the weapon.
+	All three are worth points, and all three come back.
 ]]
-Config.Beasts = {
-	{
-		Id = "Cat", Name = "Giant Cat",
-		Colour = Color3.fromRGB(180, 150, 110),
-		Speed = 24, RideSpeed = 52, TrampleDamage = 55,
-		-- Sits down and washes the sore bit.
-		Reaction = "Lick",
-	},
-	{
-		Id = "Elephant", Name = "Giant Elephant",
-		Colour = Color3.fromRGB(122, 118, 114),
-		Speed = 16, RideSpeed = 38, TrampleDamage = 90,
-		-- Startled. Leaves rather a lot behind.
-		Reaction = "Poop",
-	},
-	{
-		Id = "Dog", Name = "Giant Dog",
-		Colour = Color3.fromRGB(150, 108, 62),
-		Speed = 30, RideSpeed = 58, TrampleDamage = 50,
-		-- Shakes itself off, ears flapping.
-		Reaction = "Shake",
-	},
-	{
-		Id = "Fish", Name = "Giant Fish",
-		Colour = Color3.fromRGB(90, 150, 190),
-		Speed = 9, RideSpeed = 30, TrampleDamage = 40,
-		-- It is a fish, on land, and it is not happy about it.
-		Reaction = "Flop",
-	},
-	{
-		Id = "Gorilla", Name = "Giant Gorilla",
-		Colour = Color3.fromRGB(64, 60, 62),
-		Speed = 22, RideSpeed = 48, TrampleDamage = 80,
-		-- Stands up and beats its chest at whoever shot it.
-		Reaction = "ChestBeat",
-	},
+Config.Population = {
+	Zombies = 10,
+	Civilians = 8,
+	Targets = 12,
+
+	ZombieHealth = 120,
+	ZombieSpeed = 13,
+	ZombiePoints = 25,
+	-- How close a zombie has to get before it starts swinging.
+	ZombieReach = 9,
+	ZombieDamage = 18,
+
+	CivilianHealth = 60,
+	CivilianSpeed = 11,
+	CivilianPoints = 5,
+
+	TargetHealth = 100,
+	TargetPoints = 15,
+
+	-- Seconds before a dead one is replaced.
+	RespawnDelay = 12,
 }
 
-Config.Beast = {
-	-- How many are wandering at once.
-	Count = 3,
-	-- Seconds a reaction lasts, during which it stops walking.
-	ReactionDuration = 4,
-	-- Seconds before a burst animal comes back as something else.
-	RespawnDelay = 10,
-	-- Anything this close in front of a moving animal gets flattened.
-	TrampleRadius = 16,
-	-- Overall size multiplier. King Kong, not a big dog.
-	Scale = 3.2,
+--[[ What a civilian says when you shoot them. ]]
+Config.CivilianLines = {
+	"OW! That was a smelly one!",
+	"PBBBT! ... sorry, that always happens.",
+	"You shot me and I farted. We are both embarrassed.",
+	"Rude! And now I have gas.",
+	"AAAH — oh no, that one squeaked.",
+	"I was having a lovely day!",
+	"Not the trousers! Not the trousers!",
+	"That is coming out of your wages.",
 }
 
 --[[
@@ -457,10 +496,10 @@ Config.Mega = {
 	you eliminate.
 ]]
 Config.CarTiers = {
-	{ Name = "Rust Bucket", KeysRequired = 0, MaxSpeed = 60, Torque = 12000, TurnSpeed = 30, Color = Color3.fromRGB(120, 100, 80) },
-	{ Name = "Mud Runner", KeysRequired = 2, MaxSpeed = 82, Torque = 17000, TurnSpeed = 34, Color = Color3.fromRGB(80, 130, 90) },
-	{ Name = "Swamp Devil", KeysRequired = 5, MaxSpeed = 104, Torque = 22000, TurnSpeed = 38, Color = Color3.fromRGB(180, 120, 40) },
-	{ Name = "Nuclear Hauler", KeysRequired = 9, MaxSpeed = 130, Torque = 28000, TurnSpeed = 42, Color = Color3.fromRGB(90, 210, 220) },
+	{ Name = "Rust Bucket", KeysRequired = 0, MaxSpeed = 75, Torque = 12000, TurnSpeed = 39, Color = Color3.fromRGB(120, 100, 80) },
+	{ Name = "Mud Runner", KeysRequired = 2, MaxSpeed = 102, Torque = 17000, TurnSpeed = 44, Color = Color3.fromRGB(80, 130, 90) },
+	{ Name = "Swamp Devil", KeysRequired = 5, MaxSpeed = 130, Torque = 22000, TurnSpeed = 49, Color = Color3.fromRGB(180, 120, 40) },
+	{ Name = "Nuclear Hauler", KeysRequired = 9, MaxSpeed = 162, Torque = 28000, TurnSpeed = 54, Color = Color3.fromRGB(90, 210, 220) },
 }
 
 --[[
@@ -574,6 +613,12 @@ Config.Pickups = {
 	},
 	PoopAmmo = { DisplayName = "Poop", Color = Color3.fromRGB(92, 64, 38) },
 	DroneAmmo = { DisplayName = "Hunter Drone", Color = Color3.fromRGB(120, 205, 255) },
+	Multiplier = {
+		DisplayName = "Double Points",
+		Duration = 90,
+		Amount = 3,
+		Color = Color3.fromRGB(255, 215, 70),
+	},
 }
 
 -- ================================================================= EFFECTS ==
@@ -598,16 +643,16 @@ Config.Effects = {
 	for four wheels, not for feet.
 ]]
 Config.Maps = {
-	{ Id = "BogBasin", Name = "Bog Basin", Size = 700, MudFraction = 0.55, Buildings = 12, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
-	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 760, MudFraction = 0.25, Buildings = 16, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
-	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 820, MudFraction = 0.6, Buildings = 9, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
-	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 720, MudFraction = 0.2, Buildings = 20, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
-	{ Id = "GatorCreek", Name = "Gator Creek", Size = 780, MudFraction = 0.7, Buildings = 10, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
-	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 900, MudFraction = 0.15, Buildings = 14, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
-	{ Id = "HollerHills", Name = "Holler Hills", Size = 760, MudFraction = 0.45, Buildings = 11, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
-	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 680, MudFraction = 0.3, Buildings = 22, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
-	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 960, MudFraction = 0.35, Buildings = 13, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
-	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 820, MudFraction = 0.4, Buildings = 18, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
+	{ Id = "BogBasin", Name = "Bog Basin", Size = 700, MudFraction = 0.55, Buildings = 25, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
+	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 760, MudFraction = 0.25, Buildings = 33, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
+	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 820, MudFraction = 0.6, Buildings = 18, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
+	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 720, MudFraction = 0.2, Buildings = 42, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
+	{ Id = "GatorCreek", Name = "Gator Creek", Size = 780, MudFraction = 0.7, Buildings = 21, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
+	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 900, MudFraction = 0.15, Buildings = 29, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
+	{ Id = "HollerHills", Name = "Holler Hills", Size = 760, MudFraction = 0.45, Buildings = 23, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
+	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 680, MudFraction = 0.3, Buildings = 46, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
+	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 960, MudFraction = 0.35, Buildings = 27, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
+	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 820, MudFraction = 0.4, Buildings = 37, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
 }
 
 Config.Teams = {
@@ -648,6 +693,10 @@ export type WeaponSpec = {
 	ZoomFov: number?,
 	ZoomLevels: { number }?,
 	SemiAutoWhenScoped: boolean?,
+	Points: number?,
+	Cluster: number?,
+	ClusterRadius: number?,
+	ClusterDamage: number?,
 	FuseTime: number?,
 	Sticky: boolean?,
 	MountedOnly: boolean?,
@@ -705,6 +754,7 @@ export type MapSpec = {
 
 export type ConfigType = {
 	FreeMode: boolean,
+	InfiniteAmmo: boolean,
 
 	GamePasses: { [string]: number },
 	Products: { [string]: number },
@@ -749,17 +799,15 @@ export type ConfigType = {
 		MaxPoopPiles: number, SplatDuration: number,
 	},
 	Boost: { Speed: number, Lift: number },
-	Beasts: {
-		{
-			Id: string, Name: string, Colour: Color3,
-			Speed: number, RideSpeed: number,
-			TrampleDamage: number, Reaction: string,
-		}
+	Population: {
+		Zombies: number, Civilians: number, Targets: number,
+		ZombieHealth: number, ZombieSpeed: number, ZombiePoints: number,
+		ZombieReach: number, ZombieDamage: number,
+		CivilianHealth: number, CivilianSpeed: number, CivilianPoints: number,
+		TargetHealth: number, TargetPoints: number,
+		RespawnDelay: number,
 	},
-	Beast: {
-		Count: number, ReactionDuration: number, RespawnDelay: number,
-		TrampleRadius: number, Scale: number,
-	},
+	CivilianLines: { string },
 
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
@@ -779,6 +827,7 @@ export type ConfigType = {
 		Invincibility: { DisplayName: string, Duration: number, Color: Color3 },
 		PoopAmmo: { DisplayName: string, Color: Color3 },
 		DroneAmmo: { DisplayName: string, Color: Color3 },
+		Multiplier: { DisplayName: string, Duration: number, Amount: number, Color: Color3 },
 	},
 
 	Effects: {
@@ -1195,7 +1244,9 @@ local TeamService = tryRequire(modules, "TeamService")
 local WeaponService = tryRequire(modules, "WeaponService")
 local MonetizationService = tryRequire(modules, "MonetizationService")
 local MatchService = tryRequire(modules, "MatchService")
+local GraphicsService = tryRequire(modules, "GraphicsService")
 
+tryStart("GraphicsService", GraphicsService)
 tryStart("TeamService", TeamService)
 tryStart("WeaponService", WeaponService)
 tryStart("MonetizationService", MonetizationService)
@@ -1792,6 +1843,121 @@ return EffectService
         </Item>
         <Item class="ModuleScript" referent="13">
           <Properties>
+            <string name="Name">GraphicsService</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	GraphicsService — makes it stop looking like a bin of bricks.
+
+	Roblox's default lighting is flat, shadowless and grey, which is most of
+	why a procedurally built map reads as "some blocks". None of this changes
+	a single part: it is all lighting, atmosphere and post-processing, so it
+	costs nothing to build and can be tuned without touching the game.
+
+	No asset IDs are used anywhere — a wrong one throws at runtime — so this
+	works in a place that has never been published.
+]]
+
+local Lighting = game:GetService("Lighting")
+
+local GraphicsService = {}
+
+--[[ Remove anything we added last time, so this can be re-run safely. ]]
+local function clearPrevious()
+	for _, child in Lighting:GetChildren() do
+		if child:GetAttribute("ArenaGraphics") then
+			child:Destroy()
+		end
+	end
+end
+
+local function tag(instance: Instance): Instance
+	instance:SetAttribute("ArenaGraphics", true)
+	instance.Parent = Lighting
+	return instance
+end
+
+function GraphicsService.Start()
+	clearPrevious()
+
+	-- Future lighting gives real shadows and light that bounces off surfaces,
+	-- which is the single biggest difference between "blocks" and "a place".
+	local ok = pcall(function()
+		Lighting.Technology = Enum.Technology.Future
+	end)
+	if not ok then
+		Lighting.Technology = Enum.Technology.ShadowMap
+	end
+
+	Lighting.Brightness = 2.6
+	Lighting.ClockTime = 15.2
+	Lighting.GeographicLatitude = 24
+	Lighting.ExposureCompensation = 0.18
+	Lighting.EnvironmentDiffuseScale = 0.55
+	Lighting.EnvironmentSpecularScale = 0.7
+	Lighting.GlobalShadows = true
+	Lighting.Ambient = Color3.fromRGB(78, 82, 92)
+	Lighting.OutdoorAmbient = Color3.fromRGB(104, 112, 128)
+	Lighting.ColorShift_Top = Color3.fromRGB(255, 238, 210)
+	Lighting.ColorShift_Bottom = Color3.fromRGB(70, 78, 96)
+	Lighting.FogEnd = 2200
+	Lighting.FogStart = 400
+	Lighting.FogColor = Color3.fromRGB(150, 162, 178)
+
+	-- Haze and depth. Distant buildings fade instead of standing there in
+	-- full colour, which is most of what sells a big map as big.
+	local atmosphere = Instance.new("Atmosphere")
+	atmosphere.Density = 0.36
+	atmosphere.Offset = 0.15
+	atmosphere.Color = Color3.fromRGB(196, 200, 208)
+	atmosphere.Decay = Color3.fromRGB(104, 112, 128)
+	atmosphere.Glare = 0.28
+	atmosphere.Haze = 1.6
+	tag(atmosphere)
+
+	-- A proper sky rather than the flat blue void.
+	local sky = Instance.new("Sky")
+	sky.CelestialBodiesShown = true
+	sky.StarCount = 3000
+	tag(sky)
+
+	-- Neon tracers, muzzle flashes and the diamond gun all bloom, which is
+	-- what makes them read as light rather than as coloured plastic.
+	local bloom = Instance.new("BloomEffect")
+	bloom.Intensity = 0.55
+	bloom.Size = 26
+	bloom.Threshold = 1.1
+	tag(bloom)
+
+	local sunRays = Instance.new("SunRaysEffect")
+	sunRays.Intensity = 0.14
+	sunRays.Spread = 0.9
+	tag(sunRays)
+
+	-- A gentle warm grade. Everything default-lit in Roblox looks washed out;
+	-- a touch of contrast and saturation does more than any amount of
+	-- rebuilding the parts would.
+	local grade = Instance.new("ColorCorrectionEffect")
+	grade.Brightness = 0.02
+	grade.Contrast = 0.16
+	grade.Saturation = 0.18
+	grade.TintColor = Color3.fromRGB(255, 248, 240)
+	tag(grade)
+
+	-- Very slight, only on the far distance, so aiming is unaffected.
+	local depth = Instance.new("DepthOfFieldEffect")
+	depth.FarIntensity = 0.12
+	depth.NearIntensity = 0
+	depth.FocusDistance = 90
+	depth.InFocusRadius = 900
+	tag(depth)
+end
+
+return GraphicsService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="14">
+          <Properties>
             <string name="Name">MapService</string>
             <string name="Source"><![CDATA[--!strict
 --[[
@@ -2360,7 +2526,7 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		local spot = Util.RandomFlatPoint(half * 0.72, rng)
 		local clear = true
 		for _, other in placed do
-			if (other - spot).Magnitude < 165 then
+			if (other - spot).Magnitude < 118 then
 				clear = false
 				break
 			end
@@ -2427,7 +2593,12 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	-- One tank, one plane, one torpedo and two turret trucks, always. They
 	-- respawn on these same pads a while after they are wrecked.
 	local vehiclePads = {}
-	local bigVehicles = { "Tank", "Plane", "Torpedo", "TurretTruck", "TurretTruck" }
+	local bigVehicles = {
+		"Tank", "Plane", "TurretTruck", "TurretTruck",
+		-- Rideable rockets, several of them, because they are the best thing
+		-- on the map and one was never enough.
+		"Torpedo", "Torpedo", "Torpedo", "Torpedo",
+	}
 	for index, kind in bigVehicles do
 		local angle = (index / #bigVehicles) * math.pi * 2
 		-- Pulled in towards the middle so they are a short drive apart rather
@@ -2488,7 +2659,7 @@ return MapService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="15">
           <Properties>
             <string name="Name">MatchService</string>
             <string name="Source"><![CDATA[--!strict
@@ -2773,7 +2944,17 @@ end
 
 function MatchService.Start()
 	-- A kill is worth points to the killer's team.
-	DamageService.Killed.Connect(function(victim: Player, killer: Player?, _cause: string)
+	-- What each weapon's display name is worth, so a kill can be scored by
+	-- the thing that made it.
+	local pointsByWeapon: { [string]: number } = {}
+	for _, spec in Config.Weapons do
+		pointsByWeapon[spec.DisplayName] = spec.Points or Config.Match.PointsPerKill
+	end
+	pointsByWeapon.Melee = 20
+	pointsByWeapon.Trampled = 15
+	pointsByWeapon.Explosion = 15
+
+	DamageService.Killed.Connect(function(victim: Player, killer: Player?, cause: string)
 		local character = victim.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") then
@@ -2783,8 +2964,15 @@ function MatchService.Start()
 		EffectService.ShowDeathScreen(victim, if killer then killer.DisplayName else nil)
 
 		if killer and killer ~= victim and phase == "Playing" then
+			-- A sniper shot is worth more than a pistol round, and a running
+			-- multiplier makes everything worth more still.
+			local base = pointsByWeapon[cause] or Config.Match.PointsPerKill
+			local earned = PlayerState.AwardPoints(killer, base)
+
 			local teamIndex = TeamService.IndexOf(killer)
-			scores[teamIndex] += Config.Match.PointsPerKill
+			scores[teamIndex] += earned
+
+			Remotes.Event("Notify"):FireClient(killer, `+{earned} — {cause}`)
 			broadcast()
 		end
 	end)
@@ -2877,7 +3065,7 @@ return MatchService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">MonetizationService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3053,7 +3241,7 @@ return MonetizationService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">PickupService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3287,7 +3475,7 @@ return PickupService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="18">
           <Properties>
             <string name="Name">PlayerState</string>
             <string name="Source"><![CDATA[--!strict
@@ -3327,6 +3515,10 @@ export type State = {
 	friesUntil: number,
 	spawnProtectedUntil: number,
 	nextMeleeAt: number,
+	-- Points scored this round, and the multiplier ticking down on them.
+	points: number,
+	multiplierUntil: number,
+	multiplierAmount: number,
 	kills: number,
 	deaths: number,
 	-- The vehicle this player is sitting in, if any.
@@ -3374,6 +3566,9 @@ function PlayerState.Reset(player: Player, keepProgress: boolean)
 		friesUntil = 0,
 		spawnProtectedUntil = os.clock() + Config.Combat.SpawnProtection,
 		nextMeleeAt = 0,
+		points = if previous then previous.points else 0,
+		multiplierUntil = if keepProgress and previous then previous.multiplierUntil else 0,
+		multiplierAmount = if keepProgress and previous then previous.multiplierAmount else 1,
 		kills = if previous then previous.kills else 0,
 		deaths = if previous then previous.deaths else 0,
 		vehicle = nil,
@@ -3409,6 +3604,24 @@ function PlayerState.BarrelCount(player: Player): number
 		return Config.Pickups.Fries.Barrels
 	end
 	return 1
+end
+
+--[[ The multiplier on this player's points right now, or 1. ]]
+function PlayerState.PointMultiplier(player: Player): number
+	local state = PlayerState.Get(player)
+	if os.clock() < state.multiplierUntil then
+		return state.multiplierAmount
+	end
+	return 1
+end
+
+--[[ Score, with whatever multiplier is running applied. ]]
+function PlayerState.AwardPoints(player: Player, base: number): number
+	local state = PlayerState.Get(player)
+	local earned = math.floor(base * PlayerState.PointMultiplier(player))
+	state.points += earned
+	PlayerState.Changed.Fire(player)
+	return earned
 end
 
 --[[ Shields grow back once nobody has shot you for a few seconds. ]]
@@ -3453,7 +3666,7 @@ return PlayerState
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">ProjectileService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3587,7 +3800,7 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 	local spec = projectile.spec
 
 	-- Giant animals shrug off anything that is not a mega-detonation.
-	if WildlifeService.RegisterHit(hitPart) then
+	if WildlifeService.RegisterHit(hitPart, spec.Damage, projectile.owner) then
 		return
 	end
 
@@ -3878,7 +4091,7 @@ return ProjectileService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">TeamService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3961,7 +4174,7 @@ return TeamService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -4002,7 +4215,10 @@ local CHASSIS_HEIGHT = 4
 
 -- Wheels want grip; the chassis wants weight so it does not tip over.
 local WHEEL_PHYSICS = PhysicalProperties.new(1.2, 2.0, 0.1, 100, 1)
-local CHASSIS_PHYSICS = PhysicalProperties.new(4.5, 0.3, 0.2, 1, 1)
+-- Low friction: the chassis is what touches the ground now that the wheels
+-- are decoration, and a high-grip box would drag against the drive
+-- constraint instead of sliding along under it.
+local CHASSIS_PHYSICS = PhysicalProperties.new(4.5, 0.08, 0.1, 1, 1)
 
 --[[ Every vehicle currently alive in the world, so we can drive them each frame. ]]
 local active: { [Model]: any } = {}
@@ -4057,29 +4273,46 @@ end
 --[[
 	One wheel.
 
-	These are welded on and purely for looks. An earlier version drove them
-	with hinge motors, which is the "proper" way and also the way that gives
-	you a vehicle that silently does nothing if a single constraint axis is
-	off by ninety degrees. Driving is now done by setting the chassis velocity
-	directly — see driveWheeled — which is arcade-y, completely predictable,
-	and cannot fail quietly.
+	Wheels are anchored, non-colliding decoration that we rotate by hand. That
+	sounds backwards, but welded colliding wheels cannot roll — they scrape,
+	and their friction fights the drive constraint that is trying to move the
+	car. Anchoring them takes them out of the physics entirely and lets us
+	spin them at exactly road speed, so they look right and cost nothing.
+
+	The chassis is what actually rests on the ground.
 ]]
-local function addWheel(chassis: BasePart, offset: Vector3, model: Model)
+local function addWheel(chassis: BasePart, offset: Vector3, model: Model): (BasePart, BasePart, CFrame)
+	local localOffset = CFrame.new(offset)
+
 	local wheel = Util.Part({
 		Name = "Wheel",
 		Size = Vector3.new(WHEEL_WIDTH, WHEEL_DIAMETER, WHEEL_DIAMETER),
 		-- A cylinder's flat faces point along its own X, which is already the
-		-- car's left-right axis, so no extra rotation is needed here.
-		CFrame = chassis.CFrame * CFrame.new(offset),
+		-- car's left-right axis, so it is already oriented to roll.
+		CFrame = chassis.CFrame * localOffset,
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(30, 30, 34),
 		Material = Enum.Material.Rubber,
-		Anchored = false,
-		CustomPhysicalProperties = WHEEL_PHYSICS,
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
 		Parent = model,
 	})
-	Util.Weld(chassis, wheel)
-	return wheel
+
+	-- A pale hub, so the rotation is actually visible from outside.
+	local hub = Util.Part({
+		Name = "Hub",
+		Size = Vector3.new(WHEEL_WIDTH + 0.4, WHEEL_DIAMETER * 0.45, WHEEL_DIAMETER * 0.45),
+		CFrame = wheel.CFrame,
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(190, 190, 200),
+		Material = Enum.Material.Metal,
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = model,
+	})
+	return wheel, hub, localOffset
 end
 
 -- ================================================================== CHASSIS ==
@@ -4092,7 +4325,7 @@ local function buildChassis(
 	color: Color3,
 	wheelbase: number,
 	track: number
-): (Model, BasePart)
+): (Model, BasePart, { { part: BasePart, hub: BasePart, offset: CFrame } })
 	local model = Instance.new("Model")
 	model.Name = name
 
@@ -4167,12 +4400,18 @@ local function buildChassis(
 	local halfTrack = track * 0.5
 	local axleDrop = -bodySize.Y * 0.5
 
-	addWheel(chassis, Vector3.new(-halfTrack, axleDrop, -halfBase), model)
-	addWheel(chassis, Vector3.new(halfTrack, axleDrop, -halfBase), model)
-	addWheel(chassis, Vector3.new(-halfTrack, axleDrop, halfBase), model)
-	addWheel(chassis, Vector3.new(halfTrack, axleDrop, halfBase), model)
+	local wheels = {}
+	for _, corner in {
+		Vector3.new(-halfTrack, axleDrop, -halfBase),
+		Vector3.new(halfTrack, axleDrop, -halfBase),
+		Vector3.new(-halfTrack, axleDrop, halfBase),
+		Vector3.new(halfTrack, axleDrop, halfBase),
+	} do
+		local wheel, hub, offset = addWheel(chassis, corner, model)
+		table.insert(wheels, { part = wheel, hub = hub, offset = offset })
+	end
 
-	return model, chassis
+	return model, chassis, wheels
 end
 
 --[[
@@ -4372,7 +4611,7 @@ function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Pl
 	local tier = Config.CarTiers[math.clamp(tierIndex, 1, #Config.CarTiers)]
 	local body = Config.CarBodies[bodyPicker:NextInteger(1, #Config.CarBodies)]
 
-	local model, chassis = buildChassis(
+	local model, chassis, wheels = buildChassis(
 		`{body.Name}_{tier.Name}`,
 		position,
 		body.Size,
@@ -4395,6 +4634,7 @@ function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Pl
 
 	model.Parent = workspace
 	active[model] = {
+		wheels = wheels,
 		kind = "Car",
 		chassis = chassis,
 		seat = seat,
@@ -4409,7 +4649,7 @@ end
 function VehicleService.SpawnTurretTruck(position: Vector3): Model
 	local spec = Config.Vehicles.TurretTruck
 
-	local model, chassis = buildChassis(
+	local model, chassis, wheels = buildChassis(
 		"TurretTruck",
 		position,
 		Vector3.new(12, CHASSIS_HEIGHT, 24),
@@ -4433,6 +4673,7 @@ function VehicleService.SpawnTurretTruck(position: Vector3): Model
 
 	model.Parent = workspace
 	active[model] = {
+		wheels = wheels,
 		kind = "TurretTruck",
 		chassis = chassis,
 		seat = seat,
@@ -4451,7 +4692,7 @@ end
 function VehicleService.SpawnTank(position: Vector3): Model
 	local spec = Config.Vehicles.Tank
 
-	local model, chassis = buildChassis(
+	local model, chassis, wheels = buildChassis(
 		"Tank",
 		position,
 		Vector3.new(16, 5, 26),
@@ -4492,6 +4733,7 @@ function VehicleService.SpawnTank(position: Vector3): Model
 
 	model.Parent = workspace
 	active[model] = {
+		wheels = wheels,
 		kind = "Tank",
 		chassis = chassis,
 		seat = seat,
@@ -4803,11 +5045,21 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 
 	state.currentSpeed = current
 
-	-- An empty car rolls to a stop and then stops asking for anything.
+	-- An empty car rolls to a stop and then stops asking for anything. Its
+	-- wheels still have to be kept glued to it, or they are left behind.
 	if not seat.Occupant and math.abs(current) < 0.5 then
 		state.currentSpeed = 0
 		drive.Enabled = false
 		turn.Enabled = false
+		if state.wheels then
+			for _, wheel in state.wheels do
+				local resting = chassis.CFrame * wheel.offset * CFrame.Angles(state.wheelSpin or 0, 0, 0)
+				wheel.part.CFrame = resting
+				if wheel.hub then
+					wheel.hub.CFrame = resting
+				end
+			end
+		end
 		return
 	end
 
@@ -4822,6 +5074,22 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	turn.Enabled = true
 	drive.LineDirection = flat
 	drive.LineVelocity = current
+
+	-- Roll the wheels at whatever speed the car is actually doing. They are
+	-- anchored decoration, so this is the only thing that makes them turn —
+	-- and a car whose wheels are locked solid looks broken even when it is
+	-- driving perfectly well.
+	if state.wheels then
+		local radius = WHEEL_DIAMETER * 0.5
+		state.wheelSpin = (state.wheelSpin or 0) + (current / radius) * deltaTime
+		for _, wheel in state.wheels do
+			local spun = chassis.CFrame * wheel.offset * CFrame.Angles(state.wheelSpin, 0, 0)
+			wheel.part.CFrame = spun
+			if wheel.hub then
+				wheel.hub.CFrame = spun
+			end
+		end
+	end
 
 	-- Steering bites less the slower you are going, and reverses when you
 	-- are reversing, the way a real car does.
@@ -5057,7 +5325,7 @@ return VehicleService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">WeaponService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5294,7 +5562,7 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	impactSpark(result.Position, result.Normal, spec.Color)
 
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
-	if WildlifeService.RegisterHit(result.Instance) then
+	if WildlifeService.RegisterHit(result.Instance, spec.Damage, player) then
 		return
 	end
 
@@ -5397,6 +5665,9 @@ local function beginReload(player: Player, weaponName: string)
 	if slot.reloadingUntil > os.clock() or slot.ammo >= spec.MagSize then
 		return
 	end
+	if Config.InfiniteAmmo then
+		return
+	end
 	-- Poop and drones do not reload. What you scavenged is what you have.
 	if spec.AmmoFromPickupsOnly then
 		return
@@ -5458,7 +5729,7 @@ local function handleFire(player: Player, requestedDirection: any)
 	if now < slot.reloadingUntil then
 		return
 	end
-	if slot.ammo <= 0 then
+	if not Config.InfiniteAmmo and slot.ammo <= 0 then
 		beginReload(player, weaponName)
 		return
 	end
@@ -5474,7 +5745,9 @@ local function handleFire(player: Player, requestedDirection: any)
 	end
 
 	slot.nextFireAt = now + spec.Cooldown
-	slot.ammo -= 1
+	if not Config.InfiniteAmmo then
+		slot.ammo -= 1
+	end
 
 	local direction = requestedDirection.Unit
 
@@ -5509,7 +5782,7 @@ local function handleFire(player: Player, requestedDirection: any)
 		end
 	end
 
-	if slot.ammo <= 0 then
+	if not Config.InfiniteAmmo and slot.ammo <= 0 then
 		beginReload(player, weaponName)
 	end
 
@@ -5716,26 +5989,22 @@ return WeaponService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">WildlifeService</string>
             <string name="Source"><![CDATA[--!strict
 --[[
-	WildlifeService — the giant animals.
+	WildlifeService — everything on the map that is alive and is not a player.
 
-	King Kong sized cats, elephants, dogs, fish and gorillas wander the map.
-	Bullets do not kill them; each species has its own way of shrugging a hit
-	off. Only a diamond bullet's mega-detonation puts one down, and when it
-	goes it bursts into a red cloud and something *different* turns up
-	elsewhere a few seconds later.
+	  Zombies    roam, come for you, and hit you if they reach you.
+	  Civilians  wander, and say something regrettable when shot.
+	  Targets    stand still with a bullseye on them, for practice.
 
-	You can climb on one and ride it. You cannot use a gun while you do — the
-	animal is the weapon, and it flattens whatever it runs over.
+	All three are worth points, all three come back a few seconds after they
+	go down, and all three carry a target ring so you can pick them out.
 
-	The animals are anchored and moved by script rather than being physics
-	objects. A forty-stud ragdoll shouldering its way through a firefight
-	would fling everybody into orbit, and an anchored one cannot wedge itself
-	in a doorway and stay there for the rest of the round.
+	Poop is still here too: elephants are gone, but a pile that gets shot
+	turns into a tower with a staircase round it.
 ]]
 
 local Players = game:GetService("Players")
@@ -5753,252 +6022,301 @@ local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
 local WildlifeService = {}
 
-type Species = typeof(Config.Beasts[1])
-
-type Beast = {
+type Dweller = {
+	kind: string,
 	model: Model,
-	body: BasePart,
-	head: BasePart?,
-	seat: VehicleSeat,
-	species: Species,
+	root: BasePart,
 	position: Vector3,
 	facing: Vector3,
 	target: Vector3,
+	health: number,
+	maxHealth: number,
 	standHeight: number,
-	-- "Wander" normally; a species-specific reaction when shot.
-	mood: string,
-	moodUntil: number,
-	nextPoopAt: number,
-	lastTrampleAt: number,
+	nextAttackAt: number,
+	dead: boolean,
 }
 
-local beasts: { Beast } = {}
+local dwellers: { Dweller } = {}
 local poopPiles: { BasePart } = {}
 local wanderRadius = 300
 local rng = Random.new()
 
-local S = Config.Beast.Scale
+-- ================================================================ FURNITURE ==
+
+--[[ The bullseye ring that marks anything worth shooting. ]]
+local function addBullseye(attachTo: BasePart, height: number)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "Bullseye"
+	billboard.Size = UDim2.fromOffset(70, 70)
+	billboard.StudsOffset = Vector3.new(0, height, 0)
+	billboard.AlwaysOnTop = false
+	billboard.MaxDistance = 500
+	billboard.Parent = attachTo
+
+	-- Concentric rings, red and white, drawn out of nested frames.
+	local shades = {
+		Color3.fromRGB(220, 40, 40),
+		Color3.fromRGB(245, 245, 245),
+		Color3.fromRGB(220, 40, 40),
+		Color3.fromRGB(245, 245, 245),
+	}
+	local parent: Instance = billboard
+	for index, shade in shades do
+		local ring = Instance.new("Frame")
+		ring.Size = if index == 1 then UDim2.fromScale(1, 1) else UDim2.fromScale(0.72, 0.72)
+		ring.Position = if index == 1 then UDim2.fromScale(0, 0) else UDim2.fromScale(0.14, 0.14)
+		ring.BackgroundColor3 = shade
+		ring.BorderSizePixel = 0
+		ring.Parent = parent
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(1, 0)
+		corner.Parent = ring
+
+		parent = ring
+	end
+end
+
+--[[ A floating line of speech above someone's head. ]]
+local function say(attachTo: BasePart, text: string, colour: Color3, seconds: number)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromScale(18, 3)
+	billboard.StudsOffset = Vector3.new(0, 6, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 400
+	billboard.Parent = attachTo
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = colour
+	label.TextStrokeTransparency = 0.25
+	label.TextScaled = true
+	label.Font = Enum.Font.LuckiestGuy
+	label.Parent = billboard
+
+	Debris:AddItem(billboard, seconds)
+end
+
+--[[ A green cloud, for the obvious reason. ]]
+local function fart(position: Vector3)
+	local anchor = Util.Part({
+		Name = "Fart",
+		Size = Vector3.new(0.5, 0.5, 0.5),
+		CFrame = CFrame.new(position),
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = workspace,
+	})
+
+	local cloud = Instance.new("ParticleEmitter")
+	cloud.Color = ColorSequence.new(Color3.fromRGB(150, 200, 90))
+	cloud.Size = NumberSequence.new(3, 9)
+	cloud.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.25),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	cloud.Lifetime = NumberRange.new(0.9, 1.8)
+	cloud.Speed = NumberRange.new(4, 11)
+	cloud.SpreadAngle = Vector2.new(60, 60)
+	cloud.Rate = 0
+	cloud.Parent = anchor
+	cloud:Emit(40)
+
+	Debris:AddItem(anchor, 3)
+end
 
 -- ================================================================= BUILDING ==
 
-local function limb(parent: Instance, anchorTo: BasePart, size: Vector3, offset: CFrame, colour: Color3, name: string): BasePart
-	local part = Util.Part({
-		Name = name,
-		Size = size,
-		CFrame = anchorTo.CFrame * offset,
-		Color = colour,
-		Material = Enum.Material.SmoothPlastic,
-		-- Players and bullets pass through the body: it is a moving landmark
-		-- with a temper, not a wall to get pinned against.
-		CanCollide = false,
-		Parent = parent,
-	})
-	Util.Weld(anchorTo, part)
-	return part
-end
-
---[[ Four legs, a body, a head. The shape that covers cat, dog and elephant. ]]
-local function buildQuadruped(
-	species: Species,
-	position: Vector3,
-	bodySize: Vector3,
-	legLength: number,
-	headSize: number,
-	extras: string
-): (Model, BasePart, BasePart, number)
+--[[ A rough person: torso, head, arms, legs. Colour tells you which kind. ]]
+local function buildPerson(position: Vector3, skin: Color3, clothes: Color3, name: string): (Model, BasePart, number)
 	local model = Instance.new("Model")
-	model.Name = species.Name
+	model.Name = name
 
-	local standHeight = legLength + bodySize.Y * 0.5
-	local colour = species.Colour
+	local standHeight = 5.5
 
-	local body = Util.Part({
-		Name = "Body",
-		Size = bodySize,
+	local torso = Util.Part({
+		Name = "Torso",
+		Size = Vector3.new(2.6, 3.4, 1.5),
 		CFrame = CFrame.new(position + Vector3.new(0, standHeight, 0)),
-		Color = colour,
+		Color = clothes,
+		Material = Enum.Material.Fabric,
+		CanCollide = false,
+		Parent = model,
+	})
+	model.PrimaryPart = torso
+
+	local head = Util.Part({
+		Name = "Head",
+		Size = Vector3.new(1.7, 1.7, 1.7),
+		CFrame = torso.CFrame * CFrame.new(0, 2.6, 0),
+		Color = skin,
 		Material = Enum.Material.SmoothPlastic,
 		CanCollide = false,
 		Parent = model,
 	})
-	model.PrimaryPart = body
+	Util.Weld(torso, head)
 
-	local head = limb(
-		model, body,
-		Vector3.new(headSize, headSize, headSize),
-		CFrame.new(0, bodySize.Y * 0.35, -bodySize.Z * 0.55 - headSize * 0.4),
-		colour:Lerp(Color3.new(1, 1, 1), 0.08),
-		"Head"
+	for _, side in { -1, 1 } do
+		local arm = Util.Part({
+			Name = "Arm",
+			Size = Vector3.new(0.9, 3.2, 0.9),
+			CFrame = torso.CFrame * CFrame.new(side * 1.75, 0, 0),
+			Color = skin,
+			Material = Enum.Material.SmoothPlastic,
+			CanCollide = false,
+			Parent = model,
+		})
+		Util.Weld(torso, arm)
+
+		local leg = Util.Part({
+			Name = "Leg",
+			Size = Vector3.new(1.1, 3.4, 1.1),
+			CFrame = torso.CFrame * CFrame.new(side * 0.7, -3.4, 0),
+			Color = clothes:Lerp(Color3.new(0, 0, 0), 0.4),
+			Material = Enum.Material.Fabric,
+			CanCollide = false,
+			Parent = model,
+		})
+		Util.Weld(torso, leg)
+	end
+
+	model.Parent = workspace
+	return model, torso, standHeight
+end
+
+local function spawnZombie(position: Vector3)
+	local model, torso, standHeight = buildPerson(
+		position,
+		Color3.fromRGB(126, 158, 110),
+		Color3.fromRGB(72, 84, 66),
+		"Zombie"
 	)
+	model:SetAttribute("Dweller", "Zombie")
+	addBullseye(torso, 5)
 
-	-- Legs.
-	for _, corner in {
-		Vector3.new(-1, 0, -1), Vector3.new(1, 0, -1),
-		Vector3.new(-1, 0, 1), Vector3.new(1, 0, 1),
-	} do
-		limb(
-			model, body,
-			Vector3.new(bodySize.X * 0.22, legLength, bodySize.X * 0.22),
-			CFrame.new(
-				corner.X * bodySize.X * 0.34,
-				-bodySize.Y * 0.5 - legLength * 0.5,
-				corner.Z * bodySize.Z * 0.32
-			),
-			colour:Lerp(Color3.new(0, 0, 0), 0.12),
-			"Leg"
-		)
-	end
-
-	if extras == "Cat" then
-		-- Pointed ears and a long tail.
-		for _, side in { -1, 1 } do
-			limb(model, head, Vector3.new(headSize * 0.18, headSize * 0.45, headSize * 0.18),
-				CFrame.new(side * headSize * 0.28, headSize * 0.6, 0), colour, "Ear")
-		end
-		-- Annotated, because `body` is a Part and each tail segment comes
-		-- back as a BasePart.
-		local previous: BasePart = body
-		for segment = 1, 6 do
-			previous = limb(model, previous,
-				Vector3.new(headSize * 0.2, headSize * 0.2, bodySize.Z * 0.18),
-				CFrame.new(0, bodySize.Y * 0.3, bodySize.Z * 0.35 + segment * bodySize.Z * 0.12),
-				colour, "Tail")
-		end
-		-- Whiskers, because it should read as a cat from a distance.
-		for _, side in { -1, 1 } do
-			limb(model, head, Vector3.new(headSize * 0.9, 0.5 * S, 0.5 * S),
-				CFrame.new(side * headSize * 0.5, -headSize * 0.1, -headSize * 0.45),
-				Color3.fromRGB(240, 240, 235), "Whisker")
-		end
-	elseif extras == "Dog" then
-		-- Floppy ears, a snout and a stubby tail.
-		for _, side in { -1, 1 } do
-			limb(model, head, Vector3.new(headSize * 0.16, headSize * 0.55, headSize * 0.4),
-				CFrame.new(side * headSize * 0.5, headSize * 0.15, 0),
-				colour:Lerp(Color3.new(0, 0, 0), 0.2), "Ear")
-		end
-		limb(model, head, Vector3.new(headSize * 0.45, headSize * 0.4, headSize * 0.6),
-			CFrame.new(0, -headSize * 0.15, -headSize * 0.7),
-			colour:Lerp(Color3.new(0, 0, 0), 0.15), "Snout")
-		limb(model, body, Vector3.new(headSize * 0.25, headSize * 0.25, bodySize.Z * 0.3),
-			CFrame.new(0, bodySize.Y * 0.35, bodySize.Z * 0.6), colour, "Tail")
-	elseif extras == "Elephant" then
-		-- Trunk, ears, tusks.
-		local previous = head
-		for segment = 1, 5 do
-			local thickness = headSize * (0.34 - segment * 0.04)
-			previous = limb(model, previous, Vector3.new(thickness, thickness, headSize * 0.3),
-				CFrame.new(0, -headSize * 0.3, -headSize * 0.35), colour, "Trunk")
-		end
-		for _, side in { -1, 1 } do
-			limb(model, head, Vector3.new(headSize * 0.1, headSize * 0.8, headSize * 0.8),
-				CFrame.new(side * headSize * 0.55, headSize * 0.1, headSize * 0.1),
-				colour:Lerp(Color3.new(1, 1, 1), 0.12), "Ear")
-			limb(model, head, Vector3.new(headSize * 0.12, headSize * 0.12, headSize * 0.75),
-				CFrame.new(side * headSize * 0.25, -headSize * 0.35, -headSize * 0.5),
-				Color3.fromRGB(240, 235, 215), "Tusk")
+	-- Arms out in front, so it reads as a zombie at a glance.
+	for _, arm in model:GetChildren() do
+		if arm:IsA("BasePart") and arm.Name == "Arm" then
+			arm.CFrame = arm.CFrame * CFrame.new(0, 1.1, -1.5) * CFrame.Angles(math.rad(-75), 0, 0)
 		end
 	end
 
-	model.Parent = workspace
-	return model, body, head, standHeight
+	table.insert(dwellers, {
+		kind = "Zombie",
+		model = model,
+		root = torso :: BasePart,
+		position = position,
+		facing = Vector3.new(0, 0, 1),
+		target = position,
+		health = Config.Population.ZombieHealth,
+		maxHealth = Config.Population.ZombieHealth,
+		standHeight = standHeight,
+		nextAttackAt = 0,
+		dead = false,
+	})
 end
 
---[[ A fish. No legs, so on land it can only flop, which is the joke. ]]
-local function buildFish(species: Species, position: Vector3): (Model, BasePart, BasePart, number)
+local function spawnCivilian(position: Vector3)
+	local shirts = {
+		Color3.fromRGB(220, 90, 90), Color3.fromRGB(90, 140, 220),
+		Color3.fromRGB(240, 200, 80), Color3.fromRGB(140, 200, 130),
+		Color3.fromRGB(200, 120, 210),
+	}
+	local model, torso, standHeight = buildPerson(
+		position,
+		Color3.fromRGB(226, 186, 150),
+		shirts[rng:NextInteger(1, #shirts)],
+		"Civilian"
+	)
+	model:SetAttribute("Dweller", "Civilian")
+	addBullseye(torso, 5)
+
+	table.insert(dwellers, {
+		kind = "Civilian",
+		model = model,
+		root = torso :: BasePart,
+		position = position,
+		facing = Vector3.new(0, 0, 1),
+		target = position,
+		health = Config.Population.CivilianHealth,
+		maxHealth = Config.Population.CivilianHealth,
+		standHeight = standHeight,
+		nextAttackAt = 0,
+		dead = false,
+	})
+end
+
+--[[ A practice target on a post: board, bullseye, and a stand. ]]
+local function spawnTarget(position: Vector3)
 	local model = Instance.new("Model")
-	model.Name = species.Name
+	model.Name = "PracticeTarget"
+	model:SetAttribute("Dweller", "Target")
 
-	local bodySize = Vector3.new(16 * S, 20 * S, 42 * S)
-	local standHeight = bodySize.Y * 0.5
-
-	local body = Util.Part({
-		Name = "Body",
-		Size = bodySize,
-		CFrame = CFrame.new(position + Vector3.new(0, standHeight, 0)),
-		Color = species.Colour,
-		Material = Enum.Material.SmoothPlastic,
-		CanCollide = false,
+	local post = Util.Part({
+		Name = "Post",
+		Size = Vector3.new(1.2, 12, 1.2),
+		CFrame = CFrame.new(position + Vector3.new(0, 6, 0)),
+		Color = Color3.fromRGB(110, 82, 54),
+		Material = Enum.Material.Wood,
 		Parent = model,
 	})
-	model.PrimaryPart = body
 
-	local head = limb(model, body, Vector3.new(bodySize.X * 0.8, bodySize.Y * 0.8, bodySize.Z * 0.25),
-		CFrame.new(0, 0, -bodySize.Z * 0.55), species.Colour:Lerp(Color3.new(1, 1, 1), 0.1), "Head")
-
-	-- Eyes, enormous and unblinking.
-	for _, side in { -1, 1 } do
-		limb(model, head, Vector3.new(bodySize.X * 0.3, bodySize.X * 0.3, bodySize.X * 0.3),
-			CFrame.new(side * bodySize.X * 0.35, bodySize.Y * 0.2, -bodySize.Z * 0.05),
-			Color3.fromRGB(250, 250, 250), "Eye")
-	end
-
-	-- Tail fin and side fins.
-	limb(model, body, Vector3.new(bodySize.X * 0.25, bodySize.Y * 1.3, bodySize.Z * 0.3),
-		CFrame.new(0, 0, bodySize.Z * 0.62), species.Colour:Lerp(Color3.new(0, 0, 0), 0.15), "TailFin")
-	for _, side in { -1, 1 } do
-		limb(model, body, Vector3.new(bodySize.X * 0.7, bodySize.Y * 0.12, bodySize.Z * 0.28),
-			CFrame.new(side * bodySize.X * 0.55, -bodySize.Y * 0.15, 0),
-			species.Colour:Lerp(Color3.new(0, 0, 0), 0.15), "Fin")
-	end
-	limb(model, body, Vector3.new(bodySize.X * 0.15, bodySize.Y * 0.5, bodySize.Z * 0.4),
-		CFrame.new(0, bodySize.Y * 0.6, 0), species.Colour:Lerp(Color3.new(0, 0, 0), 0.2), "DorsalFin")
-
-	model.Parent = workspace
-	return model, body, head, standHeight
-end
-
---[[ A gorilla: upright, huge arms, small legs. ]]
-local function buildGorilla(species: Species, position: Vector3): (Model, BasePart, BasePart, number)
-	local model = Instance.new("Model")
-	model.Name = species.Name
-
-	local torsoSize = Vector3.new(22 * S, 26 * S, 16 * S)
-	local legLength = 12 * S
-	local standHeight = legLength + torsoSize.Y * 0.5
-
-	local body = Util.Part({
-		Name = "Body",
-		Size = torsoSize,
-		CFrame = CFrame.new(position + Vector3.new(0, standHeight, 0)),
-		Color = species.Colour,
-		Material = Enum.Material.SmoothPlastic,
-		CanCollide = false,
+	local board = Util.Part({
+		Name = "Board",
+		Size = Vector3.new(11, 11, 0.8),
+		CFrame = CFrame.new(position + Vector3.new(0, 15, 0))
+			* CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0),
+		Color = Color3.fromRGB(245, 245, 240),
+		Material = Enum.Material.WoodPlanks,
 		Parent = model,
 	})
-	model.PrimaryPart = body
+	model.PrimaryPart = board
+	Util.Weld(post, board)
 
-	local head = limb(model, body, Vector3.new(12 * S, 11 * S, 12 * S),
-		CFrame.new(0, torsoSize.Y * 0.62, -1 * S), species.Colour:Lerp(Color3.new(1, 1, 1), 0.1), "Head")
-	limb(model, head, Vector3.new(8 * S, 5 * S, 3 * S),
-		CFrame.new(0, -2 * S, -6 * S), Color3.fromRGB(48, 44, 44), "Muzzle")
+	-- Painted rings, front and back, so it works from either side.
+	for _, facing in { 1, -1 } do
+		local radius = 5.0
+		for ring = 1, 4 do
+			Util.Part({
+				Name = "Ring",
+				Size = Vector3.new(radius * 2, radius * 2, 0.2),
+				CFrame = board.CFrame * CFrame.new(0, 0, facing * (0.45 + ring * 0.01)),
+				Shape = Enum.PartType.Cylinder,
+				Color = if ring % 2 == 1 then Color3.fromRGB(220, 40, 40) else Color3.fromRGB(250, 250, 250),
+				Material = Enum.Material.SmoothPlastic,
+				CanCollide = false,
+				Parent = model,
+			})
+			radius *= 0.72
+		end
+	end
 
-	-- Arms down to the floor, as they should be.
-	for _, side in { -1, 1 } do
-		limb(model, body, Vector3.new(7 * S, 26 * S, 7 * S),
-			CFrame.new(side * torsoSize.X * 0.62, -torsoSize.Y * 0.15, 0),
-			species.Colour:Lerp(Color3.new(0, 0, 0), 0.1), "Arm")
-		limb(model, body, Vector3.new(8 * S, legLength, 8 * S),
-			CFrame.new(side * torsoSize.X * 0.28, -torsoSize.Y * 0.5 - legLength * 0.5, 0),
-			species.Colour:Lerp(Color3.new(0, 0, 0), 0.15), "Leg")
+	-- A cylinder lies on its own X, so the rings need standing upright.
+	for _, ring in model:GetChildren() do
+		if ring:IsA("BasePart") and ring.Name == "Ring" then
+			ring.CFrame = ring.CFrame * CFrame.Angles(0, math.rad(90), 0)
+			Util.Weld(board, ring)
+		end
 	end
 
 	model.Parent = workspace
-	return model, body, head, standHeight
-end
 
---[[ Build whichever species this is. ]]
-local function buildSpecies(species: Species, position: Vector3): (Model, BasePart, BasePart?, number)
-	if species.Id == "Fish" then
-		return buildFish(species, position)
-	elseif species.Id == "Gorilla" then
-		return buildGorilla(species, position)
-	elseif species.Id == "Cat" then
-		return buildQuadruped(species, position, Vector3.new(16 * S, 14 * S, 34 * S), 13 * S, 13 * S, "Cat")
-	elseif species.Id == "Dog" then
-		return buildQuadruped(species, position, Vector3.new(15 * S, 15 * S, 30 * S), 14 * S, 13 * S, "Dog")
-	end
-	return buildQuadruped(species, position, Vector3.new(22 * S, 20 * S, 40 * S), 18 * S, 16 * S, "Elephant")
+	table.insert(dwellers, {
+		kind = "Target",
+		model = model,
+		root = board :: BasePart,
+		position = position,
+		facing = Vector3.new(0, 0, 1),
+		target = position,
+		health = Config.Population.TargetHealth,
+		maxHealth = Config.Population.TargetHealth,
+		standHeight = 15,
+		nextAttackAt = 0,
+		dead = false,
+	})
 end
 
 -- ==================================================================== POOP ==
@@ -6010,7 +6328,6 @@ local function collectPoop(player: Player, pile: BasePart)
 	if not slot or not spec then
 		return
 	end
-
 	slot.ammo = math.min(spec.MagSize, slot.ammo + Config.Wildlife.PoopPerPile)
 	PlayerState.Changed.Fire(player)
 	Remotes.Event("Notify"):FireClient(player, "Picked up poop — press 7 to throw it")
@@ -6020,6 +6337,90 @@ local function collectPoop(player: Player, pile: BasePart)
 		table.remove(poopPiles, index)
 	end
 	pile:Destroy()
+end
+
+--[[
+	Shoot a pile and it grows into a tower with a staircase wrapped round it.
+
+	Which is ridiculous, and also genuinely useful: the top is a good sniping
+	platform, and the only way up is the stairs.
+]]
+local function raisePoopColumn(pile: BasePart)
+	local base = pile.Position
+	local index = table.find(poopPiles, pile)
+	if index then
+		table.remove(poopPiles, index)
+	end
+	pile:Destroy()
+
+	local model = Instance.new("Model")
+	model.Name = "PoopColumn"
+
+	local height = 84
+	local radius = 7
+
+	local column = Util.Part({
+		Name = "Column",
+		Size = Vector3.new(radius * 2, height, radius * 2),
+		CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)),
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(92, 64, 38),
+		Material = Enum.Material.Sand,
+		Parent = model,
+	})
+	-- Stand the cylinder upright.
+	column.CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
+
+	-- The platform on top.
+	Util.Part({
+		Name = "Platform",
+		Size = Vector3.new(radius * 4, 1.5, radius * 4),
+		CFrame = CFrame.new(base + Vector3.new(0, height, 0)),
+		Color = Color3.fromRGB(104, 74, 44),
+		Material = Enum.Material.Sand,
+		Parent = model,
+	})
+	-- A lip, so you can lie down up there without rolling off.
+	for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
+		Util.Part({
+			Name = "Lip",
+			Size = Vector3.new(
+				if side.X ~= 0 then 1 else radius * 4,
+				3,
+				if side.Z ~= 0 then 1 else radius * 4
+			),
+			CFrame = CFrame.new(base + side * radius * 2 + Vector3.new(0, height + 2, 0)),
+			Color = Color3.fromRGB(84, 58, 34),
+			Material = Enum.Material.Sand,
+			Parent = model,
+		})
+	end
+
+	-- The spiral: one step at a time, round and round.
+	local steps = 64
+	local turns = 3.5
+	for step = 1, steps do
+		local fraction = step / steps
+		local angle = fraction * turns * math.pi * 2
+		local y = fraction * (height - 2)
+		local outward = radius + 3.5
+
+		Util.Part({
+			Name = "SpiralStep",
+			Size = Vector3.new(7, 1, 4.5),
+			CFrame = CFrame.new(base + Vector3.new(math.cos(angle) * outward, y, math.sin(angle) * outward))
+				* CFrame.Angles(0, -angle + math.pi * 0.5, 0),
+			Color = Color3.fromRGB(120, 88, 52),
+			Material = Enum.Material.WoodPlanks,
+			Parent = model,
+		})
+	end
+
+	model.Parent = workspace
+
+	for _, player in Players:GetPlayers() do
+		Remotes.Event("Notify"):FireClient(player, "A poop tower has risen. There are stairs.")
+	end
 end
 
 local function dropPoop(position: Vector3)
@@ -6040,20 +6441,7 @@ local function dropPoop(position: Vector3)
 		CanCollide = false,
 		Parent = workspace,
 	})
-
-	for lump = 1, 2 do
-		local extra = Util.Part({
-			Name = "Lump",
-			Size = Vector3.new(5 - lump, 3.5, 5 - lump),
-			CFrame = pile.CFrame * CFrame.new(rng:NextNumber(-2, 2), lump * 2, rng:NextNumber(-2, 2)),
-			Shape = Enum.PartType.Ball,
-			Color = Color3.fromRGB(84, 58, 34),
-			Material = Enum.Material.Sand,
-			CanCollide = false,
-			Parent = pile,
-		})
-		Util.Weld(pile, extra)
-	end
+	pile:SetAttribute("Poop", true)
 
 	local billboard = Instance.new("BillboardGui")
 	billboard.Size = UDim2.fromScale(6, 1.6)
@@ -6084,227 +6472,111 @@ local function dropPoop(position: Vector3)
 	end)
 
 	table.insert(poopPiles, pile)
-	Debris:AddItem(pile, Config.Wildlife.PoopLifetime)
 end
 
--- ================================================================== SPAWNING ==
-
-local function pickTarget(): Vector3
-	return Vector3.new(
-		rng:NextNumber(-wanderRadius, wanderRadius),
-		0,
-		rng:NextNumber(-wanderRadius, wanderRadius)
-	)
-end
-
---[[ Sit a beast on whatever the ground turns out to be beneath it. ]]
-local function groundHeight(position: Vector3, ignore: Instance): number
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { ignore }
-	local hit = workspace:Raycast(position + Vector3.new(0, 200, 0), Vector3.new(0, -600, 0), params)
-	return if hit then hit.Position.Y else 0
-end
-
-local function spawnBeast(species: Species, position: Vector3)
-	local model, body, head, standHeight = buildSpecies(species, position)
-
-	model:SetAttribute("IsBeast", true)
-	model:SetAttribute("Species", species.Id)
-
-	-- A saddle on its back, with a prompt to climb aboard.
-	local seat = Instance.new("VehicleSeat")
-	seat.Name = "BeastSeat"
-	seat.Size = Vector3.new(8, 1, 10)
-	seat.CFrame = body.CFrame * CFrame.new(0, body.Size.Y * 0.5 + 1, 0)
-	seat.Anchored = false
-	seat.Massless = true
-	seat.MaxSpeed = 0
-	seat.Torque = 0
-	seat.TurnSpeed = 0
-	seat.Color = Color3.fromRGB(90, 60, 40)
-	seat.Parent = model
-	Util.Weld(body, seat)
-
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = "Ride it"
-	prompt.ObjectText = species.Name
-	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.HoldDuration = 0
-	prompt.MaxActivationDistance = 40
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = seat
-
-	prompt.Triggered:Connect(function(player)
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid and humanoid.Health > 0 and not humanoid.SeatPart then
-			seat:Sit(humanoid)
-		end
-	end)
-
-	-- Riding one takes your guns away and gives you the animal instead.
-	seat:GetPropertyChangedSignal("Occupant"):Connect(function()
-		local occupant = seat.Occupant
-		if occupant then
-			local character = occupant.Parent
-			local player = if character then Players:GetPlayerFromCharacter(character) else nil
-			if player then
-				local state = PlayerState.Get(player)
-				state.vehicle = model
-				state.seatRole = "Beast"
-				PlayerState.Changed.Fire(player)
-				Remotes.Event("Notify"):FireClient(
-					player,
-					`Riding the {species.Name}. No guns — run them over instead.`
-				)
-			end
-			return
-		end
-		for _, player in Players:GetPlayers() do
-			local state = PlayerState.Get(player)
-			if state.vehicle == model and state.seatRole == "Beast" then
-				state.vehicle = nil
-				state.seatRole = nil
-				PlayerState.Changed.Fire(player)
-			end
-		end
-	end)
-
-	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromScale(20, 4)
-	billboard.StudsOffset = Vector3.new(0, body.Size.Y * 0.9, 0)
-	billboard.AlwaysOnTop = true
-	billboard.MaxDistance = 1500
-	billboard.Parent = body
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Text = species.Name
-	label.TextColor3 = Color3.fromRGB(255, 220, 180)
-	label.TextStrokeTransparency = 0.25
-	label.TextScaled = true
-	label.Font = Enum.Font.LuckiestGuy
-	label.Parent = billboard
-
-	table.insert(beasts, {
-		model = model,
-		body = body,
-		head = head,
-		seat = seat,
-		species = species,
-		position = position,
-		facing = Vector3.new(0, 0, 1),
-		target = pickTarget(),
-		standHeight = standHeight,
-		mood = "Wander",
-		moodUntil = 0,
-		nextPoopAt = os.clock() + rng:NextNumber(3, Config.Wildlife.PoopInterval),
-		lastTrampleAt = 0,
-	})
-end
-
---[[ Come back somewhere else, as something else. ]]
-local function respawnAsDifferent(previous: Species)
-	local choices = {}
-	for _, species in Config.Beasts do
-		if species.Id ~= previous.Id then
-			table.insert(choices, species)
-		end
-	end
-	if #choices == 0 then
-		return
-	end
-
-	local next_ = choices[rng:NextInteger(1, #choices)]
-	local where = pickTarget()
-	spawnBeast(next_, Vector3.new(where.X, groundHeight(where, workspace), where.Z))
-
-	for _, player in Players:GetPlayers() do
-		Remotes.Event("Notify"):FireClient(player, `A {next_.Name} has appeared somewhere.`)
+--[[ Scatter some poop about, since there is no elephant leaving it any more. ]]
+local function seedPoop()
+	for _ = 1, 12 do
+		dropPoop(Vector3.new(
+			rng:NextNumber(-wanderRadius, wanderRadius),
+			2,
+			rng:NextNumber(-wanderRadius, wanderRadius)
+		))
 	end
 end
 
 -- ==================================================================== DEATH ==
 
---[[ The red cloud. Only a mega-detonation gets one of these. ]]
-local function burst(beast: Beast)
-	local position = beast.body.Position
+local function respawnOne(kind: string)
+	local where = Vector3.new(
+		rng:NextNumber(-wanderRadius, wanderRadius),
+		4,
+		rng:NextNumber(-wanderRadius, wanderRadius)
+	)
+	if kind == "Zombie" then
+		spawnZombie(where)
+	elseif kind == "Civilian" then
+		spawnCivilian(where)
+	else
+		spawnTarget(where)
+	end
+end
 
+local function kill(dweller: Dweller, attacker: Player?)
+	if dweller.dead then
+		return
+	end
+	dweller.dead = true
+
+	local points = if dweller.kind == "Zombie" then Config.Population.ZombiePoints
+		elseif dweller.kind == "Civilian" then Config.Population.CivilianPoints
+		else Config.Population.TargetPoints
+
+	if attacker then
+		local earned = PlayerState.AwardPoints(attacker, points)
+		Remotes.Event("Notify"):FireClient(attacker, `+{earned} — {dweller.kind}`)
+	end
+
+	-- A burst of whatever colour suits.
 	local anchor = Util.Part({
-		Name = "RedCloud",
-		Size = Vector3.new(1, 1, 1),
-		CFrame = CFrame.new(position),
+		Name = "Burst",
+		Size = Vector3.new(0.5, 0.5, 0.5),
+		CFrame = CFrame.new(dweller.root.Position),
 		Transparency = 1,
 		CanCollide = false,
 		CanQuery = false,
 		Parent = workspace,
 	})
+	local burst = Instance.new("ParticleEmitter")
+	burst.Color = ColorSequence.new(
+		if dweller.kind == "Zombie" then Color3.fromRGB(110, 160, 90) else Color3.fromRGB(220, 60, 60)
+	)
+	burst.Size = NumberSequence.new(2.5, 0)
+	burst.Lifetime = NumberRange.new(0.5, 1.1)
+	burst.Speed = NumberRange.new(14, 34)
+	burst.SpreadAngle = Vector2.new(180, 180)
+	burst.Rate = 0
+	burst.Parent = anchor
+	burst:Emit(60)
+	Debris:AddItem(anchor, 2.5)
 
-	local cloud = Instance.new("ParticleEmitter")
-	cloud.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(220, 30, 30)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(90, 0, 0)),
-	})
-	cloud.Size = NumberSequence.new(40, 90)
-	cloud.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.1),
-		NumberSequenceKeypoint.new(1, 1),
-	})
-	cloud.Lifetime = NumberRange.new(1.4, 2.6)
-	cloud.Speed = NumberRange.new(18, 46)
-	cloud.SpreadAngle = Vector2.new(180, 180)
-	cloud.Rate = 0
-	cloud.Parent = anchor
-	cloud:Emit(220)
-
-	Debris:AddItem(anchor, 4)
-
-	local species = beast.species
-	beast.model:Destroy()
-
-	task.delay(Config.Beast.RespawnDelay, function()
-		respawnAsDifferent(species)
+	local kind = dweller.kind
+	dweller.model:Destroy()
+	task.delay(Config.Population.RespawnDelay, function()
+		respawnOne(kind)
 	end)
 end
 
 --[[
-	A mega-detonation went off. Anything caught in it bursts.
-
-	Ordinary bullets and grenades do nothing at all — this is the only thing
-	that kills a giant animal.
+	Something was shot. Returns true if this module handled it, so the caller
+	knows not to look for a player or a vehicle as well.
 ]]
-local function onMegaBlast(position: Vector3, radius: number, attacker: Player?)
-	for index = #beasts, 1, -1 do
-		local beast = beasts[index]
-		-- A little wider than the blast itself, because the animals are
-		-- enormous and being clipped by the edge should still count. Not
-		-- much wider: at 2.5x a single shot cleared half the map.
-		if beast.model.Parent and (beast.body.Position - position).Magnitude <= radius * 1.25 then
-			table.remove(beasts, index)
-			if attacker then
-				Remotes.Event("Notify"):FireClient(attacker, `You vaporised the {beast.species.Name}.`)
-			end
-			burst(beast)
-		end
+function WildlifeService.RegisterHit(part: BasePart, damage: number?, attacker: Player?): boolean
+	-- A poop pile that takes a hit grows into a tower.
+	if part:GetAttribute("Poop") then
+		raisePoopColumn(part)
+		return true
 	end
-end
 
--- ================================================================ REACTIONS ==
-
---[[
-	Somebody shot it. Bullets cannot kill it, but they do annoy it, and each
-	species is annoyed in its own way.
-]]
-function WildlifeService.RegisterHit(part: BasePart)
 	local model = part:FindFirstAncestorOfClass("Model")
 	while model do
-		if model:GetAttribute("IsBeast") then
-			for _, beast in beasts do
-				if beast.model == model and beast.mood == "Wander" then
-					beast.mood = beast.species.Reaction
-					beast.moodUntil = os.clock() + Config.Beast.ReactionDuration
+		if model:GetAttribute("Dweller") then
+			for _, dweller in dwellers do
+				if dweller.model == model and not dweller.dead then
+					dweller.health -= (damage or 20)
+
+					if dweller.kind == "Civilian" then
+						local line = Config.CivilianLines[rng:NextInteger(1, #Config.CivilianLines)]
+						say(dweller.root, line, Color3.fromRGB(255, 240, 200), 3)
+						fart(dweller.root.Position - Vector3.new(0, 1.5, 0))
+					elseif dweller.kind == "Zombie" then
+						say(dweller.root, "RRRAAAGH", Color3.fromRGB(160, 220, 130), 1.5)
+					end
+
+					if dweller.health <= 0 then
+						kill(dweller, attacker)
+					end
+					return true
 				end
 			end
 			return true
@@ -6314,195 +6586,140 @@ function WildlifeService.RegisterHit(part: BasePart)
 	return false
 end
 
---[[ Play out whatever this species does when it has been shot. ]]
-local function playReaction(beast: Beast, deltaTime: number)
-	local now = os.clock()
-	local head = beast.head
-	local wobble = math.sin(now * 9)
+-- ================================================================= MOVEMENT ==
 
-	if beast.mood == "Lick" then
-		-- Sits and washes the sore bit.
-		if head then
-			head.CFrame = beast.body.CFrame
-				* CFrame.new(0, -beast.body.Size.Y * 0.1, -beast.body.Size.Z * 0.5)
-				* CFrame.Angles(math.rad(55 + wobble * 8), 0, 0)
-		end
-	elseif beast.mood == "ChestBeat" then
-		-- Rears up and hammers its chest.
-		beast.model:PivotTo(
-			CFrame.new(beast.position + Vector3.new(0, beast.standHeight + math.abs(wobble) * 6, 0))
-				* CFrame.Angles(0, math.atan2(beast.facing.X, beast.facing.Z), 0)
-		)
-		return
-	elseif beast.mood == "Shake" then
-		-- Shakes itself off, nose to tail.
-		beast.model:PivotTo(
-			CFrame.new(beast.position + Vector3.new(0, beast.standHeight, 0))
-				* CFrame.Angles(0, math.atan2(beast.facing.X, beast.facing.Z), math.rad(wobble * 14))
-		)
-		return
-	elseif beast.mood == "Flop" then
-		-- A fish on dry land, having a very bad time.
-		beast.model:PivotTo(
-			CFrame.new(beast.position + Vector3.new(0, beast.standHeight + math.abs(wobble) * 10, 0))
-				* CFrame.Angles(math.rad(wobble * 25), math.atan2(beast.facing.X, beast.facing.Z), math.rad(wobble * 40))
-		)
-		return
-	elseif beast.mood == "Poop" then
-		-- Startled, and the result is immediate.
-		if now >= beast.nextPoopAt then
-			beast.nextPoopAt = now + 1.2
-			dropPoop(beast.position - beast.facing * 30 * S * 0.4)
-		end
-	end
-
-	local _ = deltaTime
-end
-
--- ================================================================== MOVEMENT ==
-
---[[ Flatten anybody in front of a moving animal. ]]
-local function trample(beast: Beast, speed: number)
-	if speed < 6 then
-		return
-	end
-	local now = os.clock()
-	if now - beast.lastTrampleAt < 0.5 then
-		return
-	end
-
-	local nose = beast.position + beast.facing * (beast.body.Size.Z * 0.5)
-	local rider: Player? = nil
-	local occupant = beast.seat.Occupant
-	if occupant and occupant.Parent then
-		rider = Players:GetPlayerFromCharacter(occupant.Parent)
-	end
+local function nearestPlayer(from: Vector3): (Player?, Vector3?, number)
+	local best: Player? = nil
+	local bestPosition: Vector3? = nil
+	local bestDistance = math.huge
 
 	for _, player in Players:GetPlayers() do
-		if player == rider then
-			continue
-		end
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if root and root:IsA("BasePart") then
-			if (root.Position - nose).Magnitude <= Config.Beast.TrampleRadius * S * 0.5 then
-				beast.lastTrampleAt = now
-				DamageService.ApplyDamage(player, beast.species.TrampleDamage, rider, "Trampled")
-				-- And sent flying.
-				root.AssemblyLinearVelocity = beast.facing * 90 + Vector3.new(0, 60, 0)
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
+			local distance = (root.Position - from).Magnitude
+			if distance < bestDistance then
+				best, bestPosition, bestDistance = player, root.Position, distance
 			end
 		end
 	end
+
+	return best, bestPosition, bestDistance
 end
 
-local function stepBeast(beast: Beast, deltaTime: number)
-	local now = os.clock()
+local function groundHeight(position: Vector3, ignore: Instance): number
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { ignore }
+	local hit = workspace:Raycast(position + Vector3.new(0, 200, 0), Vector3.new(0, -600, 0), params)
+	return if hit then hit.Position.Y else 0
+end
 
-	-- A reaction stops it in its tracks until it wears off.
-	if beast.mood ~= "Wander" then
-		if now >= beast.moodUntil then
-			beast.mood = "Wander"
-		else
-			playReaction(beast, deltaTime)
-			return
-		end
+local function stepDweller(dweller: Dweller, deltaTime: number)
+	-- Targets do not go anywhere.
+	if dweller.kind == "Target" then
+		return
 	end
 
-	local occupant = beast.seat.Occupant
-	local speed = beast.species.Speed
-	local throttle, steer = 0, 0
+	local speed = if dweller.kind == "Zombie"
+		then Config.Population.ZombieSpeed
+		else Config.Population.CivilianSpeed
 
-	if occupant then
-		-- Being ridden: the player drives.
-		speed = beast.species.RideSpeed
-		throttle = beast.seat.Throttle
-		steer = beast.seat.Steer
+	local goal: Vector3
+	if dweller.kind == "Zombie" then
+		-- Zombies come for whoever is closest.
+		local player, position, distance = nearestPlayer(dweller.position)
+		if position and distance < 320 then
+			goal = position
 
-		local pedal = beast.model:GetAttribute("Pedal")
-		if typeof(pedal) == "number" and math.abs(pedal) > 0.01 then
-			throttle = math.clamp(pedal, -1, 1)
-		end
-
-		if math.abs(steer) > 0.01 then
-			local turn = -steer * 1.6 * deltaTime
-			beast.facing = (CFrame.Angles(0, turn, 0) * beast.facing).Unit
+			-- Close enough to swing.
+			if distance <= Config.Population.ZombieReach and player then
+				local now = os.clock()
+				if now >= dweller.nextAttackAt then
+					dweller.nextAttackAt = now + 1.2
+					DamageService.ApplyDamage(player, Config.Population.ZombieDamage, nil, "Zombie")
+					say(dweller.root, "NOM", Color3.fromRGB(200, 90, 90), 1)
+				end
+				return
+			end
+		else
+			goal = dweller.target
 		end
 	else
-		-- Left to itself: wander.
-		throttle = 1
-		local toTarget = beast.target - beast.position
-		toTarget = Vector3.new(toTarget.X, 0, toTarget.Z)
-		if toTarget.Magnitude < 40 then
-			beast.target = pickTarget()
-			return
-		end
-		local direction = toTarget.Unit
-		beast.facing = (beast.facing + (direction - beast.facing) * math.min(1, deltaTime * 1.5)).Unit
+		goal = dweller.target
 	end
 
-	local travelled = speed * throttle * deltaTime
-	beast.position += beast.facing * travelled
-	beast.position = Vector3.new(
-		beast.position.X,
-		groundHeight(beast.position, beast.model),
-		beast.position.Z
+	local toGoal = Vector3.new(goal.X - dweller.position.X, 0, goal.Z - dweller.position.Z)
+	if toGoal.Magnitude < 12 then
+		dweller.target = Vector3.new(
+			rng:NextNumber(-wanderRadius, wanderRadius),
+			0,
+			rng:NextNumber(-wanderRadius, wanderRadius)
+		)
+		return
+	end
+
+	local direction = toGoal.Unit
+	dweller.facing = (dweller.facing + (direction - dweller.facing) * math.min(1, deltaTime * 3)).Unit
+	dweller.position += dweller.facing * speed * deltaTime
+	dweller.position = Vector3.new(
+		dweller.position.X,
+		groundHeight(dweller.position, dweller.model),
+		dweller.position.Z
 	)
 
-	-- A fish cannot walk, so it hops along instead.
-	local bounce = 0
-	if beast.species.Id == "Fish" and math.abs(throttle) > 0.01 then
-		bounce = math.abs(math.sin(now * 6)) * 14
-	end
-
-	local stand = beast.position + Vector3.new(0, beast.standHeight + bounce, 0)
-	beast.model:PivotTo(CFrame.lookAt(stand, stand + beast.facing))
-
-	trample(beast, math.abs(speed * throttle))
-
-	-- Elephants poop as they go, ridden or not.
-	if beast.species.Id == "Elephant" and now >= beast.nextPoopAt then
-		beast.nextPoopAt = now + Config.Wildlife.PoopInterval * rng:NextNumber(0.7, 1.4)
-		dropPoop(beast.position - beast.facing * 30 * S * 0.4)
-	end
+	-- A little bob, so they look like they are walking rather than sliding.
+	local bob = math.abs(math.sin(os.clock() * 7)) * 0.4
+	local stand = dweller.position + Vector3.new(0, dweller.standHeight + bob, 0)
+	dweller.model:PivotTo(CFrame.lookAt(stand, stand + dweller.facing))
 end
 
 local function step(deltaTime: number)
-	for index = #beasts, 1, -1 do
-		local beast = beasts[index]
-		if not beast.model.Parent then
-			table.remove(beasts, index)
+	for index = #dwellers, 1, -1 do
+		local dweller = dwellers[index]
+		if not dweller.model.Parent then
+			table.remove(dwellers, index)
 		else
-			stepBeast(beast, deltaTime)
+			stepDweller(dweller, deltaTime)
 		end
 	end
 end
 
 -- =================================================================== PUBLIC ==
 
---[[ Put the animals on the current map. ]]
 function WildlifeService.Populate(mapSize: number)
 	WildlifeService.Clear()
 	wanderRadius = mapSize * 0.4
 
-	-- Always different species to begin with, so no two look the same.
-	local pool = table.clone(Config.Beasts)
-	for _ = 1, math.min(Config.Beast.Count, #pool) do
-		local pick = rng:NextInteger(1, #pool)
-		local species = pool[pick]
-		table.remove(pool, pick)
-
-		local where = pickTarget()
-		spawnBeast(species, Vector3.new(where.X, groundHeight(where, workspace), where.Z))
+	local function scatter(): Vector3
+		return Vector3.new(
+			rng:NextNumber(-wanderRadius, wanderRadius),
+			4,
+			rng:NextNumber(-wanderRadius, wanderRadius)
+		)
 	end
+
+	for _ = 1, Config.Population.Zombies do
+		spawnZombie(scatter())
+	end
+	for _ = 1, Config.Population.Civilians do
+		spawnCivilian(scatter())
+	end
+	for _ = 1, Config.Population.Targets do
+		spawnTarget(scatter())
+	end
+
+	seedPoop()
 end
 
 function WildlifeService.Clear()
-	for _, beast in beasts do
-		if beast.model.Parent then
-			beast.model:Destroy()
+	for _, dweller in dwellers do
+		if dweller.model.Parent then
+			dweller.model:Destroy()
 		end
 	end
-	table.clear(beasts)
+	table.clear(dwellers)
 
 	for _, pile in poopPiles do
 		if pile.Parent then
@@ -6510,32 +6727,38 @@ function WildlifeService.Clear()
 		end
 	end
 	table.clear(poopPiles)
+
+	for _, child in workspace:GetChildren() do
+		if child.Name == "PoopColumn" then
+			child:Destroy()
+		end
+	end
 end
 
---[[ Is this player currently riding an animal? Guns are off if so. ]]
-function WildlifeService.IsRiding(player: Player): boolean
-	local state = PlayerState.Get(player)
-	return state.seatRole == "Beast"
+--[[ Nothing is rideable any more, but the weapon code still asks. ]]
+function WildlifeService.IsRiding(_player: Player): boolean
+	return false
 end
 
 function WildlifeService.Count(): number
-	return #beasts
+	return #dwellers
 end
 
 function WildlifeService.PoopCount(): number
 	return #poopPiles
 end
 
---[[ The species currently walking about, for the tests. ]]
-function WildlifeService.SpeciesPresent(): { string }
-	local names = {}
-	for _, beast in beasts do
-		table.insert(names, beast.species.Id)
+--[[ How many of each kind are about, for the tests. ]]
+function WildlifeService.CountOf(kind: string): number
+	local total = 0
+	for _, dweller in dwellers do
+		if dweller.kind == kind and not dweller.dead then
+			total += 1
+		end
 	end
-	return names
+	return total
 end
 
-DamageService.MegaBlast.Connect(onMegaBlast)
 RunService.Heartbeat:Connect(step)
 
 return WildlifeService
@@ -6545,27 +6768,27 @@ return WildlifeService
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="23">
+  <Item class="SoundService" referent="24">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterGui" referent="24">
+  <Item class="StarterGui" referent="25">
     <Properties>
       <string name="Name">StarterGui</string>
       <bool name="ResetPlayerGuiOnSpawn">false</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="25">
+  <Item class="StarterPlayer" referent="26">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="26">
+    <Item class="StarterPlayerScripts" referent="27">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="27">
+      <Item class="LocalScript" referent="28">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
@@ -6740,11 +6963,11 @@ end)
 print("[Nuclear Mud Arena] Client ready. WASD drives, F mega-detonates.")
 ]]></string>
         </Properties>
-        <Item class="Folder" referent="28">
+        <Item class="Folder" referent="29">
           <Properties>
             <string name="Name">modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="29">
+          <Item class="ModuleScript" referent="30">
             <Properties>
               <string name="Name">Controls</string>
               <string name="Source"><![CDATA[--!strict
@@ -7257,6 +7480,12 @@ function updateLook()
 
 	humanoid.AutoRotate = false
 
+	-- Lift the camera above his head and out to the side. The crosshair sits
+	-- in the middle of the screen, and from directly behind that put it
+	-- squarely on the back of his skull — you could not see what you were
+	-- shooting at.
+	humanoid.CameraOffset = Vector3.new(1.8, 3.2, 0)
+
 	local look = camera.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
 	if flat.Magnitude < 0.01 then
@@ -7433,7 +7662,7 @@ return Controls
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="30">
+          <Item class="ModuleScript" referent="31">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--!strict
@@ -8165,7 +8394,7 @@ return Hud
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="31">
+  <Item class="Workspace" referent="32">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

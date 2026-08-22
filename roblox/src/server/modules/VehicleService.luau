@@ -36,7 +36,10 @@ local CHASSIS_HEIGHT = 4
 
 -- Wheels want grip; the chassis wants weight so it does not tip over.
 local WHEEL_PHYSICS = PhysicalProperties.new(1.2, 2.0, 0.1, 100, 1)
-local CHASSIS_PHYSICS = PhysicalProperties.new(4.5, 0.3, 0.2, 1, 1)
+-- Low friction: the chassis is what touches the ground now that the wheels
+-- are decoration, and a high-grip box would drag against the drive
+-- constraint instead of sliding along under it.
+local CHASSIS_PHYSICS = PhysicalProperties.new(4.5, 0.08, 0.1, 1, 1)
 
 --[[ Every vehicle currently alive in the world, so we can drive them each frame. ]]
 local active: { [Model]: any } = {}
@@ -91,29 +94,46 @@ end
 --[[
 	One wheel.
 
-	These are welded on and purely for looks. An earlier version drove them
-	with hinge motors, which is the "proper" way and also the way that gives
-	you a vehicle that silently does nothing if a single constraint axis is
-	off by ninety degrees. Driving is now done by setting the chassis velocity
-	directly — see driveWheeled — which is arcade-y, completely predictable,
-	and cannot fail quietly.
+	Wheels are anchored, non-colliding decoration that we rotate by hand. That
+	sounds backwards, but welded colliding wheels cannot roll — they scrape,
+	and their friction fights the drive constraint that is trying to move the
+	car. Anchoring them takes them out of the physics entirely and lets us
+	spin them at exactly road speed, so they look right and cost nothing.
+
+	The chassis is what actually rests on the ground.
 ]]
-local function addWheel(chassis: BasePart, offset: Vector3, model: Model)
+local function addWheel(chassis: BasePart, offset: Vector3, model: Model): (BasePart, BasePart, CFrame)
+	local localOffset = CFrame.new(offset)
+
 	local wheel = Util.Part({
 		Name = "Wheel",
 		Size = Vector3.new(WHEEL_WIDTH, WHEEL_DIAMETER, WHEEL_DIAMETER),
 		-- A cylinder's flat faces point along its own X, which is already the
-		-- car's left-right axis, so no extra rotation is needed here.
-		CFrame = chassis.CFrame * CFrame.new(offset),
+		-- car's left-right axis, so it is already oriented to roll.
+		CFrame = chassis.CFrame * localOffset,
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(30, 30, 34),
 		Material = Enum.Material.Rubber,
-		Anchored = false,
-		CustomPhysicalProperties = WHEEL_PHYSICS,
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
 		Parent = model,
 	})
-	Util.Weld(chassis, wheel)
-	return wheel
+
+	-- A pale hub, so the rotation is actually visible from outside.
+	local hub = Util.Part({
+		Name = "Hub",
+		Size = Vector3.new(WHEEL_WIDTH + 0.4, WHEEL_DIAMETER * 0.45, WHEEL_DIAMETER * 0.45),
+		CFrame = wheel.CFrame,
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(190, 190, 200),
+		Material = Enum.Material.Metal,
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = model,
+	})
+	return wheel, hub, localOffset
 end
 
 -- ================================================================== CHASSIS ==
@@ -126,7 +146,7 @@ local function buildChassis(
 	color: Color3,
 	wheelbase: number,
 	track: number
-): (Model, BasePart)
+): (Model, BasePart, { { part: BasePart, hub: BasePart, offset: CFrame } })
 	local model = Instance.new("Model")
 	model.Name = name
 
@@ -201,12 +221,18 @@ local function buildChassis(
 	local halfTrack = track * 0.5
 	local axleDrop = -bodySize.Y * 0.5
 
-	addWheel(chassis, Vector3.new(-halfTrack, axleDrop, -halfBase), model)
-	addWheel(chassis, Vector3.new(halfTrack, axleDrop, -halfBase), model)
-	addWheel(chassis, Vector3.new(-halfTrack, axleDrop, halfBase), model)
-	addWheel(chassis, Vector3.new(halfTrack, axleDrop, halfBase), model)
+	local wheels = {}
+	for _, corner in {
+		Vector3.new(-halfTrack, axleDrop, -halfBase),
+		Vector3.new(halfTrack, axleDrop, -halfBase),
+		Vector3.new(-halfTrack, axleDrop, halfBase),
+		Vector3.new(halfTrack, axleDrop, halfBase),
+	} do
+		local wheel, hub, offset = addWheel(chassis, corner, model)
+		table.insert(wheels, { part = wheel, hub = hub, offset = offset })
+	end
 
-	return model, chassis
+	return model, chassis, wheels
 end
 
 --[[
@@ -406,7 +432,7 @@ function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Pl
 	local tier = Config.CarTiers[math.clamp(tierIndex, 1, #Config.CarTiers)]
 	local body = Config.CarBodies[bodyPicker:NextInteger(1, #Config.CarBodies)]
 
-	local model, chassis = buildChassis(
+	local model, chassis, wheels = buildChassis(
 		`{body.Name}_{tier.Name}`,
 		position,
 		body.Size,
@@ -429,6 +455,7 @@ function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Pl
 
 	model.Parent = workspace
 	active[model] = {
+		wheels = wheels,
 		kind = "Car",
 		chassis = chassis,
 		seat = seat,
@@ -443,7 +470,7 @@ end
 function VehicleService.SpawnTurretTruck(position: Vector3): Model
 	local spec = Config.Vehicles.TurretTruck
 
-	local model, chassis = buildChassis(
+	local model, chassis, wheels = buildChassis(
 		"TurretTruck",
 		position,
 		Vector3.new(12, CHASSIS_HEIGHT, 24),
@@ -467,6 +494,7 @@ function VehicleService.SpawnTurretTruck(position: Vector3): Model
 
 	model.Parent = workspace
 	active[model] = {
+		wheels = wheels,
 		kind = "TurretTruck",
 		chassis = chassis,
 		seat = seat,
@@ -485,7 +513,7 @@ end
 function VehicleService.SpawnTank(position: Vector3): Model
 	local spec = Config.Vehicles.Tank
 
-	local model, chassis = buildChassis(
+	local model, chassis, wheels = buildChassis(
 		"Tank",
 		position,
 		Vector3.new(16, 5, 26),
@@ -526,6 +554,7 @@ function VehicleService.SpawnTank(position: Vector3): Model
 
 	model.Parent = workspace
 	active[model] = {
+		wheels = wheels,
 		kind = "Tank",
 		chassis = chassis,
 		seat = seat,
@@ -837,11 +866,21 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 
 	state.currentSpeed = current
 
-	-- An empty car rolls to a stop and then stops asking for anything.
+	-- An empty car rolls to a stop and then stops asking for anything. Its
+	-- wheels still have to be kept glued to it, or they are left behind.
 	if not seat.Occupant and math.abs(current) < 0.5 then
 		state.currentSpeed = 0
 		drive.Enabled = false
 		turn.Enabled = false
+		if state.wheels then
+			for _, wheel in state.wheels do
+				local resting = chassis.CFrame * wheel.offset * CFrame.Angles(state.wheelSpin or 0, 0, 0)
+				wheel.part.CFrame = resting
+				if wheel.hub then
+					wheel.hub.CFrame = resting
+				end
+			end
+		end
 		return
 	end
 
@@ -856,6 +895,22 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	turn.Enabled = true
 	drive.LineDirection = flat
 	drive.LineVelocity = current
+
+	-- Roll the wheels at whatever speed the car is actually doing. They are
+	-- anchored decoration, so this is the only thing that makes them turn —
+	-- and a car whose wheels are locked solid looks broken even when it is
+	-- driving perfectly well.
+	if state.wheels then
+		local radius = WHEEL_DIAMETER * 0.5
+		state.wheelSpin = (state.wheelSpin or 0) + (current / radius) * deltaTime
+		for _, wheel in state.wheels do
+			local spun = chassis.CFrame * wheel.offset * CFrame.Angles(state.wheelSpin, 0, 0)
+			wheel.part.CFrame = spun
+			if wheel.hub then
+				wheel.hub.CFrame = spun
+			end
+		end
+	end
 
 	-- Steering bites less the slower you are going, and reverses when you
 	-- are reversing, the way a real car does.

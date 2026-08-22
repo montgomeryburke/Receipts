@@ -18,6 +18,14 @@ local Config = {}
 
 Config.FreeMode = true
 
+--[[
+	Endless ammo. Guns never run dry and nothing needs reloading.
+
+	Set this to false if you ever want scarcity back — the magazine sizes and
+	reload times below are all still here and still correct.
+]]
+Config.InfiniteAmmo = true
+
 -- ============================================================ MONETIZATION ==
 -- Ignored entirely while FreeMode is true. Left here so future-you has it ready.
 
@@ -88,6 +96,7 @@ Config.Weapons = {
 		MagSize = 12, ReloadTime = 1.3, Spread = 1.2,
 		Color = Color3.fromRGB(90, 90, 96),
 		Automatic = true,
+		Points = 10,
 	},
 	Revolver = {
 		Slot = 1, Category = "Sidearm", DisplayName = ".44 Revolver",
@@ -95,6 +104,7 @@ Config.Weapons = {
 		MagSize = 6, ReloadTime = 2.1, Spread = 0.8,
 		Color = Color3.fromRGB(150, 130, 90),
 		Automatic = true,
+		Points = 15,
 	},
 	Deagle = {
 		Slot = 1, Category = "Sidearm", DisplayName = "Hand Cannon",
@@ -102,6 +112,7 @@ Config.Weapons = {
 		MagSize = 7, ReloadTime = 2.0, Spread = 1.0,
 		Color = Color3.fromRGB(200, 180, 110),
 		Automatic = true,
+		Points = 15,
 	},
 
 	-- ------------------------------------------------------------ AUTOMATIC
@@ -110,18 +121,21 @@ Config.Weapons = {
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.075, Range = 380,
 		MagSize = 35, ReloadTime = 1.7, Spread = 2.6, Automatic = true,
 		Color = Color3.fromRGB(70, 76, 84),
+		Points = 8,
 	},
 	AssaultRifle = {
 		Slot = 2, Category = "Automatic", DisplayName = "Assault Rifle",
 		Kind = "Hitscan", Damage = 14, Cooldown = 0.11, Range = 700,
 		MagSize = 30, ReloadTime = 2.0, Spread = 1.5, Automatic = true,
 		Color = Color3.fromRGB(60, 68, 58),
+		Points = 10,
 	},
 	MachineGun = {
 		Slot = 2, Category = "Automatic", DisplayName = "Machine Gun",
 		Kind = "Hitscan", Damage = 11, Cooldown = 0.09, Range = 650,
 		MagSize = 80, ReloadTime = 3.4, Spread = 2.2, Automatic = true,
 		Color = Color3.fromRGB(52, 54, 58),
+		Points = 10,
 	},
 	Minigun = {
 		Slot = 2, Category = "Automatic", DisplayName = "Mud Minigun",
@@ -130,6 +144,7 @@ Config.Weapons = {
 		-- Slows you down while you hold the trigger, because it is enormous.
 		MoveSpeedFactor = 0.45,
 		Color = Color3.fromRGB(96, 100, 104),
+		Points = 8,
 	},
 
 	-- ------------------------------------------------------------- SHOTGUNS
@@ -139,12 +154,14 @@ Config.Weapons = {
 		MagSize = 6, ReloadTime = 2.6, Spread = 6.0, Pellets = 9,
 		Color = Color3.fromRGB(120, 84, 52),
 		Automatic = true,
+		Points = 14,
 	},
 	AutoShotgun = {
 		Slot = 3, Category = "Shotgun", DisplayName = "Auto Shotgun",
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.4, Range = 140,
 		MagSize = 8, ReloadTime = 3.0, Spread = 7.5, Pellets = 8, Automatic = true,
 		Color = Color3.fromRGB(90, 70, 60),
+		Points = 12,
 	},
 
 	-- -------------------------------------------------------------- SNIPERS
@@ -162,6 +179,7 @@ Config.Weapons = {
 		Automatic = true,
 		SemiAutoWhenScoped = true,
 		Color = Color3.fromRGB(46, 56, 46),
+		Points = 30,
 	},
 	AntiMaterial = {
 		Slot = 4, Category = "Sniper", DisplayName = "Anti-Truck Rifle",
@@ -174,6 +192,7 @@ Config.Weapons = {
 		-- Wrecks vehicles specifically.
 		VehicleDamageMultiplier = 3,
 		Color = Color3.fromRGB(60, 60, 70),
+		Points = 35,
 	},
 
 	-- ------------------------------------------------------- THE STAR ITEM
@@ -191,6 +210,7 @@ Config.Weapons = {
 		AutoAim = true,
 		Color = Color3.fromRGB(120, 230, 245),
 		Automatic = true,
+		Points = 25,
 	},
 
 	-- --------------------------------------------------------- EXPLOSIVES
@@ -198,23 +218,29 @@ Config.Weapons = {
 		Slot = 6, Category = "Explosive", DisplayName = "Frag Grenade",
 		Kind = "Arcing", Damage = 0, Cooldown = 1.1, Range = 220, Speed = 90,
 		MagSize = 3, ReloadTime = 4.0, Spread = 0.0,
-		FuseTime = 3.0, BlastRadius = 26, BlastDamage = 85,
+		-- Was 26. A literal ten-times radius would be 260 studs, which is a
+		-- third of the map from one grenade; 95 is enormous without being
+		-- absurd. Change this one number if you want it bigger still.
+		FuseTime = 3.0, BlastRadius = 95, BlastDamage = 150,
 		Color = Color3.fromRGB(70, 92, 62),
+		Points = 20,
 	},
 	StickyGrenade = {
 		Slot = 6, Category = "Explosive", DisplayName = "Sticky Bomb",
 		Kind = "Arcing", Damage = 0, Cooldown = 1.3, Range = 200, Speed = 80,
 		MagSize = 2, ReloadTime = 4.5, Spread = 0.0,
-		FuseTime = 2.5, BlastRadius = 30, BlastDamage = 100, Sticky = true,
+		FuseTime = 2.5, BlastRadius = 110, BlastDamage = 170, Sticky = true,
 		Color = Color3.fromRGB(180, 90, 190),
+		Points = 22,
 	},
 	RPG = {
 		Slot = 6, Category = "Explosive", DisplayName = "Rocket Propelled Grenade",
 		Kind = "Rocket", Damage = 0, Cooldown = 2.2, Range = 1400, Speed = 180,
 		MagSize = 1, ReloadTime = 3.2, Spread = 0.0,
-		BlastRadius = 34, BlastDamage = 110,
+		BlastRadius = 90, BlastDamage = 150,
 		VehicleDamageMultiplier = 2,
 		Color = Color3.fromRGB(170, 70, 50),
+		Points = 25,
 	},
 
 	-- ------------------------------------------------------------- UTILITY
@@ -230,6 +256,7 @@ Config.Weapons = {
 		AmmoFromPickupsOnly = true,
 		Color = Color3.fromRGB(92, 64, 38),
 		Automatic = true,
+		Points = 5,
 	},
 	Drone = {
 		Slot = 7, Category = "Utility", DisplayName = "Hunter Drone",
@@ -242,6 +269,33 @@ Config.Weapons = {
 		AmmoFromPickupsOnly = true,
 		AutoAim = true,
 		Color = Color3.fromRGB(120, 205, 255),
+		Points = 30,
+	},
+
+	LandMine = {
+		Slot = 6, Category = "Explosive", DisplayName = "Land Mine",
+		Kind = "Arcing", Damage = 0, Cooldown = 1.0, Range = 90, Speed = 40,
+		MagSize = 4, ReloadTime = 3.0, Spread = 0.0,
+		-- Sits where it lands and waits. A long fuse is what makes it a mine
+		-- rather than a grenade.
+		FuseTime = 40, Sticky = true,
+		BlastRadius = 70, BlastDamage = 190,
+		VehicleDamageMultiplier = 3,
+		Points = 28, Automatic = true,
+		Color = Color3.fromRGB(90, 96, 70),
+	},
+	ClusterBomb = {
+		Slot = 6, Category = "Explosive", DisplayName = "Cluster Bomb",
+		Kind = "Arcing", Damage = 0, Cooldown = 1.6, Range = 240, Speed = 95,
+		MagSize = 2, ReloadTime = 4.5, Spread = 0.0,
+		FuseTime = 2.2,
+		BlastRadius = 60, BlastDamage = 110,
+		-- Bursts into this many smaller bomblets when it goes off.
+		Cluster = 8,
+		ClusterRadius = 34,
+		ClusterDamage = 70,
+		Points = 26, Automatic = true,
+		Color = Color3.fromRGB(200, 140, 60),
 	},
 
 	-- --------------------------------------------------- VEHICLE-MOUNTED
@@ -254,6 +308,7 @@ Config.Weapons = {
 		ZoomLevels = { 2, 4 },
 		VehicleDamageMultiplier = 2, MountedOnly = true, AutoAim = true,
 		Color = Color3.fromRGB(58, 60, 64),
+		Points = 18,
 	},
 	TankCannon = {
 		Slot = 0, Category = "Mounted", DisplayName = "Tank Cannon",
@@ -262,6 +317,7 @@ Config.Weapons = {
 		BlastRadius = 40, BlastDamage = 130,
 		VehicleDamageMultiplier = 3, MountedOnly = true,
 		Color = Color3.fromRGB(74, 84, 66),
+		Points = 25,
 	},
 	PlaneGun = {
 		Slot = 0, Category = "Mounted", DisplayName = "Wing Guns",
@@ -269,11 +325,12 @@ Config.Weapons = {
 		MagSize = 150, ReloadTime = 5.0, Spread = 2.0, Automatic = true,
 		MountedOnly = true,
 		Color = Color3.fromRGB(120, 128, 136),
+		Points = 15,
 	},
 }
 
 --[[ Which guns you spawn holding. Everything else is found on the map. ]]
-Config.StartingLoadout = { "Pistol", "AssaultRifle", "Shotgun", "Sniper", "DiamondGun", "Grenade" }
+Config.StartingLoadout = { "MachineGun", "AssaultRifle", "Shotgun", "Sniper", "DiamondGun", "Grenade", "Pistol" }
 
 --[[
 	Melee, on Q.
@@ -299,9 +356,10 @@ Config.Melee = {
 	it is going.
 ]]
 Config.Driving = {
-	Acceleration = 48,
-	BrakeDeceleration = 95,
-	Coast = 26,
+	-- Punchier than before: they still have weight, but they get going.
+	Acceleration = 72,
+	BrakeDeceleration = 130,
+	Coast = 34,
 	-- Below this fraction of top speed, steering is reduced.
 	SteerGripSpeed = 0.35,
 }
@@ -329,65 +387,46 @@ Config.Wildlife = {
 }
 
 --[[
-	THE GIANT ANIMALS.
+	THE POPULATION.
 
-	King Kong sized, wandering the map. Bullets do not kill them — each
-	species has its own way of shrugging a hit off — but a diamond bullet's
-	mega-detonation bursts them into a red cloud, and whatever comes back
-	somewhere else is a different animal.
+	Zombies roam and come for you. Civilians wander and say something
+	regrettable when shot. Bullseye targets stand around for practice.
 
-	You can climb on one and ride it. You cannot use a gun while you do; the
-	animal IS the weapon.
+	All three are worth points, and all three come back.
 ]]
-Config.Beasts = {
-	{
-		Id = "Cat", Name = "Giant Cat",
-		Colour = Color3.fromRGB(180, 150, 110),
-		Speed = 24, RideSpeed = 52, TrampleDamage = 55,
-		-- Sits down and washes the sore bit.
-		Reaction = "Lick",
-	},
-	{
-		Id = "Elephant", Name = "Giant Elephant",
-		Colour = Color3.fromRGB(122, 118, 114),
-		Speed = 16, RideSpeed = 38, TrampleDamage = 90,
-		-- Startled. Leaves rather a lot behind.
-		Reaction = "Poop",
-	},
-	{
-		Id = "Dog", Name = "Giant Dog",
-		Colour = Color3.fromRGB(150, 108, 62),
-		Speed = 30, RideSpeed = 58, TrampleDamage = 50,
-		-- Shakes itself off, ears flapping.
-		Reaction = "Shake",
-	},
-	{
-		Id = "Fish", Name = "Giant Fish",
-		Colour = Color3.fromRGB(90, 150, 190),
-		Speed = 9, RideSpeed = 30, TrampleDamage = 40,
-		-- It is a fish, on land, and it is not happy about it.
-		Reaction = "Flop",
-	},
-	{
-		Id = "Gorilla", Name = "Giant Gorilla",
-		Colour = Color3.fromRGB(64, 60, 62),
-		Speed = 22, RideSpeed = 48, TrampleDamage = 80,
-		-- Stands up and beats its chest at whoever shot it.
-		Reaction = "ChestBeat",
-	},
+Config.Population = {
+	Zombies = 10,
+	Civilians = 8,
+	Targets = 12,
+
+	ZombieHealth = 120,
+	ZombieSpeed = 13,
+	ZombiePoints = 25,
+	-- How close a zombie has to get before it starts swinging.
+	ZombieReach = 9,
+	ZombieDamage = 18,
+
+	CivilianHealth = 60,
+	CivilianSpeed = 11,
+	CivilianPoints = 5,
+
+	TargetHealth = 100,
+	TargetPoints = 15,
+
+	-- Seconds before a dead one is replaced.
+	RespawnDelay = 12,
 }
 
-Config.Beast = {
-	-- How many are wandering at once.
-	Count = 3,
-	-- Seconds a reaction lasts, during which it stops walking.
-	ReactionDuration = 4,
-	-- Seconds before a burst animal comes back as something else.
-	RespawnDelay = 10,
-	-- Anything this close in front of a moving animal gets flattened.
-	TrampleRadius = 16,
-	-- Overall size multiplier. King Kong, not a big dog.
-	Scale = 3.2,
+--[[ What a civilian says when you shoot them. ]]
+Config.CivilianLines = {
+	"OW! That was a smelly one!",
+	"PBBBT! ... sorry, that always happens.",
+	"You shot me and I farted. We are both embarrassed.",
+	"Rude! And now I have gas.",
+	"AAAH — oh no, that one squeaked.",
+	"I was having a lovely day!",
+	"Not the trousers! Not the trousers!",
+	"That is coming out of your wages.",
 }
 
 --[[
@@ -417,10 +456,10 @@ Config.Mega = {
 	you eliminate.
 ]]
 Config.CarTiers = {
-	{ Name = "Rust Bucket", KeysRequired = 0, MaxSpeed = 60, Torque = 12000, TurnSpeed = 30, Color = Color3.fromRGB(120, 100, 80) },
-	{ Name = "Mud Runner", KeysRequired = 2, MaxSpeed = 82, Torque = 17000, TurnSpeed = 34, Color = Color3.fromRGB(80, 130, 90) },
-	{ Name = "Swamp Devil", KeysRequired = 5, MaxSpeed = 104, Torque = 22000, TurnSpeed = 38, Color = Color3.fromRGB(180, 120, 40) },
-	{ Name = "Nuclear Hauler", KeysRequired = 9, MaxSpeed = 130, Torque = 28000, TurnSpeed = 42, Color = Color3.fromRGB(90, 210, 220) },
+	{ Name = "Rust Bucket", KeysRequired = 0, MaxSpeed = 75, Torque = 12000, TurnSpeed = 39, Color = Color3.fromRGB(120, 100, 80) },
+	{ Name = "Mud Runner", KeysRequired = 2, MaxSpeed = 102, Torque = 17000, TurnSpeed = 44, Color = Color3.fromRGB(80, 130, 90) },
+	{ Name = "Swamp Devil", KeysRequired = 5, MaxSpeed = 130, Torque = 22000, TurnSpeed = 49, Color = Color3.fromRGB(180, 120, 40) },
+	{ Name = "Nuclear Hauler", KeysRequired = 9, MaxSpeed = 162, Torque = 28000, TurnSpeed = 54, Color = Color3.fromRGB(90, 210, 220) },
 }
 
 --[[
@@ -534,6 +573,12 @@ Config.Pickups = {
 	},
 	PoopAmmo = { DisplayName = "Poop", Color = Color3.fromRGB(92, 64, 38) },
 	DroneAmmo = { DisplayName = "Hunter Drone", Color = Color3.fromRGB(120, 205, 255) },
+	Multiplier = {
+		DisplayName = "Double Points",
+		Duration = 90,
+		Amount = 3,
+		Color = Color3.fromRGB(255, 215, 70),
+	},
 }
 
 -- ================================================================= EFFECTS ==
@@ -558,16 +603,16 @@ Config.Effects = {
 	for four wheels, not for feet.
 ]]
 Config.Maps = {
-	{ Id = "BogBasin", Name = "Bog Basin", Size = 700, MudFraction = 0.55, Buildings = 12, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
-	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 760, MudFraction = 0.25, Buildings = 16, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
-	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 820, MudFraction = 0.6, Buildings = 9, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
-	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 720, MudFraction = 0.2, Buildings = 20, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
-	{ Id = "GatorCreek", Name = "Gator Creek", Size = 780, MudFraction = 0.7, Buildings = 10, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
-	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 900, MudFraction = 0.15, Buildings = 14, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
-	{ Id = "HollerHills", Name = "Holler Hills", Size = 760, MudFraction = 0.45, Buildings = 11, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
-	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 680, MudFraction = 0.3, Buildings = 22, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
-	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 960, MudFraction = 0.35, Buildings = 13, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
-	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 820, MudFraction = 0.4, Buildings = 18, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
+	{ Id = "BogBasin", Name = "Bog Basin", Size = 700, MudFraction = 0.55, Buildings = 25, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
+	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 760, MudFraction = 0.25, Buildings = 33, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
+	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 820, MudFraction = 0.6, Buildings = 18, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
+	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 720, MudFraction = 0.2, Buildings = 42, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
+	{ Id = "GatorCreek", Name = "Gator Creek", Size = 780, MudFraction = 0.7, Buildings = 21, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
+	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 900, MudFraction = 0.15, Buildings = 29, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
+	{ Id = "HollerHills", Name = "Holler Hills", Size = 760, MudFraction = 0.45, Buildings = 23, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
+	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 680, MudFraction = 0.3, Buildings = 46, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
+	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 960, MudFraction = 0.35, Buildings = 27, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
+	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 820, MudFraction = 0.4, Buildings = 37, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
 }
 
 Config.Teams = {
@@ -608,6 +653,10 @@ export type WeaponSpec = {
 	ZoomFov: number?,
 	ZoomLevels: { number }?,
 	SemiAutoWhenScoped: boolean?,
+	Points: number?,
+	Cluster: number?,
+	ClusterRadius: number?,
+	ClusterDamage: number?,
 	FuseTime: number?,
 	Sticky: boolean?,
 	MountedOnly: boolean?,
@@ -665,6 +714,7 @@ export type MapSpec = {
 
 export type ConfigType = {
 	FreeMode: boolean,
+	InfiniteAmmo: boolean,
 
 	GamePasses: { [string]: number },
 	Products: { [string]: number },
@@ -709,17 +759,15 @@ export type ConfigType = {
 		MaxPoopPiles: number, SplatDuration: number,
 	},
 	Boost: { Speed: number, Lift: number },
-	Beasts: {
-		{
-			Id: string, Name: string, Colour: Color3,
-			Speed: number, RideSpeed: number,
-			TrampleDamage: number, Reaction: string,
-		}
+	Population: {
+		Zombies: number, Civilians: number, Targets: number,
+		ZombieHealth: number, ZombieSpeed: number, ZombiePoints: number,
+		ZombieReach: number, ZombieDamage: number,
+		CivilianHealth: number, CivilianSpeed: number, CivilianPoints: number,
+		TargetHealth: number, TargetPoints: number,
+		RespawnDelay: number,
 	},
-	Beast: {
-		Count: number, ReactionDuration: number, RespawnDelay: number,
-		TrampleRadius: number, Scale: number,
-	},
+	CivilianLines: { string },
 
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
@@ -739,6 +787,7 @@ export type ConfigType = {
 		Invincibility: { DisplayName: string, Duration: number, Color: Color3 },
 		PoopAmmo: { DisplayName: string, Color: Color3 },
 		DroneAmmo: { DisplayName: string, Color: Color3 },
+		Multiplier: { DisplayName: string, Duration: number, Amount: number, Color: Color3 },
 	},
 
 	Effects: {

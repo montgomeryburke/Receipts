@@ -508,6 +508,12 @@ function updateLook()
 
 	humanoid.AutoRotate = false
 
+	-- Lift the camera above his head and out to the side. The crosshair sits
+	-- in the middle of the screen, and from directly behind that put it
+	-- squarely on the back of his skull — you could not see what you were
+	-- shooting at.
+	humanoid.CameraOffset = Vector3.new(1.8, 3.2, 0)
+
 	local look = camera.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
 	if flat.Magnitude < 0.01 then

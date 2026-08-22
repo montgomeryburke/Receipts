@@ -232,7 +232,7 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	impactSpark(result.Position, result.Normal, spec.Color)
 
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
-	if WildlifeService.RegisterHit(result.Instance) then
+	if WildlifeService.RegisterHit(result.Instance, spec.Damage, player) then
 		return
 	end
 
@@ -335,6 +335,9 @@ local function beginReload(player: Player, weaponName: string)
 	if slot.reloadingUntil > os.clock() or slot.ammo >= spec.MagSize then
 		return
 	end
+	if Config.InfiniteAmmo then
+		return
+	end
 	-- Poop and drones do not reload. What you scavenged is what you have.
 	if spec.AmmoFromPickupsOnly then
 		return
@@ -396,7 +399,7 @@ local function handleFire(player: Player, requestedDirection: any)
 	if now < slot.reloadingUntil then
 		return
 	end
-	if slot.ammo <= 0 then
+	if not Config.InfiniteAmmo and slot.ammo <= 0 then
 		beginReload(player, weaponName)
 		return
 	end
@@ -412,7 +415,9 @@ local function handleFire(player: Player, requestedDirection: any)
 	end
 
 	slot.nextFireAt = now + spec.Cooldown
-	slot.ammo -= 1
+	if not Config.InfiniteAmmo then
+		slot.ammo -= 1
+	end
 
 	local direction = requestedDirection.Unit
 
@@ -447,7 +452,7 @@ local function handleFire(player: Player, requestedDirection: any)
 		end
 	end
 
-	if slot.ammo <= 0 then
+	if not Config.InfiniteAmmo and slot.ammo <= 0 then
 		beginReload(player, weaponName)
 	end
 

@@ -45,6 +45,9 @@ local Debris = game:GetService("Debris")
 local TweenService = game:GetService("TweenService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local DataStoreService = game:GetService("DataStoreService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+local CollectionService = game:GetService("CollectionService")
 ''']
 
 for n in SHARED:
@@ -120,15 +123,18 @@ end
 
 -- ---------------------------------------------------------------- hitscan
 DUMP("")
-DUMP("Firing the starting pistol:")
+DUMP("Firing the starting weapon:")
 local before = countInWorkspace("Tracer")
 fireRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0, -1))
 local after = countInWorkspace("Tracer")
 check("a shot is fired", after > before, string.format("%d tracers", after - before))
 
+-- Ammo is endless by design now, so the magazine should NOT go down.
 local state = PlayerState.Get(shooter)
-check("ammo is spent", state.weapons.Pistol.ammo < Config.Weapons.Pistol.MagSize,
-	string.format("%d rounds left", state.weapons.Pistol.ammo))
+local starting = Config.StartingLoadout[1]
+check("the starting weapon is held", state.equipped == starting, state.equipped)
+check("ammo does not deplete", state.weapons[starting].ammo == Config.Weapons[starting].MagSize,
+	string.format("%d rounds", state.weapons[starting].ammo))
 
 -- ------------------------------------------------------------- projectile
 DUMP("")
@@ -182,135 +188,79 @@ check("turbo is handled", turboOk, "")
 
 -- --------------------------------------------------------------- wildlife
 DUMP("")
-DUMP("Elephants and poop:")
+DUMP("The population:")
 WildlifeService.Populate(700)
-check("animals spawn", WildlifeService.Count() == Config.Beast.Count,
-	string.format("%d walking about", WildlifeService.Count()))
+check("zombies spawn", WildlifeService.CountOf("Zombie") == Config.Population.Zombies,
+	string.format("%d zombies", WildlifeService.CountOf("Zombie")))
+check("civilians spawn", WildlifeService.CountOf("Civilian") == Config.Population.Civilians,
+	string.format("%d civilians", WildlifeService.CountOf("Civilian")))
+check("targets spawn", WildlifeService.CountOf("Target") == Config.Population.Targets,
+	string.format("%d targets", WildlifeService.CountOf("Target")))
+check("poop is scattered about", WildlifeService.PoopCount() > 0,
+	string.format("%d piles", WildlifeService.PoopCount()))
 
--- Run a while so they walk and drop something.
-for _ = 1, 60 * 12 do
-	ADVANCE(1 / 60)
-	RunService.Heartbeat._fire(1 / 60)
-end
--- Only if an elephant happens to be among them; the species are random.
-local hasElephant = false
-for _, id in WildlifeService.SpeciesPresent() do
-	if id == "Elephant" then hasElephant = true end
-end
-if hasElephant then
-	check("elephants poop", WildlifeService.PoopCount() > 0,
-		string.format("%d piles", WildlifeService.PoopCount()))
-else
-	DUMP("  skip  no elephant in this spawn, nothing to poop")
-end
-
--- ------------------------------------------------------------------ drone
+-- Shooting a zombie should hurt it and eventually kill it for points.
 DUMP("")
-DUMP("Hunter drone:")
-local droneState = PlayerState.Get(shooter)
-droneState.equipped = "Drone"
-droneState.weapons.Drone.ammo = 2
-droneState.weapons.Drone.nextFireAt = 0
-local beforeDrone = liveProjectiles()
-fireRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0, -1))
-check("drone launches", liveProjectiles() > beforeDrone,
-	string.format("%d in flight", liveProjectiles() - beforeDrone))
-
--- ------------------------------------------------------- the giant animals
-DUMP("")
-DUMP("Giant animals:")
-WildlifeService.Populate(700)
-local present = WildlifeService.SpeciesPresent()
-check("animals spawn", #present == Config.Beast.Count, table.concat(present, ", "))
-
-local distinct = {}
-local allDifferent = true
-for _, id in present do
-	if distinct[id] then allDifferent = false end
-	distinct[id] = true
-end
-check("all different species", allDifferent, "")
-
--- Shooting one should annoy it, not kill it.
-local beastPart
+DUMP("Shooting the locals:")
+local zombieTorso
 for _, child in workspace:GetChildren() do
-	if child:GetAttribute("IsBeast") then
-		beastPart = child:FindFirstChild("Body")
+	if child:GetAttribute("Dweller") == "Zombie" then
+		zombieTorso = child:FindFirstChild("Torso")
 		break
 	end
 end
-check("an animal has a body to shoot", beastPart ~= nil, "")
-if beastPart then
-	check("bullets register but do not kill", WildlifeService.RegisterHit(beastPart), "")
-	check("animal survives being shot", #WildlifeService.SpeciesPresent() == Config.Beast.Count,
-		string.format("%d still standing", #WildlifeService.SpeciesPresent()))
+check("a zombie can be found", zombieTorso ~= nil, "")
+
+local pointsBefore = PlayerState.Get(shooter).points
+if zombieTorso then
+	check("the hit registers", WildlifeService.RegisterHit(zombieTorso, 20, shooter), "")
+	-- Enough damage to finish it.
+	for _ = 1, 10 do
+		WildlifeService.RegisterHit(zombieTorso, 20, shooter)
+	end
+	RUN_SPAWNED()
+	check("killing it scores points", PlayerState.Get(shooter).points > pointsBefore,
+		string.format("%d points", PlayerState.Get(shooter).points))
+	check("the zombie is gone", WildlifeService.CountOf("Zombie") < Config.Population.Zombies,
+		string.format("%d left", WildlifeService.CountOf("Zombie")))
 end
 
--- Riding takes your guns away.
+-- Shooting a poop pile raises a tower with stairs.
 DUMP("")
-DUMP("Riding:")
-local ridingState = PlayerState.Get(shooter)
-ridingState.equipped = "Pistol"
-ridingState.weapons.Pistol.ammo = 12
-ridingState.weapons.Pistol.nextFireAt = 0
-ridingState.seatRole = "Beast"
-local tracersBefore = countInWorkspace("Tracer")
-fireRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0, -1))
-check("guns are disabled while riding", countInWorkspace("Tracer") == tracersBefore,
-	"no shot fired")
-ridingState.seatRole = nil
-
--- Only the mega-detonation kills one, and what comes back is different.
-DUMP("")
-DUMP("Mega-detonation:")
-local before = WildlifeService.SpeciesPresent()
-local victimSpecies = before[1]
-local victimPosition
+DUMP("Poop towers:")
+local pile
 for _, child in workspace:GetChildren() do
-	if child:GetAttribute("IsBeast") and child:GetAttribute("Species") == victimSpecies then
-		victimPosition = child:FindFirstChild("Body")._props.CFrame.Position
-		break
+	if child:GetAttribute("Poop") then pile = child break end
+end
+check("a poop pile can be found", pile ~= nil, "")
+if pile then
+	WildlifeService.RegisterHit(pile, 20, shooter)
+	local column, stairs = nil, 0
+	for _, child in workspace:GetChildren() do
+		if child._props.Name == "PoopColumn" then
+			column = child
+			for _, piece in child:GetChildren() do
+				if piece._props.Name == "SpiralStep" then stairs += 1 end
+			end
+		end
 	end
+	check("a tower rises", column ~= nil, "")
+	check("with stairs to the top", stairs > 30, string.format("%d steps", stairs))
 end
 
-DamageService.MegaBlast.Fire(victimPosition, 140, shooter)
--- Signals hand each listener its own thread; run them.
-RUN_SPAWNED()
--- At least the one at the centre. Two animals standing close together can
--- both be caught, which is fine.
-check("mega blast bursts the animal", #WildlifeService.SpeciesPresent() < Config.Beast.Count,
-	string.format("%d left of %d", #WildlifeService.SpeciesPresent(), Config.Beast.Count))
-
--- Fast-forward the respawn timer.
-RUN_DELAYED()
-local after = WildlifeService.SpeciesPresent()
-check("it comes back", #after == Config.Beast.Count, table.concat(after, ", "))
-check("the burst species is gone", (function()
-	for _, id in after do
-		if id == victimSpecies then return false end
-	end
-	return true
-end)(), string.format("%s did not return", tostring(victimSpecies)))
-
-local cameBackSame = false
-for _, id in after do
-	local wasThere = false
-	for _, old in before do
-		if old == id then wasThere = true end
-	end
-	if not wasThere then cameBackSame = false end
+-- Endless ammo.
+DUMP("")
+DUMP("Endless ammo:")
+local ammoState = PlayerState.Get(shooter)
+ammoState.equipped = "MachineGun"
+ammoState.weapons.MachineGun.nextFireAt = 0
+local startAmmo = ammoState.weapons.MachineGun.ammo
+for shot = 1, 30 do
+	ammoState.weapons.MachineGun.nextFireAt = 0
+	fireRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0, -1))
 end
-local replacement
-for _, id in after do
-	local matched = false
-	for _, old in before do
-		if old == id then matched = true end
-	end
-	if not matched then replacement = id end
-end
-check("it comes back as a DIFFERENT animal", replacement ~= nil and replacement ~= victimSpecies,
-	string.format("%s became %s", tostring(victimSpecies), tostring(replacement)))
-local _ = cameBackSame
+check("ammo never runs down", ammoState.weapons.MachineGun.ammo == startAmmo,
+	string.format("%d rounds after 30 shots", ammoState.weapons.MachineGun.ammo))
 
 DUMP("")
 DUMP(if failures == 0 then "SHOOTING WORKS" else failures .. " FAILURES")

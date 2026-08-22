@@ -203,6 +203,38 @@ check("turbo is faster", boosted > plain * 1.4,
 	string.format("%.0f studs vs %.0f over 6s", boosted, plain))
 
 -- The reported bug: boost pads launched the truck like a trampoline.
+-- Wheels that sit locked solid make a working car look broken.
+DUMP("")
+DUMP("Wheels:")
+do
+	local car = VehicleService.SpawnCar(1, Vector3.new(0, 5, 0), nil)
+	local chassis = car:FindFirstChild("Chassis")
+	chassis._props.CFrame = CFrame.new(0, 5, 0)
+	local seat = car:FindFirstChild("DriverSeat")
+	seat._props.Occupant = Instance.new("Humanoid")
+	seat._props.Throttle = 1
+	seat._props.Steer = 0
+
+	local wheel
+	for _, child in car:GetChildren() do
+		if child._props.Name == "Wheel" then wheel = child break end
+	end
+	check("the car has wheels", wheel ~= nil, "")
+
+	local startUp = wheel and wheel._props.CFrame.UpVector
+	for _ = 1, 60 do
+		RunService.Heartbeat._fire(1 / 60)
+		simulate(car, 1 / 60)
+	end
+	local endUp = wheel and wheel._props.CFrame.UpVector
+
+	local spun = startUp and endUp and Util.AngleBetween(startUp, endUp) or 0
+	check("wheels rotate while driving", spun > 20,
+		string.format("rolled %.0f degrees in a second", spun))
+
+	car:Destroy()
+end
+
 DUMP("")
 DUMP("Boost pads:")
 do

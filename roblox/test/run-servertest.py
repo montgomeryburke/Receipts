@@ -34,7 +34,7 @@ def strip(s):
 SHARED = ['Config', 'Signal', 'Util', 'Remotes']
 SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'ProjectileService', 'WeaponService', 'TeamService', 'PickupService', 'EffectService',
-          'MonetizationService', 'MatchService']
+          'MonetizationService', 'MatchService', 'GraphicsService']
 
 parts = [read(HERE, 'stubs.luau'), read(HERE, 'serverstubs.luau')]
 parts.append(f'DATASTORE_THROWS = {"true" if BLOCK_DATASTORE else "false"}\n')
@@ -47,6 +47,9 @@ local Debris = game:GetService("Debris")
 local TweenService = game:GetService("TweenService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local DataStoreService = game:GetService("DataStoreService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+local CollectionService = game:GetService("CollectionService")
 ''')
 
 for n in SHARED:

@@ -565,7 +565,7 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		local spot = Util.RandomFlatPoint(half * 0.72, rng)
 		local clear = true
 		for _, other in placed do
-			if (other - spot).Magnitude < 165 then
+			if (other - spot).Magnitude < 118 then
 				clear = false
 				break
 			end
@@ -632,7 +632,12 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	-- One tank, one plane, one torpedo and two turret trucks, always. They
 	-- respawn on these same pads a while after they are wrecked.
 	local vehiclePads = {}
-	local bigVehicles = { "Tank", "Plane", "Torpedo", "TurretTruck", "TurretTruck" }
+	local bigVehicles = {
+		"Tank", "Plane", "TurretTruck", "TurretTruck",
+		-- Rideable rockets, several of them, because they are the best thing
+		-- on the map and one was never enough.
+		"Torpedo", "Torpedo", "Torpedo", "Torpedo",
+	}
 	for index, kind in bigVehicles do
 		local angle = (index / #bigVehicles) * math.pi * 2
 		-- Pulled in towards the middle so they are a short drive apart rather

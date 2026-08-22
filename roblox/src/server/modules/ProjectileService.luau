@@ -129,7 +129,7 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 	local spec = projectile.spec
 
 	-- Giant animals shrug off anything that is not a mega-detonation.
-	if WildlifeService.RegisterHit(hitPart) then
+	if WildlifeService.RegisterHit(hitPart, spec.Damage, projectile.owner) then
 		return
 	end
 

@@ -280,7 +280,17 @@ end
 
 function MatchService.Start()
 	-- A kill is worth points to the killer's team.
-	DamageService.Killed.Connect(function(victim: Player, killer: Player?, _cause: string)
+	-- What each weapon's display name is worth, so a kill can be scored by
+	-- the thing that made it.
+	local pointsByWeapon: { [string]: number } = {}
+	for _, spec in Config.Weapons do
+		pointsByWeapon[spec.DisplayName] = spec.Points or Config.Match.PointsPerKill
+	end
+	pointsByWeapon.Melee = 20
+	pointsByWeapon.Trampled = 15
+	pointsByWeapon.Explosion = 15
+
+	DamageService.Killed.Connect(function(victim: Player, killer: Player?, cause: string)
 		local character = victim.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") then
@@ -290,8 +300,15 @@ function MatchService.Start()
 		EffectService.ShowDeathScreen(victim, if killer then killer.DisplayName else nil)
 
 		if killer and killer ~= victim and phase == "Playing" then
+			-- A sniper shot is worth more than a pistol round, and a running
+			-- multiplier makes everything worth more still.
+			local base = pointsByWeapon[cause] or Config.Match.PointsPerKill
+			local earned = PlayerState.AwardPoints(killer, base)
+
 			local teamIndex = TeamService.IndexOf(killer)
-			scores[teamIndex] += Config.Match.PointsPerKill
+			scores[teamIndex] += earned
+
+			Remotes.Event("Notify"):FireClient(killer, `+{earned} — {cause}`)
 			broadcast()
 		end
 	end)
