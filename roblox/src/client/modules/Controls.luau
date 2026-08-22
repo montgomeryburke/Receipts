@@ -38,6 +38,7 @@ type ArsenalEntry = {
 	MagSize: number,
 	Automatic: boolean,
 	ZoomFov: number?,
+	ZoomLevels: { number }?,
 	AutoAim: boolean,
 	CanMegaDetonate: boolean,
 	MountedOnly: boolean,
@@ -47,7 +48,8 @@ local arsenal: { [string]: ArsenalEntry } = {}
 local slotOrder: { [number]: { string } } = {}
 local equipped = ""
 local firing = false
-local zoomed = false
+-- 0 means hipfire; 1 and up index into the weapon's ZoomLevels.
+local zoomStage = 0
 local defaultFov = 70
 local nextLocalFire = 0
 local lockedTarget: BasePart? = nil
@@ -219,17 +221,57 @@ end
 
 -- ==================================================================== ZOOMING ==
 
-local function setZoom(on: boolean)
-	local spec = arsenal[effectiveWeaponName()]
-	local fov = spec and spec.ZoomFov
+--[[
+	Apply whatever zoom stage we are on.
 
-	if on and fov then
-		zoomed = true
-		TweenService:Create(camera, TweenInfo.new(0.15), { FieldOfView = fov }):Play()
-	elseif zoomed then
-		zoomed = false
-		TweenService:Create(camera, TweenInfo.new(0.15), { FieldOfView = defaultFov }):Play()
+	Scopes here work the way Halo's sniper did: right click steps *through*
+	the magnifications rather than toggling one on and off. The low stages
+	are the useful new part — 2x is close enough to line up a headshot across
+	a room without losing track of where you are.
+]]
+local function applyZoom()
+	local spec = arsenal[effectiveWeaponName()]
+	local levels = spec and spec.ZoomLevels
+
+	if not levels or zoomStage < 1 then
+		zoomStage = 0
+		TweenService:Create(camera, TweenInfo.new(0.12), { FieldOfView = defaultFov }):Play()
+		Hud.SetZoom(0)
+		return
 	end
+
+	local magnification = levels[math.clamp(zoomStage, 1, #levels)]
+	TweenService:Create(camera, TweenInfo.new(0.12), {
+		FieldOfView = defaultFov / magnification,
+	}):Play()
+	Hud.SetZoom(magnification)
+end
+
+--[[ Right click: next magnification, then back out to hipfire. ]]
+local function cycleZoom()
+	local spec = arsenal[effectiveWeaponName()]
+	local levels = spec and spec.ZoomLevels
+	if not levels or #levels == 0 then
+		-- A gun with a single fixed scope still toggles.
+		if spec and spec.ZoomFov then
+			zoomStage = if zoomStage == 0 then 1 else 0
+			if zoomStage == 1 then
+				TweenService:Create(camera, TweenInfo.new(0.12), { FieldOfView = spec.ZoomFov }):Play()
+				Hud.SetZoom(math.floor(defaultFov / spec.ZoomFov + 0.5))
+			else
+				applyZoom()
+			end
+		end
+		return
+	end
+
+	zoomStage = (zoomStage + 1) % (#levels + 1)
+	applyZoom()
+end
+
+local function clearZoom()
+	zoomStage = 0
+	applyZoom()
 end
 
 -- ================================================================== EQUIPPING ==
@@ -257,14 +299,36 @@ local function buildSlotOrder()
 	end
 end
 
+--[[ Which gun is currently chosen in each slot, for the weapon bar. ]]
+local slotChoice: { [number]: string } = {}
+
+local function refreshWeaponBar()
+	local names: { [number]: string } = {}
+	for slot = 1, 6 do
+		local chosen = slotChoice[slot]
+		if not chosen then
+			local list = slotOrder[slot]
+			chosen = list and list[1]
+		end
+		names[slot] = if chosen and arsenal[chosen] then arsenal[chosen].DisplayName else "—"
+	end
+
+	local activeSlot = if arsenal[equipped] then arsenal[equipped].Slot else 0
+	Hud.SetLoadout(names, activeSlot)
+end
+
 local function equip(name: string)
 	if not arsenal[name] or arsenal[name].MountedOnly then
 		return
 	end
 	equipped = name
-	setZoom(false)
+	slotChoice[arsenal[name].Slot] = name
+	-- A fresh gun starts unscoped.
+	clearZoom()
 	Remotes.Event("EquipWeapon"):FireServer(name)
-	Hud.Toast(arsenal[name].DisplayName)
+	-- No toast. The weapon bar shows exactly one gun lit, which is clearer
+	-- than a stack of messages naming every gun you just cycled past.
+	refreshWeaponBar()
 end
 
 --[[ Press 2 once for the rifle, again for the SMG, again for the minigun. ]]
@@ -295,7 +359,7 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	end
 
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
-		setZoom(true)
+		cycleZoom()
 		return
 	end
 
@@ -311,6 +375,8 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	elseif input.KeyCode == Enum.KeyCode.F then
 		-- The big one.
 		Remotes.Event("MegaDetonate"):FireServer()
+	elseif input.KeyCode == Enum.KeyCode.Q then
+		Remotes.Event("Melee"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.One then
 		selectSlot(1)
 	elseif input.KeyCode == Enum.KeyCode.Two then
@@ -331,8 +397,6 @@ local function onInputEnded(input: InputObject)
 		or input.UserInputType == Enum.UserInputType.Touch
 	then
 		firing = false
-	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-		setZoom(false)
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
 		Remotes.Event("SetTurbo"):FireServer(false)
 		Hud.SetTurbo(false)
@@ -449,9 +513,26 @@ end
 function Controls.Start()
 	defaultFov = camera.FieldOfView
 
-	local fetched = Remotes.Function("GetArsenal"):InvokeServer()
-	if typeof(fetched) == "table" then
-		arsenal = fetched :: any
+	-- Built straight from Config rather than asked for over the network.
+	--
+	-- This used to be a RemoteFunction call, and if the server had not
+	-- finished starting up yet that call errored — which aborted the rest of
+	-- this function, so NO input was ever connected. No firing, no E, no
+	-- turbo. Config already lives in ReplicatedStorage and the client has it
+	-- the moment it loads, so there is nothing to wait for.
+	for name, spec in Config.Weapons do
+		arsenal[name] = {
+			Slot = spec.Slot,
+			Category = spec.Category,
+			DisplayName = spec.DisplayName,
+			MagSize = spec.MagSize,
+			Automatic = spec.Automatic == true,
+			ZoomFov = spec.ZoomFov,
+			ZoomLevels = spec.ZoomLevels,
+			AutoAim = spec.AutoAim == true,
+			CanMegaDetonate = spec.CanMegaDetonate == true,
+			MountedOnly = spec.MountedOnly == true,
+		}
 	end
 	buildSlotOrder()
 
@@ -462,6 +543,8 @@ function Controls.Start()
 			break
 		end
 	end
+
+	refreshWeaponBar()
 
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UserInputService.InputEnded:Connect(onInputEnded)

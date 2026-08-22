@@ -18,8 +18,46 @@ local Controls = require(modules:WaitForChild("Controls"))
 
 local player = Players.LocalPlayer
 
-Hud.Build()
-Controls.Start()
+--[[
+	Start the interface and the controls, separately and defensively.
+
+	These used to be two bare calls. When Controls.Start() threw — which it did
+	if the server had not finished booting — every input handler after the
+	throw was never connected, so nothing responded to the mouse or keyboard
+	and there was no visible sign of why.
+]]
+local hudOk = pcall(Hud.Build)
+if not hudOk then
+	warn("[Nuclear Mud Arena] HUD failed to build.")
+end
+
+-- The closure returns a value so that a failure's error message comes back
+-- as pcall's second result rather than being dropped.
+local function startControls(): string
+	Controls.Start()
+	return "ok"
+end
+
+local controlsOk, controlsErr = pcall(startControls)
+if controlsOk then
+	Hud.SetStatus("Controls ready · WASD drive · E enter vehicle · Shift turbo · F mega", true)
+else
+	warn(`[Nuclear Mud Arena] Controls failed to start: {controlsErr}`)
+	Hud.SetStatus(`CONTROLS FAILED: {controlsErr}`, false)
+
+	-- Keep trying. Whatever it was waiting for may simply not be ready yet.
+	task.spawn(function()
+		for attempt = 1, 10 do
+			task.wait(1)
+			local ok = pcall(startControls)
+			if ok then
+				Hud.SetStatus(`Controls ready (recovered on attempt {attempt})`, true)
+				return
+			end
+		end
+		Hud.SetStatus("CONTROLS FAILED — check the Output window in Studio", false)
+	end)
+end
 
 -- ============================================================ HEALTH TRACKING ==
 

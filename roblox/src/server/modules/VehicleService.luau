@@ -162,6 +162,19 @@ local function buildChassis(
 	drive.RelativeTo = Enum.ActuatorRelativeTo.Attachment0
 	drive.LineDirection = Vector3.new(0, 0, -1)
 	drive.LineVelocity = 0
+	-- THE ONE THAT ACTUALLY MATTERS.
+	--
+	-- LinearVelocity has two separate force limits: MaxForce, used when
+	-- ForceLimitMode is Magnitude, and MaxAxesForce, used when it is PerAxis.
+	-- Set the wrong one of the pair and the constraint is left with no force
+	-- to push with, so the vehicle sits there doing nothing — no error, no
+	-- warning, just a car that will not move.
+	--
+	-- Turning the limits off entirely sidesteps the whole trap: the
+	-- constraint gets whatever force it needs to hit the requested speed.
+	drive.ForceLimitsEnabled = false
+	drive.ForceLimitMode = Enum.ForceLimitMode.Magnitude
+	drive.MaxForce = math.huge
 	drive.MaxAxesForce = Vector3.new(math.huge, math.huge, math.huge)
 	drive.Enabled = false
 	drive.Parent = chassis
@@ -572,7 +585,10 @@ function VehicleService.SpawnPlane(position: Vector3): Model
 	local velocity = Instance.new("LinearVelocity")
 	velocity.Attachment0 = root
 	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
-	velocity.MaxForce = 900000
+	-- Limits off, for the same reason as the cars.
+	velocity.ForceLimitsEnabled = false
+	velocity.MaxForce = math.huge
+	velocity.MaxAxesForce = Vector3.new(math.huge, math.huge, math.huge)
 	velocity.VectorVelocity = Vector3.zero
 	velocity.Enabled = false
 	velocity.Parent = body
@@ -580,7 +596,12 @@ function VehicleService.SpawnPlane(position: Vector3): Model
 	local orientation = Instance.new("AlignOrientation")
 	orientation.Attachment0 = root
 	orientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
-	orientation.MaxTorque = 700000
+	-- Rigid alignment ignores the torque and angular-velocity limits entirely,
+	-- which is what we want: MaxAngularVelocity was never being set, and a
+	-- zero there means the aircraft cannot turn no matter the torque.
+	orientation.RigidityEnabled = true
+	orientation.MaxTorque = math.huge
+	orientation.MaxAngularVelocity = math.huge
 	orientation.Responsiveness = 25
 	orientation.Enabled = false
 	orientation.Parent = body
@@ -669,7 +690,9 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 	local velocity = Instance.new("LinearVelocity")
 	velocity.Attachment0 = root
 	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
-	velocity.MaxForce = 400000
+	velocity.ForceLimitsEnabled = false
+	velocity.MaxForce = math.huge
+	velocity.MaxAxesForce = Vector3.new(math.huge, math.huge, math.huge)
 	velocity.VectorVelocity = Vector3.zero
 	velocity.Enabled = false
 	velocity.Parent = body
@@ -677,7 +700,9 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 	local orientation = Instance.new("AlignOrientation")
 	orientation.Attachment0 = root
 	orientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
-	orientation.MaxTorque = 400000
+	orientation.RigidityEnabled = true
+	orientation.MaxTorque = math.huge
+	orientation.MaxAngularVelocity = math.huge
 	orientation.Responsiveness = 20
 	orientation.Enabled = false
 	orientation.Parent = body
@@ -725,8 +750,12 @@ end
 	We set constraint targets, never the part's velocity directly — see the
 	note in buildChassis for why that distinction decides whether the car
 	moves at all.
+
+	Speed is eased toward the target rather than snapped to it. That is what
+	gives the thing mass: it winds up, it carries momentum into a corner, and
+	it does not turn on a coin at walking pace.
 ]]
-local function driveWheeled(model: Model, state: any)
+local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local seat = state.seat :: VehicleSeat
 	local chassis = state.chassis :: BasePart
 
@@ -736,15 +765,10 @@ local function driveWheeled(model: Model, state: any)
 		return
 	end
 
-	-- No driver means no power, so an empty car does not creep away.
-	if not seat.Occupant then
-		drive.Enabled = false
-		turn.Enabled = false
-		return
-	end
+	state.currentSpeed = state.currentSpeed or 0
 
-	local throttle = seat.Throttle
-	local steer = seat.Steer
+	local throttle = if seat.Occupant then seat.Throttle else 0
+	local steer = if seat.Occupant then seat.Steer else 0
 
 	-- Mud drags you down. We look at what is actually under the wheels
 	-- rather than trusting a flag.
@@ -762,13 +786,44 @@ local function driveWheeled(model: Model, state: any)
 		speedFactor *= Config.Turbo.Multiplier
 	end
 
+	local topSpeed = state.maxSpeed * speedFactor
+	local target = throttle * topSpeed
+	local current = state.currentSpeed
+
+	-- Winding up, braking and coasting are three different rates.
+	local rate
+	if throttle == 0 then
+		rate = Config.Driving.Coast
+	elseif (target > current and current < 0) or (target < current and current > 0) then
+		rate = Config.Driving.BrakeDeceleration
+	else
+		rate = Config.Driving.Acceleration
+	end
+
+	local difference = target - current
+	local step = rate * deltaTime
+	current = if math.abs(difference) <= step then target else current + math.sign(difference) * step
+	state.currentSpeed = current
+
+	-- An empty car rolls to a stop and then stops asking for anything.
+	if not seat.Occupant and math.abs(current) < 0.5 then
+		state.currentSpeed = 0
+		drive.Enabled = false
+		turn.Enabled = false
+		return
+	end
+
 	drive.Enabled = true
 	turn.Enabled = true
-	drive.LineVelocity = throttle * state.maxSpeed * speedFactor
+	drive.LineVelocity = current
 
-	-- You can only steer while you are actually rolling, like a real car.
-	local rolling = math.abs(throttle) > 0.05
-	turn.AngularVelocity = Vector3.new(0, if rolling then -steer * math.rad(state.turnSpeed) else 0, 0)
+	-- Steering bites less the slower you are going, and reverses when you
+	-- are reversing, the way a real car does.
+	local speedFraction = math.abs(current) / math.max(topSpeed, 1)
+	local grip = math.clamp(speedFraction / Config.Driving.SteerGripSpeed, 0, 1)
+	local direction = if current < 0 then -1 else 1
+	turn.AngularVelocity =
+		Vector3.new(0, -steer * math.rad(state.turnSpeed) * grip * direction, 0)
 end
 
 --[[
@@ -931,7 +986,7 @@ local function step(deltaTime: number)
 		elseif state.kind == "Torpedo" then
 			driveTorpedo(model, state, deltaTime)
 		else
-			driveWheeled(model, state)
+			driveWheeled(model, state, deltaTime)
 		end
 	end
 end

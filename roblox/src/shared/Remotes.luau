@@ -20,6 +20,7 @@ local EVENT_NAMES = {
 	"CastVote",
 	"SetAimDirection",
 	"SetTurbo",
+	"Melee",
 
 	-- Server -> Client
 	"HudUpdate",
@@ -66,14 +67,17 @@ if RunService:IsServer() then
 		end
 	end
 else
-	folder = ReplicatedStorage:WaitForChild("Remotes", 30) :: Folder
+	folder = ReplicatedStorage:WaitForChild("Remotes") :: Folder
 end
 
 --[[ Grab a RemoteEvent by name. Yields on the client until it exists. ]]
 function Remotes.Event(name: string): RemoteEvent
+	-- No timeout on the client: waiting a moment longer for a remote to
+	-- replicate is always better than throwing, because a throw here takes
+	-- out whatever was setting up the controls.
 	local remote = if RunService:IsServer()
 		then folder:FindFirstChild(name)
-		else folder:WaitForChild(name, 30)
+		else folder:WaitForChild(name)
 	assert(remote and remote:IsA("RemoteEvent"), `Remotes: no RemoteEvent named "{name}"`)
 	return remote
 end
@@ -82,7 +86,7 @@ end
 function Remotes.Function(name: string): RemoteFunction
 	local remote = if RunService:IsServer()
 		then folder:FindFirstChild(name)
-		else folder:WaitForChild(name, 30)
+		else folder:WaitForChild(name)
 	assert(remote and remote:IsA("RemoteFunction"), `Remotes: no RemoteFunction named "{name}"`)
 	return remote
 end

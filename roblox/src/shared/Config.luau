@@ -145,9 +145,13 @@ Config.Weapons = {
 
 	-- -------------------------------------------------------------- SNIPERS
 	Sniper = {
-		Slot = 4, Category = "Sniper", DisplayName = "Zoom Sniper",
+		Slot = 4, Category = "Sniper", DisplayName = "Sniper Rifle",
 		Kind = "Hitscan", Damage = 62, Cooldown = 1.5, Range = 2400,
-		MagSize = 5, ReloadTime = 2.8, Spread = 0.0,
+		MagSize = 4, ReloadTime = 2.8, Spread = 0.0,
+		-- Halo's sniper had two scope stages. This has four, because the ask
+		-- was to be able to line up close-range headshots too: 2x is usable
+		-- across a room, 10x reaches the other end of the map.
+		ZoomLevels = { 2, 4, 6, 10 },
 		ZoomFov = 22, AutoAim = true,
 		Color = Color3.fromRGB(46, 56, 46),
 	},
@@ -155,6 +159,7 @@ Config.Weapons = {
 		Slot = 4, Category = "Sniper", DisplayName = "Anti-Truck Rifle",
 		Kind = "Projectile", Damage = 90, Cooldown = 2.4, Range = 2600, Speed = 1200,
 		MagSize = 3, ReloadTime = 3.6, Spread = 0.0,
+		ZoomLevels = { 2, 5, 10, 16 },
 		ZoomFov = 16, AutoAim = true,
 		-- Wrecks vehicles specifically.
 		VehicleDamageMultiplier = 3,
@@ -208,6 +213,7 @@ Config.Weapons = {
 		Kind = "Projectile", Damage = 28, Cooldown = 0.14, Range = 1600, Speed = 900,
 		MagSize = 100, ReloadTime = 4.0, Spread = 1.4, Automatic = true,
 		Pierces = 2, BlastRadius = 6, BlastDamage = 10,
+		ZoomLevels = { 2, 4 },
 		VehicleDamageMultiplier = 2, MountedOnly = true, AutoAim = true,
 		Color = Color3.fromRGB(58, 60, 64),
 	},
@@ -230,6 +236,37 @@ Config.Weapons = {
 
 --[[ Which guns you spawn holding. Everything else is found on the map. ]]
 Config.StartingLoadout = { "Pistol", "AssaultRifle", "Shotgun", "Sniper", "DiamondGun", "Grenade" }
+
+--[[
+	Melee, on Q.
+
+	The other half of Halo's close-range rhythm: shoot the shield down, then
+	finish with a hit. From behind it kills outright.
+]]
+Config.Melee = {
+	Damage = 55,
+	Range = 9,
+	Cooldown = 0.8,
+	-- A hit from behind is lethal, as it should be.
+	BackstabMultiplier = 10,
+	-- How far round the back counts as "behind", in degrees.
+	BackstabArc = 80,
+}
+
+--[[
+	Driving weight.
+
+	A car that snaps to top speed feels like a cursor. These give it mass:
+	it winds up, it carries momentum, and it steers less sharply the slower
+	it is going.
+]]
+Config.Driving = {
+	Acceleration = 48,
+	BrakeDeceleration = 95,
+	Coast = 26,
+	-- Below this fraction of top speed, steering is reduced.
+	SteerGripSpeed = 0.35,
+}
 
 --[[ The mega-detonation. Press F while a diamond bullet is still flying. ]]
 Config.Mega = {
@@ -424,6 +461,7 @@ export type WeaponSpec = {
 	CanMegaDetonate: boolean?,
 	AutoAim: boolean?,
 	ZoomFov: number?,
+	ZoomLevels: { number }?,
 	FuseTime: number?,
 	Sticky: boolean?,
 	MountedOnly: boolean?,
@@ -507,6 +545,14 @@ export type ConfigType = {
 	StartingLoadout: { string },
 
 	Mega: { Multiplier: number, FreeChargesPerLife: number, CraterDepth: number },
+	Melee: {
+		Damage: number, Range: number, Cooldown: number,
+		BackstabMultiplier: number, BackstabArc: number,
+	},
+	Driving: {
+		Acceleration: number, BrakeDeceleration: number,
+		Coast: number, SteerGripSpeed: number,
+	},
 
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },

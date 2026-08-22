@@ -34,6 +34,7 @@ export type State = {
 	burgerUntil: number,
 	friesUntil: number,
 	spawnProtectedUntil: number,
+	nextMeleeAt: number,
 	kills: number,
 	deaths: number,
 	-- The vehicle this player is sitting in, if any.
@@ -80,6 +81,7 @@ function PlayerState.Reset(player: Player, keepProgress: boolean)
 		burgerUntil = 0,
 		friesUntil = 0,
 		spawnProtectedUntil = os.clock() + Config.Combat.SpawnProtection,
+		nextMeleeAt = 0,
 		kills = if previous then previous.kills else 0,
 		deaths = if previous then previous.deaths else 0,
 		vehicle = nil,

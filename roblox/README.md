@@ -26,6 +26,8 @@ need to touch anything else.
 | **Left mouse** | Fire (hold for automatic guns) |
 | **Right mouse** | Zoom, on guns with a scope |
 | **R** | Reload |
+| **Q** | Melee — lethal from behind |
+| **Right click** | Step the scope up a magnification, then back to hipfire |
 | **F** | **MEGA-DETONATE** a diamond bullet that is still in the air — 10x blast |
 | **1 – 6** | Weapon slots. Press the same number again to cycle within a slot |
 
@@ -70,6 +72,26 @@ and renaming it — no new code anywhere else.
 The server owns every decision that matters: what got hit, who took damage,
 what you own. The client only ever *asks*. That is what stops somebody editing
 their own copy of the game and giving themselves infinite damage.
+
+## Testing
+
+```sh
+LUAU=/path/to/luau ./test/run-all.sh
+```
+
+Four suites, all runnable from a terminal without Roblox Studio:
+
+| Suite | Answers |
+| --- | --- |
+| `run-maptest.py` | Do all ten maps generate, with ground and spawns? |
+| `run-servertest.py` | Does opening the place produce a world? Runs the published and unpublished cases. |
+| `run-clienttest.py` | Does input still get wired up when the server is dead? |
+| `run-drivetest.py` | Does a car actually move, reverse, boost and steer? |
+
+`run-drivetest.py` applies Roblox's documented constraint behaviour by hand and
+integrates it over time. It proves throttle reaches the drive constraint and
+produces motion. It cannot prove Roblox's own physics engine matches its
+documentation — that last mile still needs a human pressing W.
 
 ## Checking it works without opening Studio
 

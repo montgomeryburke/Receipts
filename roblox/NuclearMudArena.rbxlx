@@ -185,9 +185,13 @@ Config.Weapons = {
 
 	-- -------------------------------------------------------------- SNIPERS
 	Sniper = {
-		Slot = 4, Category = "Sniper", DisplayName = "Zoom Sniper",
+		Slot = 4, Category = "Sniper", DisplayName = "Sniper Rifle",
 		Kind = "Hitscan", Damage = 62, Cooldown = 1.5, Range = 2400,
-		MagSize = 5, ReloadTime = 2.8, Spread = 0.0,
+		MagSize = 4, ReloadTime = 2.8, Spread = 0.0,
+		-- Halo's sniper had two scope stages. This has four, because the ask
+		-- was to be able to line up close-range headshots too: 2x is usable
+		-- across a room, 10x reaches the other end of the map.
+		ZoomLevels = { 2, 4, 6, 10 },
 		ZoomFov = 22, AutoAim = true,
 		Color = Color3.fromRGB(46, 56, 46),
 	},
@@ -195,6 +199,7 @@ Config.Weapons = {
 		Slot = 4, Category = "Sniper", DisplayName = "Anti-Truck Rifle",
 		Kind = "Projectile", Damage = 90, Cooldown = 2.4, Range = 2600, Speed = 1200,
 		MagSize = 3, ReloadTime = 3.6, Spread = 0.0,
+		ZoomLevels = { 2, 5, 10, 16 },
 		ZoomFov = 16, AutoAim = true,
 		-- Wrecks vehicles specifically.
 		VehicleDamageMultiplier = 3,
@@ -248,6 +253,7 @@ Config.Weapons = {
 		Kind = "Projectile", Damage = 28, Cooldown = 0.14, Range = 1600, Speed = 900,
 		MagSize = 100, ReloadTime = 4.0, Spread = 1.4, Automatic = true,
 		Pierces = 2, BlastRadius = 6, BlastDamage = 10,
+		ZoomLevels = { 2, 4 },
 		VehicleDamageMultiplier = 2, MountedOnly = true, AutoAim = true,
 		Color = Color3.fromRGB(58, 60, 64),
 	},
@@ -270,6 +276,37 @@ Config.Weapons = {
 
 --[[ Which guns you spawn holding. Everything else is found on the map. ]]
 Config.StartingLoadout = { "Pistol", "AssaultRifle", "Shotgun", "Sniper", "DiamondGun", "Grenade" }
+
+--[[
+	Melee, on Q.
+
+	The other half of Halo's close-range rhythm: shoot the shield down, then
+	finish with a hit. From behind it kills outright.
+]]
+Config.Melee = {
+	Damage = 55,
+	Range = 9,
+	Cooldown = 0.8,
+	-- A hit from behind is lethal, as it should be.
+	BackstabMultiplier = 10,
+	-- How far round the back counts as "behind", in degrees.
+	BackstabArc = 80,
+}
+
+--[[
+	Driving weight.
+
+	A car that snaps to top speed feels like a cursor. These give it mass:
+	it winds up, it carries momentum, and it steers less sharply the slower
+	it is going.
+]]
+Config.Driving = {
+	Acceleration = 48,
+	BrakeDeceleration = 95,
+	Coast = 26,
+	-- Below this fraction of top speed, steering is reduced.
+	SteerGripSpeed = 0.35,
+}
 
 --[[ The mega-detonation. Press F while a diamond bullet is still flying. ]]
 Config.Mega = {
@@ -464,6 +501,7 @@ export type WeaponSpec = {
 	CanMegaDetonate: boolean?,
 	AutoAim: boolean?,
 	ZoomFov: number?,
+	ZoomLevels: { number }?,
 	FuseTime: number?,
 	Sticky: boolean?,
 	MountedOnly: boolean?,
@@ -547,6 +585,14 @@ export type ConfigType = {
 	StartingLoadout: { string },
 
 	Mega: { Multiplier: number, FreeChargesPerLife: number, CraterDepth: number },
+	Melee: {
+		Damage: number, Range: number, Cooldown: number,
+		BackstabMultiplier: number, BackstabArc: number,
+	},
+	Driving: {
+		Acceleration: number, BrakeDeceleration: number,
+		Coast: number, SteerGripSpeed: number,
+	},
 
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
@@ -605,6 +651,7 @@ local EVENT_NAMES = {
 	"CastVote",
 	"SetAimDirection",
 	"SetTurbo",
+	"Melee",
 
 	-- Server -> Client
 	"HudUpdate",
@@ -651,14 +698,17 @@ if RunService:IsServer() then
 		end
 	end
 else
-	folder = ReplicatedStorage:WaitForChild("Remotes", 30) :: Folder
+	folder = ReplicatedStorage:WaitForChild("Remotes") :: Folder
 end
 
 --[[ Grab a RemoteEvent by name. Yields on the client until it exists. ]]
 function Remotes.Event(name: string): RemoteEvent
+	-- No timeout on the client: waiting a moment longer for a remote to
+	-- replicate is always better than throwing, because a throw here takes
+	-- out whatever was setting up the controls.
 	local remote = if RunService:IsServer()
 		then folder:FindFirstChild(name)
-		else folder:WaitForChild(name, 30)
+		else folder:WaitForChild(name)
 	assert(remote and remote:IsA("RemoteEvent"), `Remotes: no RemoteEvent named "{name}"`)
 	return remote
 end
@@ -667,7 +717,7 @@ end
 function Remotes.Function(name: string): RemoteFunction
 	local remote = if RunService:IsServer()
 		then folder:FindFirstChild(name)
-		else folder:WaitForChild(name, 30)
+		else folder:WaitForChild(name)
 	assert(remote and remote:IsA("RemoteFunction"), `Remotes: no RemoteFunction named "{name}"`)
 	return remote
 end
@@ -2955,6 +3005,7 @@ export type State = {
 	burgerUntil: number,
 	friesUntil: number,
 	spawnProtectedUntil: number,
+	nextMeleeAt: number,
 	kills: number,
 	deaths: number,
 	-- The vehicle this player is sitting in, if any.
@@ -3001,6 +3052,7 @@ function PlayerState.Reset(player: Player, keepProgress: boolean)
 		burgerUntil = 0,
 		friesUntil = 0,
 		spawnProtectedUntil = os.clock() + Config.Combat.SpawnProtection,
+		nextMeleeAt = 0,
 		kills = if previous then previous.kills else 0,
 		deaths = if previous then previous.deaths else 0,
 		vehicle = nil,
@@ -3674,6 +3726,19 @@ local function buildChassis(
 	drive.RelativeTo = Enum.ActuatorRelativeTo.Attachment0
 	drive.LineDirection = Vector3.new(0, 0, -1)
 	drive.LineVelocity = 0
+	-- THE ONE THAT ACTUALLY MATTERS.
+	--
+	-- LinearVelocity has two separate force limits: MaxForce, used when
+	-- ForceLimitMode is Magnitude, and MaxAxesForce, used when it is PerAxis.
+	-- Set the wrong one of the pair and the constraint is left with no force
+	-- to push with, so the vehicle sits there doing nothing — no error, no
+	-- warning, just a car that will not move.
+	--
+	-- Turning the limits off entirely sidesteps the whole trap: the
+	-- constraint gets whatever force it needs to hit the requested speed.
+	drive.ForceLimitsEnabled = false
+	drive.ForceLimitMode = Enum.ForceLimitMode.Magnitude
+	drive.MaxForce = math.huge
 	drive.MaxAxesForce = Vector3.new(math.huge, math.huge, math.huge)
 	drive.Enabled = false
 	drive.Parent = chassis
@@ -4084,7 +4149,10 @@ function VehicleService.SpawnPlane(position: Vector3): Model
 	local velocity = Instance.new("LinearVelocity")
 	velocity.Attachment0 = root
 	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
-	velocity.MaxForce = 900000
+	-- Limits off, for the same reason as the cars.
+	velocity.ForceLimitsEnabled = false
+	velocity.MaxForce = math.huge
+	velocity.MaxAxesForce = Vector3.new(math.huge, math.huge, math.huge)
 	velocity.VectorVelocity = Vector3.zero
 	velocity.Enabled = false
 	velocity.Parent = body
@@ -4092,7 +4160,12 @@ function VehicleService.SpawnPlane(position: Vector3): Model
 	local orientation = Instance.new("AlignOrientation")
 	orientation.Attachment0 = root
 	orientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
-	orientation.MaxTorque = 700000
+	-- Rigid alignment ignores the torque and angular-velocity limits entirely,
+	-- which is what we want: MaxAngularVelocity was never being set, and a
+	-- zero there means the aircraft cannot turn no matter the torque.
+	orientation.RigidityEnabled = true
+	orientation.MaxTorque = math.huge
+	orientation.MaxAngularVelocity = math.huge
 	orientation.Responsiveness = 25
 	orientation.Enabled = false
 	orientation.Parent = body
@@ -4181,7 +4254,9 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 	local velocity = Instance.new("LinearVelocity")
 	velocity.Attachment0 = root
 	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
-	velocity.MaxForce = 400000
+	velocity.ForceLimitsEnabled = false
+	velocity.MaxForce = math.huge
+	velocity.MaxAxesForce = Vector3.new(math.huge, math.huge, math.huge)
 	velocity.VectorVelocity = Vector3.zero
 	velocity.Enabled = false
 	velocity.Parent = body
@@ -4189,7 +4264,9 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 	local orientation = Instance.new("AlignOrientation")
 	orientation.Attachment0 = root
 	orientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
-	orientation.MaxTorque = 400000
+	orientation.RigidityEnabled = true
+	orientation.MaxTorque = math.huge
+	orientation.MaxAngularVelocity = math.huge
 	orientation.Responsiveness = 20
 	orientation.Enabled = false
 	orientation.Parent = body
@@ -4237,8 +4314,12 @@ end
 	We set constraint targets, never the part's velocity directly — see the
 	note in buildChassis for why that distinction decides whether the car
 	moves at all.
+
+	Speed is eased toward the target rather than snapped to it. That is what
+	gives the thing mass: it winds up, it carries momentum into a corner, and
+	it does not turn on a coin at walking pace.
 ]]
-local function driveWheeled(model: Model, state: any)
+local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local seat = state.seat :: VehicleSeat
 	local chassis = state.chassis :: BasePart
 
@@ -4248,15 +4329,10 @@ local function driveWheeled(model: Model, state: any)
 		return
 	end
 
-	-- No driver means no power, so an empty car does not creep away.
-	if not seat.Occupant then
-		drive.Enabled = false
-		turn.Enabled = false
-		return
-	end
+	state.currentSpeed = state.currentSpeed or 0
 
-	local throttle = seat.Throttle
-	local steer = seat.Steer
+	local throttle = if seat.Occupant then seat.Throttle else 0
+	local steer = if seat.Occupant then seat.Steer else 0
 
 	-- Mud drags you down. We look at what is actually under the wheels
 	-- rather than trusting a flag.
@@ -4274,13 +4350,44 @@ local function driveWheeled(model: Model, state: any)
 		speedFactor *= Config.Turbo.Multiplier
 	end
 
+	local topSpeed = state.maxSpeed * speedFactor
+	local target = throttle * topSpeed
+	local current = state.currentSpeed
+
+	-- Winding up, braking and coasting are three different rates.
+	local rate
+	if throttle == 0 then
+		rate = Config.Driving.Coast
+	elseif (target > current and current < 0) or (target < current and current > 0) then
+		rate = Config.Driving.BrakeDeceleration
+	else
+		rate = Config.Driving.Acceleration
+	end
+
+	local difference = target - current
+	local step = rate * deltaTime
+	current = if math.abs(difference) <= step then target else current + math.sign(difference) * step
+	state.currentSpeed = current
+
+	-- An empty car rolls to a stop and then stops asking for anything.
+	if not seat.Occupant and math.abs(current) < 0.5 then
+		state.currentSpeed = 0
+		drive.Enabled = false
+		turn.Enabled = false
+		return
+	end
+
 	drive.Enabled = true
 	turn.Enabled = true
-	drive.LineVelocity = throttle * state.maxSpeed * speedFactor
+	drive.LineVelocity = current
 
-	-- You can only steer while you are actually rolling, like a real car.
-	local rolling = math.abs(throttle) > 0.05
-	turn.AngularVelocity = Vector3.new(0, if rolling then -steer * math.rad(state.turnSpeed) else 0, 0)
+	-- Steering bites less the slower you are going, and reverses when you
+	-- are reversing, the way a real car does.
+	local speedFraction = math.abs(current) / math.max(topSpeed, 1)
+	local grip = math.clamp(speedFraction / Config.Driving.SteerGripSpeed, 0, 1)
+	local direction = if current < 0 then -1 else 1
+	turn.AngularVelocity =
+		Vector3.new(0, -steer * math.rad(state.turnSpeed) * grip * direction, 0)
 end
 
 --[[
@@ -4443,7 +4550,7 @@ local function step(deltaTime: number)
 		elseif state.kind == "Torpedo" then
 			driveTorpedo(model, state, deltaTime)
 		else
-			driveWheeled(model, state)
+			driveWheeled(model, state, deltaTime)
 		end
 	end
 end
@@ -4824,6 +4931,76 @@ local function handleMegaDetonate(player: Player)
 	end
 end
 
+--[[
+	Melee, on Q.
+
+	Halo's close-range rhythm: shoot the shields off, then finish with a hit.
+	Catch somebody facing away and it kills outright, which is what makes
+	circling behind people worth the risk.
+]]
+local function handleMelee(player: Player)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return
+	end
+
+	local state = PlayerState.Get(player)
+	local now = os.clock()
+	if now < state.nextMeleeAt then
+		return
+	end
+	state.nextMeleeAt = now + Config.Melee.Cooldown
+
+	local facing = root.CFrame.LookVector
+	local best: Player? = nil
+	local bestDistance = Config.Melee.Range
+
+	for _, other in Players:GetPlayers() do
+		if other == player then
+			continue
+		end
+		if other.Team and player.Team and other.Team == player.Team then
+			continue
+		end
+		local otherCharacter = other.Character
+		local otherRoot = otherCharacter and otherCharacter:FindFirstChild("HumanoidRootPart")
+		if not otherRoot or not otherRoot:IsA("BasePart") then
+			continue
+		end
+
+		local toTarget = otherRoot.Position - root.Position
+		local distance = toTarget.Magnitude
+		-- Has to be in front of you, not merely nearby.
+		if distance <= bestDistance and Util.AngleBetween(facing, toTarget) < 70 then
+			best = other
+			bestDistance = distance
+		end
+	end
+
+	if not best then
+		return
+	end
+
+	local victimCharacter = best.Character
+	local victimRoot = victimCharacter and victimCharacter:FindFirstChild("HumanoidRootPart")
+	local damage = Config.Melee.Damage
+
+	if victimRoot and victimRoot:IsA("BasePart") then
+		-- Both facing the same way means you are behind them.
+		local alignment = Util.AngleBetween(facing, victimRoot.CFrame.LookVector)
+		if alignment < Config.Melee.BackstabArc then
+			damage *= Config.Melee.BackstabMultiplier
+		end
+	end
+
+	DamageService.ApplyDamage(best, damage, player, "Melee")
+end
+
 --[[ Gunners tell the server where they are looking; the turret follows. ]]
 local function handleAim(player: Player, worldTarget: any)
 	if typeof(worldTarget) ~= "Vector3" then
@@ -4858,6 +5035,10 @@ function WeaponService.Start()
 
 	Remotes.Event("SetTurbo").OnServerEvent:Connect(function(player, on)
 		VehicleService.SetTurbo(player, on == true)
+	end)
+
+	Remotes.Event("Melee").OnServerEvent:Connect(function(player)
+		handleMelee(player)
 	end)
 
 	-- The client asks once at join for the full gun list, so the weapon wheel
@@ -4939,8 +5120,46 @@ local Controls = require(modules:WaitForChild("Controls"))
 
 local player = Players.LocalPlayer
 
-Hud.Build()
-Controls.Start()
+--[[
+	Start the interface and the controls, separately and defensively.
+
+	These used to be two bare calls. When Controls.Start() threw — which it did
+	if the server had not finished booting — every input handler after the
+	throw was never connected, so nothing responded to the mouse or keyboard
+	and there was no visible sign of why.
+]]
+local hudOk = pcall(Hud.Build)
+if not hudOk then
+	warn("[Nuclear Mud Arena] HUD failed to build.")
+end
+
+-- The closure returns a value so that a failure's error message comes back
+-- as pcall's second result rather than being dropped.
+local function startControls(): string
+	Controls.Start()
+	return "ok"
+end
+
+local controlsOk, controlsErr = pcall(startControls)
+if controlsOk then
+	Hud.SetStatus("Controls ready · WASD drive · E enter vehicle · Shift turbo · F mega", true)
+else
+	warn(`[Nuclear Mud Arena] Controls failed to start: {controlsErr}`)
+	Hud.SetStatus(`CONTROLS FAILED: {controlsErr}`, false)
+
+	-- Keep trying. Whatever it was waiting for may simply not be ready yet.
+	task.spawn(function()
+		for attempt = 1, 10 do
+			task.wait(1)
+			local ok = pcall(startControls)
+			if ok then
+				Hud.SetStatus(`Controls ready (recovered on attempt {attempt})`, true)
+				return
+			end
+		end
+		Hud.SetStatus("CONTROLS FAILED — check the Output window in Studio", false)
+	end)
+end
 
 -- ============================================================ HEALTH TRACKING ==
 
@@ -5094,6 +5313,7 @@ type ArsenalEntry = {
 	MagSize: number,
 	Automatic: boolean,
 	ZoomFov: number?,
+	ZoomLevels: { number }?,
 	AutoAim: boolean,
 	CanMegaDetonate: boolean,
 	MountedOnly: boolean,
@@ -5103,7 +5323,8 @@ local arsenal: { [string]: ArsenalEntry } = {}
 local slotOrder: { [number]: { string } } = {}
 local equipped = ""
 local firing = false
-local zoomed = false
+-- 0 means hipfire; 1 and up index into the weapon's ZoomLevels.
+local zoomStage = 0
 local defaultFov = 70
 local nextLocalFire = 0
 local lockedTarget: BasePart? = nil
@@ -5275,17 +5496,57 @@ end
 
 -- ==================================================================== ZOOMING ==
 
-local function setZoom(on: boolean)
-	local spec = arsenal[effectiveWeaponName()]
-	local fov = spec and spec.ZoomFov
+--[[
+	Apply whatever zoom stage we are on.
 
-	if on and fov then
-		zoomed = true
-		TweenService:Create(camera, TweenInfo.new(0.15), { FieldOfView = fov }):Play()
-	elseif zoomed then
-		zoomed = false
-		TweenService:Create(camera, TweenInfo.new(0.15), { FieldOfView = defaultFov }):Play()
+	Scopes here work the way Halo's sniper did: right click steps *through*
+	the magnifications rather than toggling one on and off. The low stages
+	are the useful new part — 2x is close enough to line up a headshot across
+	a room without losing track of where you are.
+]]
+local function applyZoom()
+	local spec = arsenal[effectiveWeaponName()]
+	local levels = spec and spec.ZoomLevels
+
+	if not levels or zoomStage < 1 then
+		zoomStage = 0
+		TweenService:Create(camera, TweenInfo.new(0.12), { FieldOfView = defaultFov }):Play()
+		Hud.SetZoom(0)
+		return
 	end
+
+	local magnification = levels[math.clamp(zoomStage, 1, #levels)]
+	TweenService:Create(camera, TweenInfo.new(0.12), {
+		FieldOfView = defaultFov / magnification,
+	}):Play()
+	Hud.SetZoom(magnification)
+end
+
+--[[ Right click: next magnification, then back out to hipfire. ]]
+local function cycleZoom()
+	local spec = arsenal[effectiveWeaponName()]
+	local levels = spec and spec.ZoomLevels
+	if not levels or #levels == 0 then
+		-- A gun with a single fixed scope still toggles.
+		if spec and spec.ZoomFov then
+			zoomStage = if zoomStage == 0 then 1 else 0
+			if zoomStage == 1 then
+				TweenService:Create(camera, TweenInfo.new(0.12), { FieldOfView = spec.ZoomFov }):Play()
+				Hud.SetZoom(math.floor(defaultFov / spec.ZoomFov + 0.5))
+			else
+				applyZoom()
+			end
+		end
+		return
+	end
+
+	zoomStage = (zoomStage + 1) % (#levels + 1)
+	applyZoom()
+end
+
+local function clearZoom()
+	zoomStage = 0
+	applyZoom()
 end
 
 -- ================================================================== EQUIPPING ==
@@ -5313,14 +5574,36 @@ local function buildSlotOrder()
 	end
 end
 
+--[[ Which gun is currently chosen in each slot, for the weapon bar. ]]
+local slotChoice: { [number]: string } = {}
+
+local function refreshWeaponBar()
+	local names: { [number]: string } = {}
+	for slot = 1, 6 do
+		local chosen = slotChoice[slot]
+		if not chosen then
+			local list = slotOrder[slot]
+			chosen = list and list[1]
+		end
+		names[slot] = if chosen and arsenal[chosen] then arsenal[chosen].DisplayName else "—"
+	end
+
+	local activeSlot = if arsenal[equipped] then arsenal[equipped].Slot else 0
+	Hud.SetLoadout(names, activeSlot)
+end
+
 local function equip(name: string)
 	if not arsenal[name] or arsenal[name].MountedOnly then
 		return
 	end
 	equipped = name
-	setZoom(false)
+	slotChoice[arsenal[name].Slot] = name
+	-- A fresh gun starts unscoped.
+	clearZoom()
 	Remotes.Event("EquipWeapon"):FireServer(name)
-	Hud.Toast(arsenal[name].DisplayName)
+	-- No toast. The weapon bar shows exactly one gun lit, which is clearer
+	-- than a stack of messages naming every gun you just cycled past.
+	refreshWeaponBar()
 end
 
 --[[ Press 2 once for the rifle, again for the SMG, again for the minigun. ]]
@@ -5351,7 +5634,7 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	end
 
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
-		setZoom(true)
+		cycleZoom()
 		return
 	end
 
@@ -5367,6 +5650,8 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	elseif input.KeyCode == Enum.KeyCode.F then
 		-- The big one.
 		Remotes.Event("MegaDetonate"):FireServer()
+	elseif input.KeyCode == Enum.KeyCode.Q then
+		Remotes.Event("Melee"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.One then
 		selectSlot(1)
 	elseif input.KeyCode == Enum.KeyCode.Two then
@@ -5387,8 +5672,6 @@ local function onInputEnded(input: InputObject)
 		or input.UserInputType == Enum.UserInputType.Touch
 	then
 		firing = false
-	elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-		setZoom(false)
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
 		Remotes.Event("SetTurbo"):FireServer(false)
 		Hud.SetTurbo(false)
@@ -5505,9 +5788,26 @@ end
 function Controls.Start()
 	defaultFov = camera.FieldOfView
 
-	local fetched = Remotes.Function("GetArsenal"):InvokeServer()
-	if typeof(fetched) == "table" then
-		arsenal = fetched :: any
+	-- Built straight from Config rather than asked for over the network.
+	--
+	-- This used to be a RemoteFunction call, and if the server had not
+	-- finished starting up yet that call errored — which aborted the rest of
+	-- this function, so NO input was ever connected. No firing, no E, no
+	-- turbo. Config already lives in ReplicatedStorage and the client has it
+	-- the moment it loads, so there is nothing to wait for.
+	for name, spec in Config.Weapons do
+		arsenal[name] = {
+			Slot = spec.Slot,
+			Category = spec.Category,
+			DisplayName = spec.DisplayName,
+			MagSize = spec.MagSize,
+			Automatic = spec.Automatic == true,
+			ZoomFov = spec.ZoomFov,
+			ZoomLevels = spec.ZoomLevels,
+			AutoAim = spec.AutoAim == true,
+			CanMegaDetonate = spec.CanMegaDetonate == true,
+			MountedOnly = spec.MountedOnly == true,
+		}
 	end
 	buildSlotOrder()
 
@@ -5518,6 +5818,8 @@ function Controls.Start()
 			break
 		end
 	end
+
+	refreshWeaponBar()
 
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UserInputService.InputEnded:Connect(onInputEnded)
@@ -5568,6 +5870,10 @@ local healthText: TextLabel
 local shieldFill: Frame
 local shieldTrack: Frame
 local turboText: TextLabel
+local statusText: TextLabel
+local zoomText: TextLabel
+local weaponBar: Frame
+local slotChips: { [number]: TextLabel } = {}
 local weaponLabel: TextLabel
 local ammoLabel: TextLabel
 local statsLabel: TextLabel
@@ -5789,6 +6095,82 @@ function Hud.Build()
 		ZIndex = 22,
 	})
 
+	-- Magnification, sitting just under the crosshair where your eye is.
+	zoomText = makeLabel(screen, {
+		Size = UDim2.fromOffset(120, 22),
+		Position = UDim2.new(0.5, -60, 0.5, 18),
+		Text = "",
+		TextSize = 16,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(255, 220, 120),
+	})
+
+	-- The weapon bar: one chip per slot, and exactly one of them is lit.
+	--
+	-- This replaces a toast that fired on every weapon change. Cycling
+	-- through a slot popped four toasts that sat on screen together, which
+	-- read as four guns being selected at once.
+	weaponBar = makeFrame(screen, {
+		Size = UDim2.fromOffset(660, 36),
+		Position = UDim2.new(0.5, -330, 1, -64),
+		BackgroundTransparency = 1,
+	})
+
+	local barLayout = Instance.new("UIListLayout")
+	barLayout.FillDirection = Enum.FillDirection.Horizontal
+	barLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	barLayout.Padding = UDim.new(0, 6)
+	barLayout.Parent = weaponBar
+
+	for slot = 1, 6 do
+		local chip = makeFrame(weaponBar, {
+			Size = UDim2.fromOffset(104, 36),
+			BackgroundColor3 = Color3.fromRGB(28, 32, 38),
+			BackgroundTransparency = 0.25,
+		})
+		chip.LayoutOrder = slot
+
+		local chipCorner = Instance.new("UICorner")
+		chipCorner.CornerRadius = UDim.new(0, 6)
+		chipCorner.Parent = chip
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Name = "Highlight"
+		stroke.Color = Color3.fromRGB(90, 200, 230)
+		stroke.Thickness = 0
+		stroke.Parent = chip
+
+		local number = makeLabel(chip, {
+			Size = UDim2.fromOffset(18, 36),
+			Position = UDim2.fromOffset(8, 0),
+			Text = tostring(slot),
+			TextSize = 15,
+			TextColor3 = Color3.fromRGB(150, 165, 180),
+		})
+		number.Name = "SlotNumber"
+
+		local name = makeLabel(chip, {
+			Size = UDim2.new(1, -30, 1, 0),
+			Position = UDim2.fromOffset(28, 0),
+			Text = "—",
+			TextSize = 12,
+			TextColor3 = Color3.fromRGB(200, 212, 222),
+		})
+		name.Name = "SlotName"
+		slotChips[slot] = name
+	end
+
+	-- A small line reporting whether the controls actually came up. If input
+	-- ever dies again, this says so on screen instead of hiding in Output.
+	statusText = makeLabel(screen, {
+		Size = UDim2.fromOffset(560, 18),
+		Position = UDim2.new(0.5, -280, 1, -22),
+		Text = "",
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(150, 165, 175),
+	})
+
 	-- ------------------------------------------------------------- toasts
 	toastHolder = makeFrame(screen, {
 		Size = UDim2.fromOffset(400, 200),
@@ -5984,6 +6366,55 @@ function Hud.Toast(message: string)
 		fade.Completed:Wait()
 		label:Destroy()
 	end)
+end
+
+--[[
+	Fill in the weapon bar and light exactly one chip.
+
+	`names` is the gun currently chosen in each slot; `activeSlot` is the one
+	in your hands. Only ever one is highlighted.
+]]
+function Hud.SetLoadout(names: { [number]: string }, activeSlot: number)
+	if not weaponBar then
+		return
+	end
+
+	for slot = 1, 6 do
+		local label = slotChips[slot]
+		if label then
+			label.Text = names[slot] or "—"
+			local active = slot == activeSlot
+			label.TextColor3 = if active
+				then Color3.fromRGB(255, 255, 255)
+				else Color3.fromRGB(150, 162, 172)
+
+			local chip = label.Parent :: Frame
+			chip.BackgroundTransparency = if active then 0.05 else 0.45
+			local stroke = chip:FindFirstChild("Highlight")
+			if stroke and stroke:IsA("UIStroke") then
+				stroke.Thickness = if active then 2 else 0
+			end
+		end
+	end
+end
+
+--[[ Show the current magnification, or nothing when hipfiring. ]]
+function Hud.SetZoom(magnification: number)
+	if not zoomText then
+		return
+	end
+	zoomText.Text = if magnification > 0 then `{magnification}×` else ""
+end
+
+--[[ Report control health on screen. Green when fine, red when not. ]]
+function Hud.SetStatus(text: string, good: boolean)
+	if not statusText then
+		return
+	end
+	statusText.Text = text
+	statusText.TextColor3 = if good
+		then Color3.fromRGB(120, 190, 140)
+		else Color3.fromRGB(240, 120, 110)
 end
 
 --[[ The crosshair turns gold when auto-aim has actually locked something. ]]

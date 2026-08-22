@@ -319,6 +319,76 @@ local function handleMegaDetonate(player: Player)
 	end
 end
 
+--[[
+	Melee, on Q.
+
+	Halo's close-range rhythm: shoot the shields off, then finish with a hit.
+	Catch somebody facing away and it kills outright, which is what makes
+	circling behind people worth the risk.
+]]
+local function handleMelee(player: Player)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return
+	end
+
+	local state = PlayerState.Get(player)
+	local now = os.clock()
+	if now < state.nextMeleeAt then
+		return
+	end
+	state.nextMeleeAt = now + Config.Melee.Cooldown
+
+	local facing = root.CFrame.LookVector
+	local best: Player? = nil
+	local bestDistance = Config.Melee.Range
+
+	for _, other in Players:GetPlayers() do
+		if other == player then
+			continue
+		end
+		if other.Team and player.Team and other.Team == player.Team then
+			continue
+		end
+		local otherCharacter = other.Character
+		local otherRoot = otherCharacter and otherCharacter:FindFirstChild("HumanoidRootPart")
+		if not otherRoot or not otherRoot:IsA("BasePart") then
+			continue
+		end
+
+		local toTarget = otherRoot.Position - root.Position
+		local distance = toTarget.Magnitude
+		-- Has to be in front of you, not merely nearby.
+		if distance <= bestDistance and Util.AngleBetween(facing, toTarget) < 70 then
+			best = other
+			bestDistance = distance
+		end
+	end
+
+	if not best then
+		return
+	end
+
+	local victimCharacter = best.Character
+	local victimRoot = victimCharacter and victimCharacter:FindFirstChild("HumanoidRootPart")
+	local damage = Config.Melee.Damage
+
+	if victimRoot and victimRoot:IsA("BasePart") then
+		-- Both facing the same way means you are behind them.
+		local alignment = Util.AngleBetween(facing, victimRoot.CFrame.LookVector)
+		if alignment < Config.Melee.BackstabArc then
+			damage *= Config.Melee.BackstabMultiplier
+		end
+	end
+
+	DamageService.ApplyDamage(best, damage, player, "Melee")
+end
+
 --[[ Gunners tell the server where they are looking; the turret follows. ]]
 local function handleAim(player: Player, worldTarget: any)
 	if typeof(worldTarget) ~= "Vector3" then
@@ -353,6 +423,10 @@ function WeaponService.Start()
 
 	Remotes.Event("SetTurbo").OnServerEvent:Connect(function(player, on)
 		VehicleService.SetTurbo(player, on == true)
+	end)
+
+	Remotes.Event("Melee").OnServerEvent:Connect(function(player)
+		handleMelee(player)
 	end)
 
 	-- The client asks once at join for the full gun list, so the weapon wheel

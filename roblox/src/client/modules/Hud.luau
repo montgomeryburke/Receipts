@@ -24,6 +24,10 @@ local healthText: TextLabel
 local shieldFill: Frame
 local shieldTrack: Frame
 local turboText: TextLabel
+local statusText: TextLabel
+local zoomText: TextLabel
+local weaponBar: Frame
+local slotChips: { [number]: TextLabel } = {}
 local weaponLabel: TextLabel
 local ammoLabel: TextLabel
 local statsLabel: TextLabel
@@ -245,6 +249,82 @@ function Hud.Build()
 		ZIndex = 22,
 	})
 
+	-- Magnification, sitting just under the crosshair where your eye is.
+	zoomText = makeLabel(screen, {
+		Size = UDim2.fromOffset(120, 22),
+		Position = UDim2.new(0.5, -60, 0.5, 18),
+		Text = "",
+		TextSize = 16,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(255, 220, 120),
+	})
+
+	-- The weapon bar: one chip per slot, and exactly one of them is lit.
+	--
+	-- This replaces a toast that fired on every weapon change. Cycling
+	-- through a slot popped four toasts that sat on screen together, which
+	-- read as four guns being selected at once.
+	weaponBar = makeFrame(screen, {
+		Size = UDim2.fromOffset(660, 36),
+		Position = UDim2.new(0.5, -330, 1, -64),
+		BackgroundTransparency = 1,
+	})
+
+	local barLayout = Instance.new("UIListLayout")
+	barLayout.FillDirection = Enum.FillDirection.Horizontal
+	barLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	barLayout.Padding = UDim.new(0, 6)
+	barLayout.Parent = weaponBar
+
+	for slot = 1, 6 do
+		local chip = makeFrame(weaponBar, {
+			Size = UDim2.fromOffset(104, 36),
+			BackgroundColor3 = Color3.fromRGB(28, 32, 38),
+			BackgroundTransparency = 0.25,
+		})
+		chip.LayoutOrder = slot
+
+		local chipCorner = Instance.new("UICorner")
+		chipCorner.CornerRadius = UDim.new(0, 6)
+		chipCorner.Parent = chip
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Name = "Highlight"
+		stroke.Color = Color3.fromRGB(90, 200, 230)
+		stroke.Thickness = 0
+		stroke.Parent = chip
+
+		local number = makeLabel(chip, {
+			Size = UDim2.fromOffset(18, 36),
+			Position = UDim2.fromOffset(8, 0),
+			Text = tostring(slot),
+			TextSize = 15,
+			TextColor3 = Color3.fromRGB(150, 165, 180),
+		})
+		number.Name = "SlotNumber"
+
+		local name = makeLabel(chip, {
+			Size = UDim2.new(1, -30, 1, 0),
+			Position = UDim2.fromOffset(28, 0),
+			Text = "—",
+			TextSize = 12,
+			TextColor3 = Color3.fromRGB(200, 212, 222),
+		})
+		name.Name = "SlotName"
+		slotChips[slot] = name
+	end
+
+	-- A small line reporting whether the controls actually came up. If input
+	-- ever dies again, this says so on screen instead of hiding in Output.
+	statusText = makeLabel(screen, {
+		Size = UDim2.fromOffset(560, 18),
+		Position = UDim2.new(0.5, -280, 1, -22),
+		Text = "",
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(150, 165, 175),
+	})
+
 	-- ------------------------------------------------------------- toasts
 	toastHolder = makeFrame(screen, {
 		Size = UDim2.fromOffset(400, 200),
@@ -440,6 +520,55 @@ function Hud.Toast(message: string)
 		fade.Completed:Wait()
 		label:Destroy()
 	end)
+end
+
+--[[
+	Fill in the weapon bar and light exactly one chip.
+
+	`names` is the gun currently chosen in each slot; `activeSlot` is the one
+	in your hands. Only ever one is highlighted.
+]]
+function Hud.SetLoadout(names: { [number]: string }, activeSlot: number)
+	if not weaponBar then
+		return
+	end
+
+	for slot = 1, 6 do
+		local label = slotChips[slot]
+		if label then
+			label.Text = names[slot] or "—"
+			local active = slot == activeSlot
+			label.TextColor3 = if active
+				then Color3.fromRGB(255, 255, 255)
+				else Color3.fromRGB(150, 162, 172)
+
+			local chip = label.Parent :: Frame
+			chip.BackgroundTransparency = if active then 0.05 else 0.45
+			local stroke = chip:FindFirstChild("Highlight")
+			if stroke and stroke:IsA("UIStroke") then
+				stroke.Thickness = if active then 2 else 0
+			end
+		end
+	end
+end
+
+--[[ Show the current magnification, or nothing when hipfiring. ]]
+function Hud.SetZoom(magnification: number)
+	if not zoomText then
+		return
+	end
+	zoomText.Text = if magnification > 0 then `{magnification}×` else ""
+end
+
+--[[ Report control health on screen. Green when fine, red when not. ]]
+function Hud.SetStatus(text: string, good: boolean)
+	if not statusText then
+		return
+	end
+	statusText.Text = text
+	statusText.TextColor3 = if good
+		then Color3.fromRGB(120, 190, 140)
+		else Color3.fromRGB(240, 120, 110)
 end
 
 --[[ The crosshair turns gold when auto-aim has actually locked something. ]]

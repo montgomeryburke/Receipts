@@ -199,6 +199,10 @@ Inst.__newindex = function(self, k, v)
 			end
 		end
 		rawset(self, "_parent", v)
+		-- Readable as well as writable. Without this, code that checks
+		-- `instance.Parent` to see whether something still exists sees nil
+		-- for everything, and silently skips it.
+		rawget(self, "_props").Parent = v
 		if v and v._children then table.insert(v._children, self) end
 		return
 	end
