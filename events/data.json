@@ -1,5 +1,5 @@
 {
- "generated": "2026-08-24T14:25:30.530Z",
+ "generated": "2026-08-25T14:29:17.777Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -10,150 +10,8 @@
  },
  "radiusMiles": 50,
  "tracks": [],
- "venues": [
-  {
-   "name": "Out Door Theater",
-   "lat": 49.9194324,
-   "lon": -57.8146109,
-   "website": "",
-   "dist": 0.7017846640181956
-  },
-  {
-   "name": "Woody Point Heritage Theatre",
-   "lat": 49.5027439,
-   "lon": -57.9167293,
-   "website": "",
-   "dist": 28.779338738002842
-  },
-  {
-   "name": "Royal Canadian Legion Branch 45",
-   "lat": 49.5010139,
-   "lon": -57.9134713,
-   "website": "",
-   "dist": 28.871720574630036
-  },
-  {
-   "name": "Gros Mourne Summer Music Theater",
-   "lat": 49.4998776,
-   "lon": -57.9196674,
-   "website": "",
-   "dist": 28.997661941087788
-  },
-  {
-   "name": "SAPP Rec Center",
-   "lat": 49.7607185,
-   "lon": -56.907797,
-   "website": "",
-   "dist": 41.24339845629454
-  },
-  {
-   "name": "Cormack Community Centre",
-   "lat": 49.3014589,
-   "lon": -57.3949883,
-   "website": "https://www.facebook.com/townofcormack/",
-   "dist": 46.011274958674214
-  },
-  {
-   "name": "Hampden Community Center",
-   "lat": 49.5383415,
-   "lon": -56.8613909,
-   "website": "",
-   "dist": 49.366984782593924
-  },
-  {
-   "name": "Beaches Recreational Center",
-   "lat": 49.5772433,
-   "lon": -56.8261983,
-   "website": "",
-   "dist": 49.38031374669497
-  }
- ],
- "towns": [
-  {
-   "name": "Cow Head",
-   "lat": 49.9208018,
-   "lon": -57.8057057,
-   "website": "",
-   "dist": 0.5745194929806098
-  },
-  {
-   "name": "Sally's Cove",
-   "lat": 49.7318259,
-   "lon": -57.9323688,
-   "website": "",
-   "dist": 13.76744704708042
-  },
-  {
-   "name": "Portland Creek",
-   "lat": 50.1659347,
-   "lon": -57.6135513,
-   "website": "",
-   "dist": 19.40811202362241
-  },
-  {
-   "name": "Rocky Harbour",
-   "lat": 49.5885139,
-   "lon": -57.9196203,
-   "website": "https://www.rockyharbour.ca/",
-   "dist": 22.998443936180173
-  },
-  {
-   "name": "Norris Point",
-   "lat": 49.5271835,
-   "lon": -57.8808231,
-   "website": "",
-   "dist": 26.863967114776944
-  },
-  {
-   "name": "Woody Point",
-   "lat": 49.4958892,
-   "lon": -57.9205885,
-   "website": "",
-   "dist": 29.276183408160097
-  },
-  {
-   "name": "Trout River",
-   "lat": 49.4799143,
-   "lon": -58.1297164,
-   "website": "",
-   "dist": 33.28145537818548
-  },
-  {
-   "name": "Pollards Point",
-   "lat": 49.7497648,
-   "lon": -56.9209827,
-   "website": "",
-   "dist": 40.881648080945446
-  },
-  {
-   "name": "Jackson Arm",
-   "lat": 49.8641249,
-   "lon": -56.8160005,
-   "website": "",
-   "dist": 44.05589962981258
-  },
-  {
-   "name": "Jackson's Arm",
-   "lat": 49.8668773,
-   "lon": -56.7771904,
-   "website": "",
-   "dist": 45.76384527466577
-  },
-  {
-   "name": "Cormack",
-   "lat": 49.3020209,
-   "lon": -57.3951172,
-   "website": "",
-   "dist": 45.97330196291361
-  },
-  {
-   "name": "Hampden",
-   "lat": 49.533333,
-   "lon": -56.866667,
-   "website": "",
-   "dist": 49.35117519362655
-  }
- ],
+ "venues": [],
+ "towns": [],
  "events": [
   {
    "id": "src:https://www.theatrenewfoundland.com|2026-09-13|e workshop Schedule Donate Rentals Contact Curated by Alliso",
@@ -171,26 +29,6 @@
    "segment": "arts",
    "genre": "",
    "desc": "…e workshop Schedule Donate Rentals Contact Curated by Allison Crowe Connect with our culture Neddy Norris Night June 4– September 13, 2026 BOOK NOW DISCOVER By Daniel Payne Havin' a time with Daniel Payne June 22nd - August 24th, 2026 BOOK NOW DISCOVER By Megan Gail Coles August 22nd - Augus…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-24|y Norris Night June 4– September 13, 2026 BOOK NOW DISCOVER ",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-08-24T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…y Norris Night June 4– September 13, 2026 BOOK NOW DISCOVER By Daniel Payne Havin' a time with Daniel Payne June 22nd - August 24th, 2026 BOOK NOW DISCOVER By Megan Gail Coles August 22nd - August 30th, 2026 Building Houses BOOK NOW DISCOVER Get your tickets for the 2026 season Buy tickets…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
@@ -296,11 +134,11 @@
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-24|Grain paint technique workshop Classes Read More Havin&#8217",
+   "id": "src:https://www.theatrenewfoundland.com|2026-08-30|ng Events 12 events found. Events Views Navigation Event Vie",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-08-24T00:00:00.000Z",
+   "dt": "2026-08-30T00:00:00.000Z",
    "hasTime": false,
    "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "venueCity": "",
@@ -310,33 +148,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…Grain paint technique workshop Classes Read More Havin&#8217; a time with Daniel Payne Studio Read More From June 9th - August 24th Upcoming Events 42 events found. Events Views Navigation Event Views Navigation Month List Month Day This Month 8/24/2026 August 2026 Select date. Calendar of…",
+   "desc": "…ng Events 12 events found. Events Views Navigation Event Views Navigation List List Month Day Today Now Now - 8/30/2026 August 30 Select date. August 2026 Tue 25 Building Houses Featured August 25 @ 7:00 pm - 8:30 pm Building Houses Fortis Theatre - Nurse Myra Bennett Centre for the Perfo…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-24|.. 1 event 24 has featured events 1 event, 24 Featured 7:00 ",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-08-24T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "….. 1 event 24 has featured events 1 event, 24 Featured 7:00 pm - 8:30 pm Havin&#8217; a time with Daniel Payne Featured August 24 @ 7:00 pm - 8:30 pm Havin&#8217; a time with Daniel Payne Come experience classic Newfoundland and Labrador music from a master of tin whistle, accordion, fidd…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-25|de many traditional... 2 events 25 has featured events 2 eve",
+   "id": "src:https://www.theatrenewfoundland.com|2026-08-25|gation List List Month Day Today Now Now - 8/30/2026 August ",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -350,13 +168,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…de many traditional... 2 events 25 has featured events 2 events, 25 Featured 7:00 pm - 8:30 pm Building Houses Featured August 25 @ 7:00 pm - 8:30 pm Building Houses From the playwright who brought you Our Eliza and Falling Trees, Megan Gail Coles’ newest play Building Houses takes the st…",
+   "desc": "…gation List List Month Day Today Now Now - 8/30/2026 August 30 Select date. August 2026 Tue 25 Building Houses Featured August 25 @ 7:00 pm - 8:30 pm Building Houses Fortis Theatre - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canad…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-25|squatters by the crown. Shanawdithit has been taken from her",
+   "id": "src:https://www.theatrenewfoundland.com|2026-08-25|his August at the Gros Morne Theatre Festival. Mid summer 18",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -370,13 +188,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…squatters by the crown. Shanawdithit has been taken from her... Featured 8:30 pm - 10:00 pm Neddy Norris Night Featured August 25 @ 8:30 pm - 10:00 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy N…",
+   "desc": "…his August at the Gros Morne Theatre Festival. Mid summer 1828. Newfoundland is a... Tue 25 Neddy Norris Night Featured August 25 @ 8:30 pm - 10:00 pm Neddy Norris Night BMO Studio - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canad…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-26|out with a few folk... 2 events 26 has featured events 2 eve",
+   "id": "src:https://www.theatrenewfoundland.com|2026-08-26|orris Night is an evening of traditional folk music from New",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -390,7 +208,47 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…out with a few folk... 2 events 26 has featured events 2 events, 26 Featured 7:00 pm - 8:30 pm Building Houses Featured August 26 @ 7:00 pm - 8:30 pm Building Houses From the playwright who brought you Our Eliza and Falling Trees, Megan Gail Coles’ newest play Building Houses takes the st…",
+   "desc": "…orris Night is an evening of traditional folk music from Newfoundland and Labrador. ... Wed 26 Building Houses Featured August 26 @ 7:00 pm - 8:30 pm Building Houses Fortis Theatre - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canad…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-08-26|his August at the Gros Morne Theatre Festival. Mid summer 18",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-08-26T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…his August at the Gros Morne Theatre Festival. Mid summer 1828. Newfoundland is a... Wed 26 Neddy Norris Night Featured August 26 @ 8:30 pm - 10:00 pm Neddy Norris Night BMO Studio - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canad…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-08-27|orris Night is an evening of traditional folk music from New",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-08-27T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…orris Night is an evening of traditional folk music from Newfoundland and Labrador. ... Thu 27 Building Houses Featured August 27 @ 7:00 pm - 8:30 pm Building Houses Fortis Theatre - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canad…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
