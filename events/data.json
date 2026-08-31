@@ -1,5 +1,5 @@
 {
- "generated": "2026-08-30T12:04:53.630Z",
+ "generated": "2026-08-31T12:04:20.220Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -10,8 +10,150 @@
  },
  "radiusMiles": 50,
  "tracks": [],
- "venues": [],
- "towns": [],
+ "venues": [
+  {
+   "name": "Out Door Theater",
+   "lat": 49.9194324,
+   "lon": -57.8146109,
+   "website": "",
+   "dist": 0.7017846640181956
+  },
+  {
+   "name": "Woody Point Heritage Theatre",
+   "lat": 49.5027439,
+   "lon": -57.9167293,
+   "website": "",
+   "dist": 28.779338738002842
+  },
+  {
+   "name": "Royal Canadian Legion Branch 45",
+   "lat": 49.5010139,
+   "lon": -57.9134713,
+   "website": "",
+   "dist": 28.871720574630036
+  },
+  {
+   "name": "Gros Mourne Summer Music Theater",
+   "lat": 49.4998776,
+   "lon": -57.9196674,
+   "website": "",
+   "dist": 28.997661941087788
+  },
+  {
+   "name": "SAPP Rec Center",
+   "lat": 49.7607185,
+   "lon": -56.907797,
+   "website": "",
+   "dist": 41.24339845629454
+  },
+  {
+   "name": "Cormack Community Centre",
+   "lat": 49.3014589,
+   "lon": -57.3949883,
+   "website": "https://www.facebook.com/townofcormack/",
+   "dist": 46.011274958674214
+  },
+  {
+   "name": "Hampden Community Center",
+   "lat": 49.5383415,
+   "lon": -56.8613909,
+   "website": "",
+   "dist": 49.366984782593924
+  },
+  {
+   "name": "Beaches Recreational Center",
+   "lat": 49.5772433,
+   "lon": -56.8261983,
+   "website": "",
+   "dist": 49.38031374669497
+  }
+ ],
+ "towns": [
+  {
+   "name": "Cow Head",
+   "lat": 49.9208018,
+   "lon": -57.8057057,
+   "website": "",
+   "dist": 0.5745194929806098
+  },
+  {
+   "name": "Sally's Cove",
+   "lat": 49.7318259,
+   "lon": -57.9323688,
+   "website": "",
+   "dist": 13.76744704708042
+  },
+  {
+   "name": "Portland Creek",
+   "lat": 50.1659347,
+   "lon": -57.6135513,
+   "website": "",
+   "dist": 19.40811202362241
+  },
+  {
+   "name": "Rocky Harbour",
+   "lat": 49.5885139,
+   "lon": -57.9196203,
+   "website": "https://www.rockyharbour.ca/",
+   "dist": 22.998443936180173
+  },
+  {
+   "name": "Norris Point",
+   "lat": 49.5271835,
+   "lon": -57.8808231,
+   "website": "",
+   "dist": 26.863967114776944
+  },
+  {
+   "name": "Woody Point",
+   "lat": 49.4958892,
+   "lon": -57.9205885,
+   "website": "",
+   "dist": 29.276183408160097
+  },
+  {
+   "name": "Trout River",
+   "lat": 49.4799143,
+   "lon": -58.1297164,
+   "website": "",
+   "dist": 33.28145537818548
+  },
+  {
+   "name": "Pollards Point",
+   "lat": 49.7497648,
+   "lon": -56.9209827,
+   "website": "",
+   "dist": 40.881648080945446
+  },
+  {
+   "name": "Jackson Arm",
+   "lat": 49.8641249,
+   "lon": -56.8160005,
+   "website": "",
+   "dist": 44.05589962981258
+  },
+  {
+   "name": "Jackson's Arm",
+   "lat": 49.8668773,
+   "lon": -56.7771904,
+   "website": "",
+   "dist": 45.76384527466577
+  },
+  {
+   "name": "Cormack",
+   "lat": 49.3020209,
+   "lon": -57.3951172,
+   "website": "",
+   "dist": 45.97330196291361
+  },
+  {
+   "name": "Hampden",
+   "lat": 49.533333,
+   "lon": -56.866667,
+   "website": "",
+   "dist": 49.35117519362655
+  }
+ ],
  "events": [
   {
    "id": "src:https://www.theatrenewfoundland.com|2026-09-13|e workshop Schedule Donate Rentals Contact Curated by Alliso",
@@ -34,26 +176,6 @@
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-30|nect with our culture Neddy Norris Night June 4– September 1",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-08-30T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…nect with our culture Neddy Norris Night June 4– September 13, 2026 BOOK NOW DISCOVER By Megan Gail Coles August 22nd - August 30th, 2026 Building Houses BOOK NOW DISCOVER Get your tickets for the 2026 season Buy tickets Get your tickets for the 2026 season Buy tickets Theatre Newfoundland…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
    "id": "src:https://www.theatrenewfoundland.com|2026-09-13|l repertoire that speak to the place in which we live. Featu",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
@@ -69,26 +191,6 @@
    "segment": "arts",
    "genre": "",
    "desc": "…l repertoire that speak to the place in which we live. Featured Shows Neddy Norris Night Studio Read More From June 2 - September 13 Building Houses Mainstage Read More From August 22nd - August 30th Shanneyganock presented by Gros Morne Fall Fest Mainstage Read More September 19, 2026 Rugge…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-30|s Neddy Norris Night Studio Read More From June 2 - Septembe",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-08-30T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…s Neddy Norris Night Studio Read More From June 2 - September 13 Building Houses Mainstage Read More From August 22nd - August 30th Shanneyganock presented by Gros Morne Fall Fest Mainstage Read More September 19, 2026 Rugged Shores Mainstage Read More September 18, 2026 An NL evening with…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
@@ -154,46 +256,6 @@
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-30|land and Labrador. ... 2 events 30 has featured events 2 eve",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-08-30T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…land and Labrador. ... 2 events 30 has featured events 2 events, 30 Featured 4:00 pm - 5:30 pm Building Houses Featured August 30 @ 4:00 pm - 5:30 pm Building Houses From the playwright who brought you Our Eliza and Falling Trees, Megan Gail Coles’ newest play Building Houses takes the st…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-08-30|os Morne Theatre Festival. Mid summer 1828. Newfoundland is ",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-08-30T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…os Morne Theatre Festival. Mid summer 1828. Newfoundland is a... Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured August 30 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
    "id": "src:https://www.theatrenewfoundland.com|2026-08-31|ador. ... 1 event 31 has featured events 1 event, 31 Feature",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
@@ -249,6 +311,86 @@
    "segment": "arts",
    "genre": "",
    "desc": "…nday, August 31 at 7 pm 1 event 1 has featured events 1 event, 1 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 1 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-02|dland and Labrador. ... 1 event 2 has featured events 1 even",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-02T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…dland and Labrador. ... 1 event 2 has featured events 1 event, 2 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 2 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-03|dland and Labrador. ... 1 event 3 has featured events 1 even",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-03T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…dland and Labrador. ... 1 event 3 has featured events 1 event, 3 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 3 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-04|dland and Labrador. ... 1 event 4 has featured events 1 even",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-04T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…dland and Labrador. ... 1 event 4 has featured events 1 event, 4 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 4 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-05|dland and Labrador. ... 1 event 5 has featured events 1 even",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-05T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…dland and Labrador. ... 1 event 5 has featured events 1 event, 5 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 5 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
