@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-07T16:51:03.863Z",
+ "generated": "2026-09-08T15:40:54.382Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -10,150 +10,8 @@
  },
  "radiusMiles": 50,
  "tracks": [],
- "venues": [
-  {
-   "name": "Out Door Theater",
-   "lat": 49.9194324,
-   "lon": -57.8146109,
-   "website": "",
-   "dist": 0.7017846640181956
-  },
-  {
-   "name": "Woody Point Heritage Theatre",
-   "lat": 49.5027439,
-   "lon": -57.9167293,
-   "website": "",
-   "dist": 28.779338738002842
-  },
-  {
-   "name": "Royal Canadian Legion Branch 45",
-   "lat": 49.5010139,
-   "lon": -57.9134713,
-   "website": "",
-   "dist": 28.871720574630036
-  },
-  {
-   "name": "Gros Mourne Summer Music Theater",
-   "lat": 49.4998776,
-   "lon": -57.9196674,
-   "website": "",
-   "dist": 28.997661941087788
-  },
-  {
-   "name": "SAPP Rec Center",
-   "lat": 49.7607185,
-   "lon": -56.907797,
-   "website": "",
-   "dist": 41.24339845629454
-  },
-  {
-   "name": "Cormack Community Centre",
-   "lat": 49.3014589,
-   "lon": -57.3949883,
-   "website": "https://www.facebook.com/townofcormack/",
-   "dist": 46.011274958674214
-  },
-  {
-   "name": "Hampden Community Center",
-   "lat": 49.5383415,
-   "lon": -56.8613909,
-   "website": "",
-   "dist": 49.366984782593924
-  },
-  {
-   "name": "Beaches Recreational Center",
-   "lat": 49.5772433,
-   "lon": -56.8261983,
-   "website": "",
-   "dist": 49.38031374669497
-  }
- ],
- "towns": [
-  {
-   "name": "Cow Head",
-   "lat": 49.9208018,
-   "lon": -57.8057057,
-   "website": "",
-   "dist": 0.5745194929806098
-  },
-  {
-   "name": "Sally's Cove",
-   "lat": 49.7318259,
-   "lon": -57.9323688,
-   "website": "",
-   "dist": 13.76744704708042
-  },
-  {
-   "name": "Portland Creek",
-   "lat": 50.1659347,
-   "lon": -57.6135513,
-   "website": "",
-   "dist": 19.40811202362241
-  },
-  {
-   "name": "Rocky Harbour",
-   "lat": 49.5885139,
-   "lon": -57.9196203,
-   "website": "https://www.rockyharbour.ca/",
-   "dist": 22.998443936180173
-  },
-  {
-   "name": "Norris Point",
-   "lat": 49.5271835,
-   "lon": -57.8808231,
-   "website": "",
-   "dist": 26.863967114776944
-  },
-  {
-   "name": "Woody Point",
-   "lat": 49.4958892,
-   "lon": -57.9205885,
-   "website": "",
-   "dist": 29.276183408160097
-  },
-  {
-   "name": "Trout River",
-   "lat": 49.4799143,
-   "lon": -58.1297164,
-   "website": "",
-   "dist": 33.28145537818548
-  },
-  {
-   "name": "Pollards Point",
-   "lat": 49.7497648,
-   "lon": -56.9209827,
-   "website": "",
-   "dist": 40.881648080945446
-  },
-  {
-   "name": "Jackson Arm",
-   "lat": 49.8641249,
-   "lon": -56.8160005,
-   "website": "",
-   "dist": 44.05589962981258
-  },
-  {
-   "name": "Jackson's Arm",
-   "lat": 49.8668773,
-   "lon": -56.7771904,
-   "website": "",
-   "dist": 45.76384527466577
-  },
-  {
-   "name": "Cormack",
-   "lat": 49.3020209,
-   "lon": -57.3951172,
-   "website": "",
-   "dist": 45.97330196291361
-  },
-  {
-   "name": "Hampden",
-   "lat": 49.533333,
-   "lon": -56.866667,
-   "website": "",
-   "dist": 49.35117519362655
-  }
- ],
+ "venues": [],
+ "towns": [],
  "events": [
   {
    "id": "src:https://www.theatrenewfoundland.com|2026-09-13|e workshop Schedule Donate Rentals Contact Curated by Alliso",
@@ -236,11 +94,11 @@
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-07|September 19, 2026 Rugged Shores Mainstage Read More Septemb",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-17|ng Events 12 events found. Events Views Navigation Event Vie",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-07T00:00:00.000Z",
+   "dt": "2026-09-17T00:00:00.000Z",
    "hasTime": false,
    "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "venueCity": "",
@@ -250,93 +108,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…September 19, 2026 Rugged Shores Mainstage Read More September 18, 2026 An NL evening with Nick Hamlyn Studio Read More September 7, 2026 Theatre Tours theatre tour Read More Wood Grain paint technique workshop Classes Read More Upcoming Events 35 events found. Events Views Navigation Event…",
+   "desc": "…ng Events 12 events found. Events Views Navigation Event Views Navigation List List Month Day Today Now Now - 9/17/2026 September 17 Select date. September 2026 Tue 8 Theatre Tours September 8 @ 1:00 pm - 1:45 pm Theatre Tours Nurse Myra Bennett Centre for the Performing Arts 188 Main Street…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-07|ador. ... 3 events 7 has featured events 3 events, 7 Feature",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-07T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…ador. ... 3 events 7 has featured events 3 events, 7 Featured 7:00 pm - 8:30 pm An NL evening with Nick Hamlyn Featured September 7 @ 7:00 pm - 8:30 pm An NL evening with Nick Hamlyn Happy to share ANOTHER end of summer, pop-up event. Join the multi-talented Nick Hamlyn as he shares music a…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-07|pop-up event. Join the multi-talented Nick Hamlyn as he shar",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-07T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…pop-up event. Join the multi-talented Nick Hamlyn as he shares music and songs from Newfoundland and Labrador. Monday, September 7 at 7 pm 11:00 am - 11:40 am Theatre Tours September 7 @ 11:00 am - 11:40 am Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurs…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-07|he shares music and songs from Newfoundland and Labrador. Mo",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-07T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…he shares music and songs from Newfoundland and Labrador. Monday, September 7 at 7 pm 11:00 am - 11:40 am Theatre Tours September 7 @ 11:00 am - 11:40 am Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-07|r the Performing Arts. Home of the Gros Morne Theatre Festiv",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-07T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…r the Performing Arts. Home of the Gros Morne Theatre Festival, this tour introduces... 1:00 pm - 1:40 pm Theatre Tours September 7 @ 1:00 pm - 1:40 pm Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of t…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-08|is tour introduces... 3 events 8 has featured events 3 event",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-08|s Navigation List List Month Day Today Now Now - 9/17/2026 S",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -350,13 +128,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…is tour introduces... 3 events 8 has featured events 3 events, 8 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 8 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
+   "desc": "…s Navigation List List Month Day Today Now Now - 9/17/2026 September 17 Select date. September 2026 Tue 8 Theatre Tours September 8 @ 1:00 pm - 1:45 pm Theatre Tours Nurse Myra Bennett Centre for the Performing Arts 188 Main Street, Cow Head, Newfoundland and Labrador, Canada Experience a g…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-08|ris Night is an evening of traditional folk music from Newfo",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-08|the Performing Arts. Home of the Gros Morne Theatre Festival",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -370,17 +148,17 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…ris Night is an evening of traditional folk music from Newfoundland and Labrador. ... 11:00 am - 11:40 am Theatre Tours September 8 @ 11:00 am - 11:40 am Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of…",
+   "desc": "…the Performing Arts. Home of the Gros Morne Theatre Festival, this tour introduces... Tue 8 Neddy Norris Night Featured September 8 @ 7:00 pm - 8:30 pm Neddy Norris Night BMO Studio - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canada…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-08|r the Performing Arts. Home of the Gros Morne Theatre Festiv",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-09|ris Night is an evening of traditional folk music from Newfo",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-08T00:00:00.000Z",
+   "dt": "2026-09-09T00:00:00.000Z",
    "hasTime": false,
    "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "venueCity": "",
@@ -390,7 +168,87 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…r the Performing Arts. Home of the Gros Morne Theatre Festival, this tour introduces... 1:00 pm - 1:45 pm Theatre Tours September 8 @ 1:00 pm - 1:45 pm Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of t…",
+   "desc": "…ris Night is an evening of traditional folk music from Newfoundland and Labrador. ... Wed 9 Neddy Norris Night Featured September 9 @ 7:00 pm - 8:30 pm Neddy Norris Night BMO Studio - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canada…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-10|is Night is an evening of traditional folk music from Newfou",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-10T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…is Night is an evening of traditional folk music from Newfoundland and Labrador. ... Thu 10 Neddy Norris Night Featured September 10 @ 7:00 pm - 8:30 pm Neddy Norris Night BMO Studio - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canada…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-11|is Night is an evening of traditional folk music from Newfou",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-11T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…is Night is an evening of traditional folk music from Newfoundland and Labrador. ... Fri 11 Neddy Norris Night Featured September 11 @ 7:00 pm - 8:30 pm Neddy Norris Night BMO Studio - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canada…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-12|riencing our hit music show, Neddy Norris Night! Running for",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-12T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…riencing our hit music show, Neddy Norris Night! Running for over 25 years, Neddy... Sat 12 Neddy Norris Night Featured September 12 @ 7:00 pm - 8:30 pm Neddy Norris Night BMO Studio - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canada…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-13|is Night is an evening of traditional folk music from Newfou",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-13T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…is Night is an evening of traditional folk music from Newfoundland and Labrador. ... Sun 13 Neddy Norris Night Featured September 13 @ 7:00 pm - 8:30 pm Neddy Norris Night BMO Studio - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canada…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
