@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-10T15:29:51.688Z",
+ "generated": "2026-09-11T15:31:21.224Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -236,26 +236,6 @@
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-10|and and Labrador. ... 1 event 10 has featured events 1 event",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-10T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…and and Labrador. ... 1 event 10 has featured events 1 event, 10 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 10 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
    "id": "src:https://www.theatrenewfoundland.com|2026-09-11|and and Labrador. ... 1 event 11 has featured events 1 event",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
@@ -391,6 +371,26 @@
    "segment": "arts",
    "genre": "",
    "desc": "…ome of the Gros Morne Theatre Festival, this tour introduces... 11:00 am - 11:40 am Wood Grain paint technique workshop September 17 @ 11:00 am - 11:40 am Wood Grain paint technique workshop Wood grain paint technique, used in scenic painting, is an application often applied to antique resto…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-17|l pieces, and home decor. Participants will learn and practi",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-17T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…l pieces, and home decor. Participants will learn and practice the technique through... 1:00 pm - 1:40 pm Theatre Tours September 17 @ 1:00 pm - 1:40 pm Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of t…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
