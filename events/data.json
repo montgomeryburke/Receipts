@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-12T14:39:17.622Z",
+ "generated": "2026-09-13T15:16:58.779Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -236,27 +236,7 @@
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-12|ut with a few folk... 1 event 12 has featured events 1 event",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-12T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…ut with a few folk... 1 event 12 has featured events 1 event, 12 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 12 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-13|ut with a few folk... 1 event 13 has featured events 1 event",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-13|and and Labrador. ... 1 event 13 has featured events 1 event",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -270,7 +250,7 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…ut with a few folk... 1 event 13 has featured events 1 event, 13 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 13 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
+   "desc": "…and and Labrador. ... 1 event 13 has featured events 1 event, 13 Featured 7:00 pm - 8:30 pm Neddy Norris Night Featured September 13 @ 7:00 pm - 8:30 pm Neddy Norris Night Neddy Norris Night You haven’t been to the Gros Morne Theatre Festival without experiencing our hit music show, Neddy No…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
@@ -391,6 +371,26 @@
    "segment": "arts",
    "genre": "",
    "desc": "…18 has featured events 1 event, 18 Featured 8:00 pm - 10:00 pm Rugged Shores presented by Gros Morne Fall Fest Featured September 18 @ 8:00 pm - 10:00 pm Rugged Shores presented by Gros Morne Fall Fest Gros Morne Fall Fest presents Rugged Shores, opening with Jim Payne & Fergus O'Byrne. Gene…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-19|19 has featured events 1 event, 19 Featured 8:00 pm - 10:00 ",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-19T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…19 has featured events 1 event, 19 Featured 8:00 pm - 10:00 pm Shanneyganock presented by Gros Morne Fall Fest Featured September 19 @ 8:00 pm - 10:00 pm Shanneyganock presented by Gros Morne Fall Fest Gros Morne Fall Fest presents Shanneyganock, opening with Daniel Payne. General seating ev…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
