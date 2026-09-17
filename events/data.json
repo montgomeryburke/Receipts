@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-16T15:47:55.374Z",
+ "generated": "2026-09-17T15:54:13.373Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -10,8 +10,150 @@
  },
  "radiusMiles": 50,
  "tracks": [],
- "venues": [],
- "towns": [],
+ "venues": [
+  {
+   "name": "Out Door Theater",
+   "lat": 49.9194324,
+   "lon": -57.8146109,
+   "website": "",
+   "dist": 0.7017846640181956
+  },
+  {
+   "name": "Woody Point Heritage Theatre",
+   "lat": 49.5027439,
+   "lon": -57.9167293,
+   "website": "",
+   "dist": 28.779338738002842
+  },
+  {
+   "name": "Royal Canadian Legion Branch 45",
+   "lat": 49.5010139,
+   "lon": -57.9134713,
+   "website": "",
+   "dist": 28.871720574630036
+  },
+  {
+   "name": "Gros Mourne Summer Music Theater",
+   "lat": 49.4998776,
+   "lon": -57.9196674,
+   "website": "",
+   "dist": 28.997661941087788
+  },
+  {
+   "name": "SAPP Rec Center",
+   "lat": 49.7607185,
+   "lon": -56.907797,
+   "website": "",
+   "dist": 41.24339845629454
+  },
+  {
+   "name": "Cormack Community Centre",
+   "lat": 49.3014589,
+   "lon": -57.3949883,
+   "website": "https://www.facebook.com/townofcormack/",
+   "dist": 46.011274958674214
+  },
+  {
+   "name": "Hampden Community Center",
+   "lat": 49.5383415,
+   "lon": -56.8613909,
+   "website": "",
+   "dist": 49.366984782593924
+  },
+  {
+   "name": "Beaches Recreational Center",
+   "lat": 49.5772433,
+   "lon": -56.8261983,
+   "website": "",
+   "dist": 49.38031374669497
+  }
+ ],
+ "towns": [
+  {
+   "name": "Cow Head",
+   "lat": 49.9208018,
+   "lon": -57.8057057,
+   "website": "",
+   "dist": 0.5745194929806098
+  },
+  {
+   "name": "Sally's Cove",
+   "lat": 49.7318259,
+   "lon": -57.9323688,
+   "website": "",
+   "dist": 13.76744704708042
+  },
+  {
+   "name": "Portland Creek",
+   "lat": 50.1659347,
+   "lon": -57.6135513,
+   "website": "",
+   "dist": 19.40811202362241
+  },
+  {
+   "name": "Rocky Harbour",
+   "lat": 49.5885139,
+   "lon": -57.9196203,
+   "website": "https://www.rockyharbour.ca/",
+   "dist": 22.998443936180173
+  },
+  {
+   "name": "Norris Point",
+   "lat": 49.5271835,
+   "lon": -57.8808231,
+   "website": "",
+   "dist": 26.863967114776944
+  },
+  {
+   "name": "Woody Point",
+   "lat": 49.4958892,
+   "lon": -57.9205885,
+   "website": "",
+   "dist": 29.276183408160097
+  },
+  {
+   "name": "Trout River",
+   "lat": 49.4799143,
+   "lon": -58.1297164,
+   "website": "",
+   "dist": 33.28145537818548
+  },
+  {
+   "name": "Pollards Point",
+   "lat": 49.7497648,
+   "lon": -56.9209827,
+   "website": "",
+   "dist": 40.881648080945446
+  },
+  {
+   "name": "Jackson Arm",
+   "lat": 49.8641249,
+   "lon": -56.8160005,
+   "website": "",
+   "dist": 44.05589962981258
+  },
+  {
+   "name": "Jackson's Arm",
+   "lat": 49.8668773,
+   "lon": -56.7771904,
+   "website": "",
+   "dist": 45.76384527466577
+  },
+  {
+   "name": "Cormack",
+   "lat": 49.3020209,
+   "lon": -57.3951172,
+   "website": "",
+   "dist": 45.97330196291361
+  },
+  {
+   "name": "Hampden",
+   "lat": 49.533333,
+   "lon": -56.866667,
+   "website": "",
+   "dist": 49.35117519362655
+  }
+ ],
  "events": [
   {
    "id": "src:https://www.theatrenewfoundland.com|2026-09-19|Mainstage Read More From August 22nd - August 30th Shanneyga",
@@ -54,7 +196,7 @@
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-17|on the... 0 events 15 0 events, 15 0 events 16 0 events, 16 ",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-17|ion Event Views Navigation List List Month Day Today Upcomin",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -68,13 +210,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…on the... 0 events 15 0 events, 15 0 events 16 0 events, 16 4 events 17 4 events, 17 11:00 am - 11:40 am Theatre Tours September 17 @ 11:00 am - 11:40 am Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of…",
+   "desc": "…ion Event Views Navigation List List Month Day Today Upcoming Upcoming Select date. September 2026 Thu 17 Theatre Tours September 17 @ 1:00 pm - 1:40 pm Theatre Tours Nurse Myra Bennett Centre for the Performing Arts 188 Main Street, Cow Head, Newfoundland and Labrador, Canada Experience a g…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-17|ome of the Gros Morne Theatre Festival, this tour introduces",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-17|rming Arts. Home of the Gros Morne Theatre Festival, this to",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -88,33 +230,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…ome of the Gros Morne Theatre Festival, this tour introduces... 11:00 am - 11:40 am Wood Grain paint technique workshop September 17 @ 11:00 am - 11:40 am Wood Grain paint technique workshop Wood grain paint technique, used in scenic painting, is an application often applied to antique resto…",
+   "desc": "…rming Arts. Home of the Gros Morne Theatre Festival, this tour introduces... Thu 17 Wood Grain paint technique workshop September 17 @ 3:00 pm - 5:00 pm Theatre Tours Nurse Myra Bennett Centre for the Performing Arts 188 Main Street, Cow Head, Newfoundland and Labrador, Canada Wood grain pai…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-17|l pieces, and home decor. Participants will learn and practi",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-17T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…l pieces, and home decor. Participants will learn and practice the technique through... 1:00 pm - 1:40 pm Theatre Tours September 17 @ 1:00 pm - 1:40 pm Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of t…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-18|18 has featured events 1 event, 18 Featured 8:00 pm - 10:00 ",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-18|ipants will learn and practice the technique through... Fri ",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -128,13 +250,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…18 has featured events 1 event, 18 Featured 8:00 pm - 10:00 pm Rugged Shores presented by Gros Morne Fall Fest Featured September 18 @ 8:00 pm - 10:00 pm Rugged Shores presented by Gros Morne Fall Fest Gros Morne Fall Fest presents Rugged Shores, opening with Jim Payne & Fergus O'Byrne. Gene…",
+   "desc": "…ipants will learn and practice the technique through... Fri 18 Rugged Shores presented by Gros Morne Fall Fest Featured September 18 @ 8:00 pm - 10:00 pm Fortis Theatre - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canada Gros Morne Fa…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-19|19 has featured events 1 event, 19 Featured 8:00 pm - 10:00 ",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-19|with Jim Payne & Fergus O'Byrne. General seating event. Sat ",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -148,13 +270,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…19 has featured events 1 event, 19 Featured 8:00 pm - 10:00 pm Shanneyganock presented by Gros Morne Fall Fest Featured September 19 @ 8:00 pm - 10:00 pm Shanneyganock presented by Gros Morne Fall Fest Gros Morne Fall Fest presents Shanneyganock, opening with Daniel Payne. General seating ev…",
+   "desc": "…with Jim Payne & Fergus O'Byrne. General seating event. Sat 19 Shanneyganock presented by Gros Morne Fall Fest Featured September 19 @ 8:00 pm - 10:00 pm Fortis Theatre - Nurse Myra Bennett Centre for the Performing Arts 188 Main St., Cow Head, Newfoundland and Labrador, Canada Gros Morne Fa…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-21|aniel Payne. General seating event. 0 events 20 0 events, 20",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-21|ada Gros Morne Fall Fest presents Shanneyganock, opening wit",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -168,13 +290,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…aniel Payne. General seating event. 0 events 20 0 events, 20 2 events 21 2 events, 21 11:00 am - 11:40 am Theatre Tours September 21 @ 11:00 am - 11:40 am Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of…",
+   "desc": "…ada Gros Morne Fall Fest presents Shanneyganock, opening with Daniel Payne. General seating event. Mon 21 Theatre Tours September 21 @ 11:00 am - 11:40 am Theatre Tours Nurse Myra Bennett Centre for the Performing Arts 188 Main Street, Cow Head, Newfoundland and Labrador, Canada Experience a…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-21|r the Performing Arts. Home of the Gros Morne Theatre Festiv",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-21|t Centre for the Performing Arts. Home of the Gros Morne The",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -188,13 +310,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…r the Performing Arts. Home of the Gros Morne Theatre Festival, this tour introduces... 1:00 pm - 1:40 pm Theatre Tours September 21 @ 1:00 pm - 1:40 pm Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of t…",
+   "desc": "…t Centre for the Performing Arts. Home of the Gros Morne Theatre Festival, this tour introduces... Mon 21 Theatre Tours September 21 @ 1:00 pm - 1:40 pm Theatre Tours Nurse Myra Bennett Centre for the Performing Arts 188 Main Street, Cow Head, Newfoundland and Labrador, Canada Experience a g…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-22|of the Gros Morne Theatre Festival, this tour introduces... ",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-22|t Centre for the Performing Arts. Home of the Gros Morne The",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -208,33 +330,13 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…of the Gros Morne Theatre Festival, this tour introduces... 2 events 22 2 events, 22 11:00 am - 11:40 am Theatre Tours September 22 @ 11:00 am - 11:40 am Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of…",
+   "desc": "…t Centre for the Performing Arts. Home of the Gros Morne Theatre Festival, this tour introduces... Tue 22 Theatre Tours September 22 @ 11:00 am - 11:40 am Theatre Tours Nurse Myra Bennett Centre for the Performing Arts 188 Main Street, Cow Head, Newfoundland and Labrador, Canada Experience a…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
   },
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-22|r the Performing Arts. Home of the Gros Morne Theatre Festiv",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-09-22T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…r the Performing Arts. Home of the Gros Morne Theatre Festival, this tour introduces... 1:00 pm - 1:40 pm Theatre Tours September 22 @ 1:00 pm - 1:40 pm Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of t…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-09-25|roduces... 0 events 23 0 events, 23 0 events 24 0 events, 24",
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-25|t Centre for the Performing Arts. Home of the Gros Morne The",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
@@ -248,7 +350,47 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…roduces... 0 events 23 0 events, 23 0 events 24 0 events, 24 2 events 25 2 events, 25 11:00 am - 11:40 am Theatre Tours September 25 @ 11:00 am - 11:40 am Theatre Tours Experience a guided 'on stage and behind the scenes' tour of the Nurse Myra Bennett Centre for the Performing Arts. Home of…",
+   "desc": "…t Centre for the Performing Arts. Home of the Gros Morne Theatre Festival, this tour introduces... Fri 25 Theatre Tours September 25 @ 11:00 am - 11:40 am Theatre Tours Nurse Myra Bennett Centre for the Performing Arts 188 Main Street, Cow Head, Newfoundland and Labrador, Canada Experience a…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-18|re for the Performing Arts Address 188 Main St. Cow Head, Ne",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-18T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…re for the Performing Arts Address 188 Main St. Cow Head, Newfoundland and Labrador A0K 2A0 Canada Phone 1-877-243-2899 Sep 18 Featured 8:00 pm - 10:00 pm Rugged Shores presented by Gros Morne Fall Fest Sep 19 Featured 8:00 pm - 10:00 pm Shanneyganock presented by Gros Morne Fall Fest…",
+   "confirmed": false,
+   "forcedCat": null,
+   "kwHit": null
+  },
+  {
+   "id": "src:https://www.theatrenewfoundland.com|2026-09-19|A0K 2A0 Canada Phone 1-877-243-2899 Sep 18 Featured 8:00 pm ",
+   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "url": "https://www.theatrenewfoundland.com",
+   "dt": "2026-09-19T00:00:00.000Z",
+   "hasTime": false,
+   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
+   "venueCity": "",
+   "venueLat": 49.9127,
+   "venueLon": -57.8028,
+   "priceMin": null,
+   "priceMax": null,
+   "segment": "arts",
+   "genre": "",
+   "desc": "…A0K 2A0 Canada Phone 1-877-243-2899 Sep 18 Featured 8:00 pm - 10:00 pm Rugged Shores presented by Gros Morne Fall Fest Sep 19 Featured 8:00 pm - 10:00 pm Shanneyganock presented by Gros Morne Fall Fest View More Our Performance Company Colin Furlong Actor Gordon Patrick White Actor Em…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
