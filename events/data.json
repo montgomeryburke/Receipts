@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-02T17:03:39.174Z",
+ "generated": "2026-10-03T15:27:01.798Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -14,11 +14,11 @@
  "towns": [],
  "events": [
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-10-02|upcoming events. There are no upcoming events. Views Navigat",
+   "id": "src:https://www.theatrenewfoundland.com|2026-10-03|upcoming events. There are no upcoming events. Views Navigat",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-10-02T00:00:00.000Z",
+   "dt": "2026-10-03T00:00:00.000Z",
    "hasTime": false,
    "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "venueCity": "",
@@ -28,7 +28,7 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…upcoming events. There are no upcoming events. Views Navigation Event Views Navigation Month List Month Day This Month 10/2/2026 October 2026 Select date. Calendar of Events There are no upcoming events. Latest Past Events Sep 25 2026 September 25 @ 1:00 pm - 1:40 pm Theatre Tours Nurse…",
+   "desc": "…upcoming events. There are no upcoming events. Views Navigation Event Views Navigation Month List Month Day This Month 10/3/2026 October 2026 Select date. Calendar of Events There are no upcoming events. Latest Past Events Sep 25 2026 September 25 @ 1:00 pm - 1:40 pm Theatre Tours Nurse…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
