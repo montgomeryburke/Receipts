@@ -181,11 +181,11 @@ function sha256(file) {
 async function assertSameTree(src, dst, { ignoreEmptyDirs = false, exclude = [] } = {}) {
   assert(fs.existsSync(dst), `destination ${dst} exists`);
   const a = walk(src);
-  // Apache writes uploads to .davfs.tmp* files and removes them when an aborted upload's connection closes.
-  // Our test proxies can hold such connections open for a few seconds after a pause/cancel, so allow that.
+  // Apache writes uploads to .davfs.tmp* files and deletes them as soon as an aborted upload's connection
+  // closes; give it a moment after a pause/cancel. (Temp files that never go away still fail the test.)
   const isTmp = (rel) => /(^|\/)\.davfs\.tmp/.test(rel);
   let b = walk(dst, { skipJunk: false });
-  for (let i = 0; i < 60 && [...b.files.keys()].some(isTmp); i++) {
+  for (let i = 0; i < 20 && [...b.files.keys()].some(isTmp); i++) {
     await new Promise((r) => setTimeout(r, 500));
     b = walk(dst, { skipJunk: false });
   }
@@ -215,7 +215,7 @@ function dav(server, method, p, body) {
   const fullPath = base + p.replace(/^\//, '').split('/').map(encodeURIComponent).join('/');
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { host: u.hostname, port: u.port, method, path: fullPath, headers: { Authorization: 'Basic ' + Buffer.from(`${USER}:${PASSWORD}`).toString('base64'), Depth: '1' } },
+      { host: u.hostname, port: u.port, method, path: fullPath, headers: { Authorization: 'Basic ' + Buffer.from(`${USER}:${PASSWORD}`).toString('base64'), ...(method === 'PROPFIND' ? { Depth: '1' } : {}) } },
       (res) => {
         let text = '';
         res.on('data', (c) => (text += c));
@@ -534,7 +534,7 @@ test('pause / resume / cancel on a slow connection', async () => {
   await assertSameTree(media, path.join(SERVERS.throttle.root, 'slow-test', 'Media Set'));
 
   // Cancel, then retry the cancelled files.
-  await dav('apache', 'DELETE', 'slow-test/Media Set/');
+  eq((await dav('apache', 'DELETE', 'slow-test/Media Set/')).status, 204, 'cleanup before the cancel test');
   await drop(page, [media]);
   await confirmUpload(page);
   await page.waitForFunction(() => window.nasUploader.manager.stats().inflightBytes > 2e6, null, { timeout: 30000, polling: 100 });

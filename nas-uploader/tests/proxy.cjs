@@ -28,6 +28,11 @@ function forward(req, res, bodySource) {
     upRes.pipe(res);
   });
   up.on('error', () => res.destroy());
+  // If the browser aborts the upload, abort the upstream request too (like a direct connection would),
+  // so the WebDAV server discards the partial file instead of waiting for the rest of the body.
+  req.on('close', () => {
+    if (!req.complete) up.destroy();
+  });
   bodySource.pipe(up);
 }
 
