@@ -79,7 +79,7 @@
 
           <details class="options" id="options">
             <summary>Upload options</summary>
-            <label class="check"><input type="checkbox" id="opt-skip" checked /> Skip files that are already on the NAS with the same size <span class="muted">(to resume an interrupted upload, drop the same folder again)</span></label>
+            <label class="check"><input type="checkbox" id="opt-skip" checked /> Skip files that are already on the NAS <span class="muted">(same size and not changed since; to resume an interrupted upload, drop the same folder again)</span></label>
             <label class="check"><input type="checkbox" id="opt-verify" checked /> Double-check every file on the NAS after uploading</label>
             <label class="check"><input type="checkbox" id="opt-junk" checked /> Leave out system junk files <span class="muted">(.DS_Store, Thumbs.db, desktop.ini, ._*)</span></label>
             <label class="inline">Parallel uploads
@@ -88,6 +88,18 @@
               </select>
             </label>
           </details>
+        </div>
+
+        <!-- Saved mirrors: a local folder kept in step with a NAS folder -->
+        <div class="card mirrors" id="mirrors-card" hidden>
+          <div class="tr-head">
+            <div>
+              <h2>Mirrors</h2>
+              <p class="muted small mirrors-intro">Pick a folder on this computer once. After that, <strong>Sync</strong> sends only what changed: new and edited files, renames, and deletions.</p>
+            </div>
+            <button class="btn small" id="btn-new-mirror">＋ New mirror…</button>
+          </div>
+          <ul class="mirror-list" id="mirror-list"></ul>
         </div>
 
         <!-- Transfer status -->
@@ -143,6 +155,7 @@
         <p class="error" id="dialog-error" hidden></p>
         <div class="row end">
           <button class="btn" type="button" id="dialog-cancel">Cancel</button>
+          <button class="btn" type="button" id="dialog-alt" hidden>Other</button>
           <button class="btn primary" value="ok" id="dialog-ok">OK</button>
         </div>
       </form>

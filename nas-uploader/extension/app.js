@@ -1,7 +1,9 @@
 import { CONFIG } from './config.js';
 import { WebDAVClient } from './lib/webdav.js';
-import { captureDrop, scanEntries, scanFileList } from './lib/scan.js';
+import { captureDrop, scanEntries, scanFileList, scanDirectoryHandle, stripTopFolder, singleTopFolder } from './lib/scan.js';
 import { TransferManager } from './lib/transfer.js';
+import { MANIFEST_NAME, isProtectedName, listRemoteTree, readManifest, writeManifest, planMirror, buildManifest } from './lib/mirror.js';
+import { listMirrors, saveMirror, deleteMirror } from './lib/store.js';
 import {
   normalizePath,
   joinPath,
@@ -12,6 +14,7 @@ import {
   formatDuration,
   formatDate,
   sanitizeDownloadName,
+  isJunkDir,
 } from './lib/util.js';
 
 const $ = (id) => document.getElementById(id);
@@ -29,6 +32,8 @@ const state = {
   prefs: { skipExisting: true, verify: true, skipJunk: true, parallel: 3 },
   passwordBuiltIn: !!CONFIG.password,
   lastFailedSig: '',
+  mirrors: [],
+  pickDirectory: null, // tests can replace the native folder picker
 };
 
 // ---------------------------------------------------------------------------
@@ -152,6 +157,7 @@ async function connect(creds, { fromLogin = false } = {}) {
   else {
     state.manager = new TransferManager(client, managerOptions());
     state.manager.addEventListener('change', onManagerChange);
+    state.manager.addEventListener('settled', onManagerSettled);
   }
   const insecure = new URL(CONFIG.serverUrl).protocol === 'http:';
   setConn('ok', `${serverLabel()} · ${creds.username}${insecure ? ' · not encrypted (http)' : ''}`, insecure ? 'This connection uses http://, so your password and files travel unencrypted. Use https:// if you can.' : '');
@@ -159,6 +165,7 @@ async function connect(creds, { fromLogin = false } = {}) {
   showOnly('app');
   state.ready = true;
   await navigate(folder, { entries });
+  await loadMirrors();
   return true;
 }
 
@@ -231,7 +238,7 @@ function refresh() {
 }
 
 function renderListing(entries) {
-  const sorted = [...entries].sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })));
+  const sorted = entries.filter((e) => !(e.name === MANIFEST_NAME && !e.isDir)).sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })));
   const rows = sorted.map((e) => {
     const tr = document.createElement('tr');
     tr.dataset.name = e.name;
@@ -331,13 +338,15 @@ async function downloadEntry(e) {
 // Dialog helper (avoids native alert/confirm/prompt)
 // ---------------------------------------------------------------------------
 
-let dialogResolve = null;
+let currentDialog = null;
 
 /**
- * @returns {Promise<any>} input value (string) for input dialogs, true for confirmations, null/false when cancelled.
+ * @returns {Promise<any>} input value (string) for input dialogs, true for confirmations, 'alt' for the optional
+ *   third button, null/false when cancelled.
  */
-function dialog({ title, body = '', bodyNodes = null, input = undefined, okText = 'OK', cancelText = 'Cancel', danger = false, noCancel = false, validate = null }) {
+function dialog({ title, body = '', bodyNodes = null, input = undefined, okText = 'OK', cancelText = 'Cancel', altText = '', danger = false, noCancel = false, validate = null }) {
   const dlg = $('dialog');
+  currentDialog?.supersede();
   if (dlg.open) dlg.close('cancel');
   $('dialog-title').textContent = title;
   const bodyEl = $('dialog-body');
@@ -351,14 +360,31 @@ function dialog({ title, body = '', bodyNodes = null, input = undefined, okText 
   $('dialog-ok').className = 'btn ' + (danger ? 'primary danger-fill' : 'primary');
   $('dialog-cancel').textContent = cancelText;
   $('dialog-cancel').hidden = noCancel;
+  $('dialog-alt').hidden = !altText;
+  $('dialog-alt').textContent = altText;
   dlg._validate = validate;
   dlg._hasInput = input !== undefined;
   dlg.returnValue = '';
   dlg.showModal();
   if (input !== undefined) inp.focus();
   else $('dialog-ok').focus();
+  const hasInput = input !== undefined;
+  const cancelValue = hasInput ? null : false;
   return new Promise((resolve) => {
-    dialogResolve = resolve;
+    const me = {};
+    const finish = (value) => {
+      dlg.removeEventListener('close', onClose);
+      if (currentDialog === me) currentDialog = null;
+      resolve(value);
+    };
+    const onClose = () => {
+      if (dlg.open) return; // a previous dialog's close event arriving late
+      const rv = dlg.returnValue;
+      finish(rv === 'alt' ? 'alt' : rv === 'ok' ? (hasInput ? inp.value : true) : cancelValue);
+    };
+    me.supersede = () => finish(cancelValue);
+    currentDialog = me;
+    dlg.addEventListener('close', onClose);
   });
 }
 
@@ -379,14 +405,7 @@ function wireDialog() {
     dlg.close('ok');
   });
   $('dialog-cancel').addEventListener('click', () => dlg.close('cancel'));
-  dlg.addEventListener('close', () => {
-    const ok = dlg.returnValue === 'ok';
-    const r = dialogResolve;
-    dialogResolve = null;
-    if (!r) return;
-    if (dlg._hasInput) r(ok ? $('dialog-input').value : null);
-    else r(ok);
-  });
+  $('dialog-alt').addEventListener('click', () => dlg.close('alt'));
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +419,7 @@ function el(tag, text, cls) {
   return e;
 }
 
-async function startScan(scanFn) {
+async function startScan(scanFn, { handlePromise = null, knowsEmptyDirs = true } = {}) {
   if (!state.ready) return;
   if (state.scanning) {
     await dialog({ title: 'Still reading the previous drop', body: 'Please wait until it has been read, then drop again.', noCancel: true });
@@ -438,14 +457,14 @@ async function startScan(scanFn) {
   }
 
   // Confirm before sending anything.
-  const top = [...new Set([...result.files.map((f) => f.rel.split('/')[0] + (f.rel.includes('/') ? '/' : '')), ...result.dirs.map((d) => d.split('/')[0] + '/')])];
+  const tops = [...new Set([...result.files.map((f) => f.rel.split('/')[0] + (f.rel.includes('/') ? '/' : '')), ...result.dirs.map((d) => d.split('/')[0] + '/')])];
   const nodes = [];
   nodes.push(
     el('p', `Upload ${nf.format(result.files.length)} file${result.files.length === 1 ? '' : 's'} (${formatBytes(result.totalBytes)})${result.dirs.length ? ` in ${nf.format(result.dirs.length)} folder${result.dirs.length === 1 ? '' : 's'}` : ''} into ${dest}?`),
   );
   const ul = el('ul');
-  for (const t of top.slice(0, 12)) ul.append(el('li', (t.endsWith('/') ? '📁 ' : '📄 ') + t));
-  if (top.length > 12) ul.append(el('li', `…and ${top.length - 12} more`, 'muted'));
+  for (const t of tops.slice(0, 12)) ul.append(el('li', (t.endsWith('/') ? '📁 ' : '📄 ') + t));
+  if (tops.length > 12) ul.append(el('li', `…and ${tops.length - 12} more`, 'muted'));
   nodes.push(ul);
   if (state.prefs.skipExisting) nodes.push(el('p', 'Files already on the NAS with the same size will be skipped; other files with the same name will be replaced.', 'muted small'));
   else nodes.push(el('p', 'Files with the same name on the NAS will be replaced.', 'muted small'));
@@ -457,9 +476,356 @@ async function startScan(scanFn) {
     if (result.errors.length > 20) eu.append(el('li', `…and ${result.errors.length - 20} more`, 'muted small'));
     nodes.push(eu);
   }
-  const ok = await dialog({ title: 'Ready to upload', bodyNodes: nodes, okText: 'Upload' });
+  const top = singleTopFolder(result);
+  if (top) {
+    nodes.push(el('p', `Mirror… instead keeps ${joinPath(dest, top)} identical to this folder: it also removes from the NAS what you deleted here, and moves renamed files instead of sending them again.`, 'muted small'));
+  }
+  const ok = await dialog({ title: 'Ready to upload', bodyNodes: nodes, okText: 'Upload', altText: top ? 'Mirror…' : '' });
+  if (ok === 'alt') {
+    let handle = null;
+    try {
+      const h = await handlePromise;
+      if (h && h.kind === 'directory') handle = h;
+    } catch {}
+    await mirrorFolder({
+      name: top,
+      nasRoot: joinPath(dest, top),
+      local: stripTopFolder(result),
+      options: { deletions: true, protectMetadata: true, localKnowsEmptyDirs: knowsEmptyDirs },
+      rememberHandle: handle,
+    });
+    return;
+  }
   if (!ok) return;
   state.manager.addBatch(result, dest);
+}
+
+// ---------------------------------------------------------------------------
+// Mirrors
+// ---------------------------------------------------------------------------
+
+function setStatus(text) {
+  $('scan-status').hidden = !text;
+  if (text) $('scan-text').textContent = text;
+}
+
+/**
+ * Compare a local folder with a NAS folder, show what will change, and queue it.
+ * Either `local` (already scanned, paths relative to the folder) or `scanLocal` must be given.
+ */
+async function mirrorFolder({ name, nasRoot, local = null, scanLocal = null, options, record = null, rememberHandle = null }) {
+  nasRoot = normalizePath(nasRoot);
+  if (nasRoot === '/') {
+    await dialog({ title: "Can't mirror to the top level", body: 'Choose a folder on the NAS to mirror into, not the top level.', noCancel: true });
+    return;
+  }
+  if (state.manager.busy) {
+    await dialog({ title: 'A transfer is still running', body: 'Wait until it has finished (or cancel it), then mirror again.', noCancel: true });
+    return;
+  }
+  if (state.scanning) return;
+  const ac = new AbortController();
+  state.scanning = ac;
+  updateKeepAwake();
+  let remote;
+  let manifest;
+  let plan;
+  try {
+    if (!local) {
+      setStatus(`Reading “${name}” on this computer…`);
+      local = await scanLocal({
+        skipJunk: state.prefs.skipJunk,
+        signal: ac.signal,
+        onProgress: ({ files, bytes }) => setStatus(`Reading “${name}”… ${nf.format(files)} files (${formatBytes(bytes)})`),
+      });
+    }
+    setStatus(`Comparing with ${nasRoot} on the NAS…`);
+    const localDirKeys = new Set(local.dirs.map((d) => d.normalize('NFC')));
+    remote = await listRemoteTree(state.client, nasRoot, {
+      signal: ac.signal,
+      // Don't walk into NAS-only metadata or system folders (never touched); do walk into ones that exist here too.
+      shouldDescend: (rel, n) => localDirKeys.has(rel.normalize('NFC')) || !((options.protectMetadata && isProtectedName(n, true)) || (state.prefs.skipJunk && isJunkDir(n))),
+      onProgress: ({ folders, files }) => setStatus(`Comparing with ${nasRoot} on the NAS… ${nf.format(folders)} folders, ${nf.format(files)} files`),
+    });
+    manifest = remote.exists ? await readManifest(state.client, nasRoot, { signal: ac.signal }) : null;
+    plan = planMirror({ local, remote, manifest, options: { ...options, skipJunk: state.prefs.skipJunk } });
+  } catch (err) {
+    if (ac.signal.aborted) return;
+    await dialog({ title: "Couldn't prepare the mirror", body: err?.message || String(err), noCancel: true });
+    return;
+  } finally {
+    state.scanning = null;
+    setStatus('');
+    updateKeepAwake();
+  }
+
+  if (local.errors?.length) plan.warnings.unshift(`${local.errors.length} item(s) in “${name}” could not be read; they are left alone on the NAS.`);
+  if (plan.nothingToDo) {
+    // Record the current state so the next comparison is exact, then report.
+    if (remote.exists) {
+      const m = buildManifest({ previous: manifest, plan, remote, tasks: [], sourceName: name });
+      await writeManifest(state.client, nasRoot, m).catch(() => {});
+    }
+    if (record) await recordSync(record, { uploaded: 0, moved: 0, deleted: 0, failed: 0 });
+    else if (rememberHandle) await rememberMirror(rememberHandle, name, nasRoot, options);
+    await dialog({ title: 'Already in sync', body: `${nasRoot} on the NAS already matches “${name}” (${nf.format(plan.unchanged.length)} files). Nothing to send or delete.`, noCancel: true });
+    return;
+  }
+
+  const choice = await reviewMirrorPlan({ plan, name, nasRoot, firstSync: !manifest, canRemember: !record && !!rememberHandle, deletionsEnabled: options.deletions !== false });
+  if (!choice) return;
+  if (!choice.deletions) {
+    plan.deletes = [];
+    plan.deleteDirs = [];
+  }
+  if (choice.remember) record = await rememberMirror(rememberHandle, name, nasRoot, options);
+  state.manager.addMirror(plan, nasRoot, remote, { manifest, sourceName: name, mirrorId: record?.id || null });
+}
+
+function countUploads(plan, reason) {
+  const list = plan.uploads.filter((u) => u.reason === reason);
+  return { n: list.length, bytes: list.reduce((a, u) => a + u.file.size, 0) };
+}
+
+/** Show what a mirror will do. Resolves to {deletions, remember} or null if cancelled. */
+async function reviewMirrorPlan({ plan, name, nasRoot, firstSync, canRemember, deletionsEnabled }) {
+  const nodes = [el('p', `Make ${nasRoot} on the NAS match “${name}” on this computer:`)];
+  const ul = el('ul', undefined, 'plan-list');
+  const row = (n, text) => {
+    const li = el('li');
+    li.append(el('span', nf.format(n), 'n'), document.createTextNode(' ' + text));
+    ul.append(li);
+  };
+  const added = countUploads(plan, 'new');
+  const changed = countUploads(plan, 'changed');
+  if (added.n) row(added.n, `new file${added.n === 1 ? '' : 's'} to upload (${formatBytes(added.bytes)})`);
+  if (changed.n) row(changed.n, `changed file${changed.n === 1 ? '' : 's'} to upload (${formatBytes(changed.bytes)})`);
+  if (plan.moves.length) row(plan.moves.length, `renamed or moved file${plan.moves.length === 1 ? '' : 's'}, moved on the NAS without uploading again (${formatBytes(plan.moves.reduce((a, m) => a + m.file.size, 0))} saved)`);
+  if (plan.createDirs.length) row(plan.createDirs.length, `new folder${plan.createDirs.length === 1 ? '' : 's'}`);
+  row(plan.unchanged.length, 'unchanged, skipped');
+  if (plan.keptProtected) row(plan.keptProtected, 'artwork/metadata files that only exist on the NAS (e.g. Jellyfin posters, .nfo), kept');
+  if (plan.keptOnNas) row(plan.keptOnNas, 'files only on the NAS, kept (deleting is off for this mirror)');
+  nodes.push(ul);
+  if (firstSync && plan.unchanged.length) {
+    nodes.push(el('p', 'First mirror of this NAS folder: files with the same size that the NAS received after you last changed them count as unchanged.', 'muted small'));
+  }
+
+  let delBox = null;
+  const delFolders = plan.deleteDirs.length;
+  if (plan.deletingFiles > 0 || delFolders > 0) {
+    const box = el('div', undefined, 'plan-del');
+    const parts = [];
+    if (plan.deletes.length) parts.push(`${nf.format(plan.deletes.length)} file${plan.deletes.length === 1 ? '' : 's'}`);
+    if (delFolders) parts.push(`${nf.format(delFolders)} folder${delFolders === 1 ? '' : 's'} (${nf.format(plan.deleteDirs.reduce((a, d) => a + d.files, 0))} files inside)`);
+    box.append(el('strong', `${parts.join(' and ')} on the NAS ${parts.length === 1 && plan.deletes.length === 1 && !delFolders ? 'is' : 'are'} no longer in your folder:`));
+    const dl = el('ul');
+    const items = [...plan.deleteDirs.map((d) => `📁 ${d.rel}/`), ...plan.deletes.map((d) => d.rel)];
+    for (const t of items.slice(0, 12)) dl.append(el('li', t));
+    if (items.length > 12) dl.append(el('li', `…and ${nf.format(items.length - 12)} more`, 'muted'));
+    box.append(dl);
+    const label = el('label', undefined, 'check');
+    delBox = document.createElement('input');
+    delBox.type = 'checkbox';
+    delBox.id = 'plan-delete';
+    // Be cautious by default when the numbers look like a mistake.
+    delBox.checked = deletionsEnabled && plan.warnings.length === 0;
+    label.append(delBox, document.createTextNode(' Delete them from the NAS'));
+    box.append(label);
+    nodes.push(box);
+  }
+  for (const c of plan.conflicts.slice(0, 5)) nodes.push(el('p', `Can't mirror ${c.rel}: ${c.message}.`, 'warn-text small'));
+  for (const w of plan.warnings) nodes.push(el('p', '⚠ ' + w, 'plan-warn'));
+
+  let rememberBox = null;
+  if (canRemember) {
+    const label = el('label', undefined, 'check');
+    rememberBox = document.createElement('input');
+    rememberBox.type = 'checkbox';
+    rememberBox.id = 'plan-remember';
+    rememberBox.checked = true;
+    label.append(rememberBox, document.createTextNode(` Remember “${name}” for one-click Sync next time`));
+    nodes.push(label);
+  }
+  const ok = await dialog({ title: 'Mirror: review the changes', bodyNodes: nodes, okText: 'Start mirror' });
+  if (!ok) return null;
+  return { deletions: !!delBox?.checked, remember: !!rememberBox?.checked };
+}
+
+async function rememberMirror(handle, name, nasPath, options) {
+  if (!handle) return null;
+  const rec = {
+    id: crypto.randomUUID(),
+    name,
+    handle,
+    nasPath: normalizePath(nasPath),
+    deletions: options.deletions !== false,
+    protectMetadata: options.protectMetadata !== false,
+    serverUrl: CONFIG.serverUrl,
+    created: Date.now(),
+    lastSync: null,
+  };
+  try {
+    await saveMirror(rec);
+  } catch (err) {
+    await dialog({ title: "Couldn't remember this mirror", body: err?.message || String(err), noCancel: true });
+    return null;
+  }
+  await loadMirrors();
+  return rec;
+}
+
+async function recordSync(rec, summary) {
+  const fresh = state.mirrors.find((m) => m.id === rec.id) || rec;
+  fresh.lastSync = { at: Date.now(), ...summary };
+  try {
+    await saveMirror(fresh);
+  } catch {}
+  await loadMirrors();
+}
+
+/** After every run: store each mirror's manifest and the "last synced" summary. */
+async function onManagerSettled(e) {
+  for (const b of e.detail.batches) {
+    if (b.kind !== 'mirror') continue;
+    const manifest = buildManifest({ previous: b.manifest, plan: b.plan, remote: b.remote, tasks: b.tasks, sourceName: b.sourceName });
+    try {
+      await writeManifest(state.client, b.root, manifest);
+    } catch (err) {
+      console.warn('Could not save mirror manifest', err);
+    }
+    if (b.mirrorId) {
+      const done = (k) => b.tasks.filter((t) => t.kind === k && t.status === 'done');
+      await recordSync(
+        { id: b.mirrorId },
+        {
+          uploaded: done('file').length,
+          moved: done('move').length,
+          deleted: done('delete').reduce((n, t) => n + (t.count || 1), 0),
+          failed: b.tasks.filter((t) => t.status === 'failed' || t.status === 'cancelled').length,
+        },
+      );
+    }
+  }
+}
+
+async function loadMirrors() {
+  try {
+    state.mirrors = (await listMirrors()).filter((m) => m.serverUrl === CONFIG.serverUrl).sort((a, b) => a.created - b.created);
+  } catch {
+    state.mirrors = [];
+  }
+  renderMirrors();
+}
+
+function canPickFolders() {
+  return !!state.pickDirectory || typeof window.showDirectoryPicker === 'function';
+}
+
+function renderMirrors() {
+  const card = $('mirrors-card');
+  card.hidden = !canPickFolders() && !state.mirrors.length;
+  $('btn-new-mirror').hidden = !canPickFolders();
+  const rows = state.mirrors.map((m) => {
+    const li = el('li');
+    li.dataset.id = m.id;
+    const main = el('div', undefined, 'm-main');
+    main.append(el('div', '📁 ' + m.name, 'm-name'), el('div', `→ ${m.nasPath} on the NAS${m.deletions ? '' : ' (never deletes)'}`, 'm-dest'));
+    const ls = m.lastSync;
+    main.append(
+      el(
+        'div',
+        ls
+          ? `Last synced ${new Date(ls.at).toLocaleString()} · ${nf.format(ls.uploaded)} uploaded · ${nf.format(ls.moved)} moved · ${nf.format(ls.deleted)} deleted${ls.failed ? ` · ${nf.format(ls.failed)} problem(s)` : ''}`
+          : 'Not synced yet',
+        'm-last',
+      ),
+    );
+    const sync = el('button', 'Sync now', 'btn small primary m-sync');
+    sync.type = 'button';
+    sync.addEventListener('click', () => syncMirror(m));
+    const open = el('button', 'Open on NAS', 'btn small m-open');
+    open.type = 'button';
+    open.addEventListener('click', () => navigate(m.nasPath));
+    const del = el('button', 'Remove', 'btn small ghost m-remove');
+    del.type = 'button';
+    del.addEventListener('click', async () => {
+      const ok = await dialog({ title: `Remove the mirror “${m.name}”?`, body: 'Only the shortcut is removed. Nothing is deleted on this computer or on the NAS.', okText: 'Remove' });
+      if (!ok) return;
+      await deleteMirror(m.id).catch(() => {});
+      await loadMirrors();
+    });
+    li.append(main, sync, open, del);
+    return li;
+  });
+  $('mirror-list').replaceChildren(...rows);
+}
+
+async function ensureReadPermission(handle) {
+  if (typeof handle.queryPermission !== 'function') return true;
+  let p = await handle.queryPermission({ mode: 'read' });
+  if (p !== 'granted') p = await handle.requestPermission({ mode: 'read' });
+  return p === 'granted';
+}
+
+async function syncMirror(m) {
+  try {
+    if (!(await ensureReadPermission(m.handle))) {
+      await dialog({ title: 'No access to the folder', body: `Chrome needs your permission to read “${m.name}”. Click Sync now again and choose Allow.`, noCancel: true });
+      return;
+    }
+  } catch (err) {
+    await dialog({ title: "Couldn't open the folder", body: `${err?.message || err}. If “${m.name}” was moved or deleted, remove this mirror and create it again.`, noCancel: true });
+    return;
+  }
+  await mirrorFolder({
+    name: m.name,
+    nasRoot: m.nasPath,
+    scanLocal: (opts) => scanDirectoryHandle(m.handle, opts),
+    options: { deletions: m.deletions, protectMetadata: m.protectMetadata, localKnowsEmptyDirs: true },
+    record: m,
+  });
+}
+
+async function newMirror() {
+  let handle;
+  try {
+    handle = await (state.pickDirectory ? state.pickDirectory() : window.showDirectoryPicker({ id: 'nas-mirror', mode: 'read' }));
+  } catch (err) {
+    if (err?.name !== 'AbortError') await dialog({ title: "Couldn't choose that folder", body: err?.message || String(err), noCancel: true });
+    return;
+  }
+  const field = el('label', 'Mirror into this folder on the NAS', 'field');
+  const pathInput = document.createElement('input');
+  pathInput.type = 'text';
+  pathInput.id = 'mirror-nas-path';
+  pathInput.spellcheck = false;
+  pathInput.value = joinPath(state.cwd, handle.name);
+  field.append(pathInput);
+  const mkCheck = (id, text, checked) => {
+    const label = el('label', undefined, 'check');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.id = id;
+    box.checked = checked;
+    label.append(box, document.createTextNode(' ' + text));
+    return { label, box };
+  };
+  const del = mkCheck('mirror-deletions', 'When I delete files here, delete them from the NAS too (you always see the list first)', true);
+  const prot = mkCheck('mirror-protect', 'Never delete artwork or metadata that only exists on the NAS (Jellyfin posters, .nfo files, trickplay)', true);
+  const ok = await dialog({
+    title: `New mirror: “${handle.name}”`,
+    bodyNodes: [el('p', `Keep a NAS folder identical to “${handle.name}” on this computer.`), field, del.label, prot.label],
+    okText: 'Create and sync',
+  });
+  if (!ok) return;
+  const nasPath = normalizePath(pathInput.value);
+  if (nasPath === '/') {
+    await dialog({ title: "Can't mirror to the top level", body: 'Type a folder on the NAS, for example ' + joinPath('/', handle.name), noCancel: true });
+    return;
+  }
+  const options = { deletions: del.box.checked, protectMetadata: prot.box.checked };
+  const rec = await rememberMirror(handle, handle.name, nasPath, options);
+  if (rec) await syncMirror(rec);
 }
 
 function wireDragAndDrop() {
@@ -487,7 +853,8 @@ function wireDragAndDrop() {
     overlay.hidden = true;
     if (!state.ready || !hasFiles(e) || $('dialog').open) return;
     const captured = captureDrop(e.dataTransfer); // must happen synchronously
-    startScan((opts) => scanEntries(captured, opts));
+    const handlePromise = captured.handlePromises.length === 1 ? captured.handlePromises[0] : null;
+    startScan((opts) => scanEntries(captured, opts), { handlePromise });
   });
 }
 
@@ -499,7 +866,7 @@ function wirePickers() {
       const files = Array.from(e.target.files || []);
       e.target.value = '';
       if (!files.length) return;
-      startScan(async (opts) => scanFileList(files, opts));
+      startScan(async (opts) => scanFileList(files, opts), { knowsEmptyDirs: id !== 'pick-folder' });
     });
   }
   $('btn-cancel-scan').addEventListener('click', () => state.scanning?.abort());
@@ -549,18 +916,19 @@ function renderTransfers() {
   if (!m) return;
   const s = m.stats();
   const panel = $('transfers');
-  const visible = s.files + s.dirs > 0;
+  const visible = s.files + s.dirs + s.moves + s.deletes > 0;
   panel.hidden = !visible;
   if (!visible) {
     document.title = 'NAS Uploader';
     return;
   }
-  const problems = s.failedFiles + s.dirsFailed;
+  const problems = s.failedFiles + s.dirsFailed + s.opsFailed;
   let title;
   let pstate = 'running';
+  const mirroring = m.batches.some((b) => b.kind === 'mirror');
   switch (s.state) {
     case 'running':
-      title = 'Uploading…';
+      title = m.activeTasks().some((t) => t.kind === 'delete') ? 'Removing files you deleted…' : mirroring ? 'Mirroring…' : 'Uploading…';
       break;
     case 'paused':
       title = m.connectionIssue
@@ -583,7 +951,9 @@ function renderTransfers() {
   panel.dataset.state = pstate;
 
   const doneish = s.doneBytes + s.inflightBytes;
-  const pct = s.totalBytes > 0 ? doneish / s.totalBytes : s.files ? s.doneFiles / s.files : s.dirs ? s.dirsDone / s.dirs : 1;
+  const ops = s.files + s.moves + s.deletes;
+  const opsDone = s.doneFiles + s.movesDone + s.deletesDone;
+  const pct = s.totalBytes > 0 ? doneish / s.totalBytes : ops ? opsDone / ops : s.dirs ? s.dirsDone / s.dirs : 1;
   $('tr-fill').style.width = `${Math.min(100, pct * 100).toFixed(1)}%`;
 
   let line = `${nf.format(s.doneFiles)} of ${nf.format(s.files)} files · ${formatBytes(doneish)} of ${formatBytes(s.totalBytes)}`;
@@ -594,6 +964,8 @@ function renderTransfers() {
   if (s.uploadedFiles) sub.push(`${nf.format(s.uploadedFiles)} uploaded (${formatBytes(s.uploadedBytes)})`);
   if (s.verifiedFiles) sub.push(`${nf.format(s.verifiedFiles)} double-checked on NAS`);
   if (s.skippedFiles) sub.push(`${nf.format(s.skippedFiles)} already on NAS, skipped`);
+  if (s.moves) sub.push(`${nf.format(s.movesDone)} of ${nf.format(s.moves)} renamed/moved on NAS`);
+  if (s.deletes) sub.push(`${nf.format(s.deletedFiles)} deleted from NAS`);
   if (s.dirs) sub.push(`${nf.format(s.dirsDone)} of ${nf.format(s.dirs)} empty folders created`);
   if (s.failedFiles) sub.push(`${nf.format(s.failedFiles)} failed`);
   if (s.cancelledFiles) sub.push(`${nf.format(s.cancelledFiles)} cancelled`);
@@ -603,18 +975,18 @@ function renderTransfers() {
   $('btn-pause').hidden = s.state !== 'running';
   $('btn-resume').hidden = s.state !== 'paused';
   $('btn-cancel').hidden = !m.busy;
-  const retryable = s.failedFiles + s.dirsFailed + (m.busy ? 0 : s.cancelledFiles);
+  const retryable = s.failedFiles + s.dirsFailed + s.opsFailed + (m.busy ? 0 : s.cancelledFiles);
   $('btn-retry').hidden = retryable === 0;
   $('btn-retry').textContent = `Retry ${nf.format(retryable)} failed`;
   $('btn-clear').hidden = m.busy;
 
   // Files in flight
-  const active = m.activeTasks().filter((t) => t.kind === 'file');
+  const active = m.activeTasks().filter((t) => t.kind !== 'dir');
   $('active-list').replaceChildren(
     ...active.map((t) => {
       const li = document.createElement('li');
       const name = el('div', '', 'name');
-      name.append(el('bdi', t.rel));
+      name.append(el('bdi', t.kind === 'delete' ? `🗑 ${t.rel}` : t.kind === 'move' && !t.fellBack ? `↪ ${t.rel}` : t.rel));
       name.title = t.rel;
       const right = el('div');
       const mini = el('div', undefined, 'mini');
@@ -712,6 +1084,7 @@ function wireUi() {
   $('btn-up').addEventListener('click', () => navigate(parentPath(state.cwd)));
   $('btn-refresh').addEventListener('click', refresh);
   $('btn-mkdir').addEventListener('click', newFolder);
+  $('btn-new-mirror').addEventListener('click', newMirror);
   $('btn-pause').addEventListener('click', () => state.manager.pause());
   $('btn-resume').addEventListener('click', () => state.manager.resume());
   $('btn-cancel').addEventListener('click', async () => {
@@ -787,6 +1160,7 @@ async function init() {
 
 // Exposed for automated tests and troubleshooting from DevTools.
 window.nasUploader = state;
+state.renderMirrors = () => renderMirrors();
 await loadPrefs();
 wireUi();
 await init();

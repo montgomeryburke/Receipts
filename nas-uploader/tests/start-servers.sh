@@ -6,6 +6,7 @@
 #   :18084  flaky proxy -> :18081 (injects 503s, dropped connections, 502s, permanent 403s)
 #   :18085  throttling proxy -> :18081 (slow uploads, for pause/resume/cancel tests)
 #   :18443  Apache mod_dav over HTTPS with a self-signed certificate (same data as :18081)
+#   :18446  HTTPS reverse proxy -> :18081 (like Tailscale Funnel; breaks Apache's MOVE unless fixed server-side)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DATA="${NAS_TEST_DATA:-/var/tmp/nas-uploader-test}"
@@ -116,9 +117,11 @@ nohup node "$HERE/proxy.cjs" --listen 18084 --target 18081 --mode flaky > "$DATA
 echo $! > "$DATA/proxy-flaky.pid"
 nohup node "$HERE/proxy.cjs" --listen 18085 --target 18081 --mode throttle --rate 3000000 > "$DATA/logs/proxy-throttle.log" 2>&1 &
 echo $! > "$DATA/proxy-throttle.pid"
+nohup node "$HERE/proxy.cjs" --listen 18446 --target 18081 --mode tls --cert "$DATA/cert.pem" --key "$DATA/key.pem" > "$DATA/logs/proxy-tls.log" 2>&1 &
+echo $! > "$DATA/proxy-tls.pid"
 
-for port in 18081 18082 18083 18084 18085 18443; do
-  scheme=http; [ "$port" = 18443 ] && scheme=https
+for port in 18081 18082 18083 18084 18085 18443 18446; do
+  scheme=http; { [ "$port" = 18443 ] || [ "$port" = 18446 ]; } && scheme=https
   for i in $(seq 1 50); do
     if curl -sk -o /dev/null "$scheme://127.0.0.1:$port/"; then break; fi
     sleep 0.2

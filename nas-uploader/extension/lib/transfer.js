@@ -1,14 +1,21 @@
-// Upload queue: parallel uploads, retries with back-off, pause/resume/cancel, skip-existing (resume) and verification.
+// Transfer queue: parallel uploads, server-side moves and deletions (for mirrors), retries with back-off,
+// pause/resume/cancel, skip-existing (resume) and verification.
 
 import { WebDAVError } from './webdav.js';
 import { joinPath, parentPath, baseName, normalizePath, sleep, waitForOnline } from './util.js';
 
 let nextId = 1;
 
+/** True when the NAS copy was written after the local file was last modified (HTTP dates have 1 s resolution). */
+export function remoteIsUpToDate(remoteModified, localMtime) {
+  if (!remoteModified || isNaN(remoteModified)) return true;
+  return remoteModified.getTime() >= Math.floor(localMtime / 1000) * 1000;
+}
+
 export class TransferManager extends EventTarget {
   /**
    * @param {import('./webdav.js').WebDAVClient} client
-   * @param {{concurrency?: number, skipExisting?: boolean, verify?: boolean, maxAttempts?: number, retryBaseMs?: number}} options
+   * @param {{concurrency?: number, skipExisting?: boolean, verify?: boolean, maxAttempts?: number, retryBaseMs?: number, autoResumeMs?: number}} options
    */
   constructor(client, options = {}) {
     super();
@@ -26,9 +33,14 @@ export class TransferManager extends EventTarget {
     this.queue = [];
     this.qi = 0;
     this.front = [];
+    this.deferred = []; // deletions: only run once every upload and move has finished
     this.active = new Set();
-    this.dirMemo = new Map();
-    this.knownDirs = new Set();
+    this.dirMemo = new Map(); // folder -> Promise<{created}>
+    this.listMemo = new Map(); // folder -> Promise<Map(name -> entry)>
+    this.knownDirs = new Set(); // folders known to exist
+    this.knownListings = new Map(); // folder -> Map(name -> entry), known without asking the NAS
+    this.createdDirs = new Set();
+    this.batches = []; // mirror batches, kept until the next fresh session
     this.session = new AbortController();
     this.sentBytes = 0;
     this.samples = [];
@@ -58,41 +70,41 @@ export class TransferManager extends EventTarget {
     return this.state === 'running' || this.state === 'paused' || this.state === 'verifying';
   }
 
+  startSessionIfIdle() {
+    if (this.busy) return;
+    // Start a fresh session, but keep earlier failures visible until the user clears them.
+    const keep = this.tasks.filter((t) => t.status === 'failed');
+    this.reset();
+    for (const t of keep) this.tasks.push(t);
+    this.startedAt = Date.now();
+  }
+
+  newTask(fields) {
+    const t = { id: nextId++, status: 'pending', loaded: 0, size: 0, error: null, note: null, ...fields };
+    this.tasks.push(t);
+    return t;
+  }
+
+  start() {
+    if (this.state !== 'paused') this.setState('running');
+    this.emit();
+    this.pump();
+  }
+
   /**
    * Queue a scanned batch for upload into destRoot.
    * @param {{files: {rel: string, file: File}[], dirs: string[]}} scan
    * @param {string} destRoot existing folder on the NAS
    */
   addBatch(scan, destRoot) {
-    if (!this.busy) {
-      // Start a fresh session, but keep earlier failures visible until the user clears them.
-      const keep = this.tasks.filter((t) => t.status === 'failed');
-      this.reset();
-      for (const t of keep) this.tasks.push(t);
-      this.startedAt = Date.now();
-    }
+    this.startSessionIfIdle();
     destRoot = normalizePath(destRoot);
     this.knownDirs.add(destRoot);
 
     const fileDirs = new Set();
     for (const { rel, file } of scan.files) {
       const destPath = joinPath(destRoot, rel);
-      const task = {
-        id: nextId++,
-        kind: 'file',
-        rel,
-        name: baseName(destPath),
-        destPath,
-        destDir: parentPath(destPath),
-        file,
-        size: file.size,
-        status: 'pending',
-        loaded: 0,
-        error: null,
-        note: null,
-        verified: false,
-      };
-      this.tasks.push(task);
+      const task = this.newTask({ kind: 'file', rel, name: baseName(destPath), destPath, destDir: parentPath(destPath), file, size: file.size, expectSize: file.size, verified: false });
       this.queue.push(task);
       for (let d = task.destDir; d !== '/' && !fileDirs.has(d); d = parentPath(d)) fileDirs.add(d);
     }
@@ -100,13 +112,109 @@ export class TransferManager extends EventTarget {
     for (const rel of scan.dirs) {
       const destPath = joinPath(destRoot, rel);
       if (fileDirs.has(destPath)) continue;
-      const task = { id: nextId++, kind: 'dir', rel: rel + '/', name: baseName(destPath), destPath, destDir: parentPath(destPath), size: 0, status: 'pending', loaded: 0, error: null, note: null };
-      this.tasks.push(task);
-      this.queue.push(task);
+      this.queue.push(this.newTask({ kind: 'dir', rel: rel + '/', name: baseName(destPath), destPath, destDir: parentPath(destPath) }));
     }
-    if (this.state !== 'paused') this.setState('running');
-    this.emit();
-    this.pump();
+    this.start();
+  }
+
+  /**
+   * Queue a mirror plan (from mirror.js planMirror) that makes the NAS folder `root` match the local folder.
+   * Uploads and moves run first; deletions run last, once everything else has finished.
+   * @returns {{kind: 'mirror', root: string, plan: object, remote: object, tasks: object[]}}
+   */
+  addMirror(plan, root, remote, extra = {}) {
+    this.startSessionIfIdle();
+    root = normalizePath(root);
+    const batch = { kind: 'mirror', root, plan, remote, tasks: [], ...extra };
+    const mk = (fields) => {
+      const t = this.newTask({ ...fields, batch });
+      batch.tasks.push(t);
+      return t;
+    };
+
+    // Seed what the listing already told us, so the queue doesn't have to ask the NAS again.
+    if (remote.exists) {
+      this.knownDirs.add(root);
+      const listings = new Map([[root, new Map()]]);
+      for (const d of remote.dirs.values()) {
+        const abs = joinPath(root, d.rel);
+        this.knownDirs.add(abs);
+        if (d.listed) listings.set(abs, new Map());
+      }
+      for (const d of remote.dirs.values()) {
+        const abs = joinPath(root, d.rel);
+        listings.get(parentPath(abs))?.set(baseName(abs), { name: baseName(abs), isDir: true });
+      }
+      for (const f of remote.files.values()) {
+        const abs = joinPath(root, f.rel);
+        listings.get(parentPath(abs))?.set(baseName(abs), { name: baseName(abs), isDir: false, size: f.size, modified: f.modified });
+      }
+      for (const [k, v] of listings) this.knownListings.set(k, v);
+    } else {
+      this.queue.push(mk({ kind: 'dir', rel: baseName(root) + '/', name: baseName(root), destPath: root, destDir: parentPath(root) }));
+    }
+
+    const fileDirs = new Set();
+    const noteDirs = (destDir) => {
+      for (let d = destDir; d !== '/' && !fileDirs.has(d); d = parentPath(d)) fileDirs.add(d);
+    };
+    for (const m of plan.moves) {
+      const to = joinPath(root, m.to);
+      const t = mk({
+        kind: 'move',
+        rel: m.to,
+        name: baseName(to),
+        from: joinPath(root, m.from),
+        destPath: to,
+        destDir: parentPath(to),
+        file: m.file,
+        expectSize: m.file.size,
+        verified: false,
+        mirrorRel: m.to,
+        mirrorFrom: m.from,
+        localSize: m.file.size,
+        localMtime: m.file.lastModified,
+      });
+      this.queue.push(t);
+      noteDirs(t.destDir);
+    }
+    for (const u of plan.uploads) {
+      const destPath = joinPath(root, u.rel);
+      const t = mk({
+        kind: 'file',
+        force: true,
+        reason: u.reason,
+        rel: u.rel,
+        name: baseName(destPath),
+        destPath,
+        destDir: parentPath(destPath),
+        file: u.file,
+        size: u.file.size,
+        expectSize: u.file.size,
+        verified: false,
+        mirrorRel: u.rel,
+        localSize: u.file.size,
+        localMtime: u.file.lastModified,
+      });
+      this.queue.push(t);
+      noteDirs(t.destDir);
+    }
+    for (const rel of plan.createDirs) {
+      const destPath = joinPath(root, rel);
+      if (fileDirs.has(destPath)) continue;
+      this.queue.push(mk({ kind: 'dir', rel: rel + '/', name: baseName(destPath), destPath, destDir: parentPath(destPath) }));
+    }
+    for (const d of plan.deleteDirs) {
+      const p = joinPath(root, d.rel);
+      this.deferred.push(mk({ kind: 'delete', dir: true, rel: d.rel + '/', name: baseName(p), destPath: p, destDir: parentPath(p), mirrorRel: d.rel, count: d.files }));
+    }
+    for (const d of plan.deletes) {
+      const p = joinPath(root, d.rel);
+      this.deferred.push(mk({ kind: 'delete', dir: false, rel: d.rel, name: baseName(p), destPath: p, destDir: parentPath(p), mirrorRel: d.rel, count: 1 }));
+    }
+    this.batches.push(batch);
+    this.start();
+    return batch;
   }
 
   // ---- queue mechanics ---------------------------------------------------
@@ -120,7 +228,7 @@ export class TransferManager extends EventTarget {
       const t = this.queue[this.qi++];
       if (t.status === 'pending') return t;
     }
-    // Compact the queue occasionally so it doesn't grow forever across retries.
+    // Compact the queue so it doesn't grow forever across retries.
     if (this.qi > 0) {
       this.queue = [];
       this.qi = 0;
@@ -134,15 +242,25 @@ export class TransferManager extends EventTarget {
 
   pump() {
     if (this.state !== 'running') return;
-    while (this.active.size < this.options.concurrency) {
-      const task = this.nextPending();
-      if (!task) break;
-      this.runTask(task);
+    for (;;) {
+      while (this.active.size < this.options.concurrency) {
+        const task = this.nextPending();
+        if (!task) break;
+        this.runTask(task);
+      }
+      if (this.active.size === 0 && !this.hasPending()) {
+        if (this.deferred.length) {
+          for (const t of this.deferred) this.queue.push(t);
+          this.deferred = [];
+          continue;
+        }
+        this.finishRun();
+      }
+      return;
     }
-    if (this.active.size === 0 && !this.hasPending()) this.finishRun();
   }
 
-  async retry(fn, { signal, onRetry } = {}) {
+  async retry(fn, { signal, onRetry, retryIf = (err) => err?.retryable } = {}) {
     let attempt = 0;
     for (;;) {
       attempt++;
@@ -150,7 +268,7 @@ export class TransferManager extends EventTarget {
         return await fn();
       } catch (err) {
         if (err?.aborted || signal?.aborted) throw err;
-        if (!err?.retryable || attempt >= this.options.maxAttempts) throw err;
+        if (!retryIf(err) || attempt >= this.options.maxAttempts) throw err;
         if (!navigator.onLine) {
           onRetry?.(err, attempt, 0, true);
           await waitForOnline(signal);
@@ -163,7 +281,7 @@ export class TransferManager extends EventTarget {
     }
   }
 
-  /** Make sure a folder exists; returns {created, listing} where listing maps child name -> entry (if known). */
+  /** Make sure a folder exists on the NAS; resolves to {created}. */
   prepareDir(dir) {
     dir = normalizePath(dir);
     let p = this.dirMemo.get(dir);
@@ -179,25 +297,62 @@ export class TransferManager extends EventTarget {
 
   async _prepareDir(dir) {
     const signal = this.session.signal;
-    let exists;
-    if (dir === '/' || this.knownDirs.has(dir)) {
-      exists = true;
-    } else {
-      const parent = await this.prepareDir(parentPath(dir));
-      if (parent.created) exists = false;
-      else if (parent.listing) {
-        const e = parent.listing.get(baseName(dir));
-        if (e && !e.isDir) throw new WebDAVError(`A file named "${baseName(dir)}" already exists on the NAS where a folder is needed`);
-        exists = !!e;
-      }
+    if (dir === '/' || this.knownDirs.has(dir)) return { created: false };
+    const parentDir = parentPath(dir);
+    const parent = await this.prepareDir(parentDir);
+    if (!parent.created) {
+      // If we know (or are going to fetch anyway) what the parent holds, skip asking to create existing folders.
+      const listing = this.knownListings.get(parentDir) || (this.options.skipExisting ? await this.listDir(parentDir) : null);
+      const e = listing?.get(baseName(dir));
+      if (e && !e.isDir) throw new WebDAVError(`A file named "${baseName(dir)}" already exists on the NAS where a folder is needed`);
+      if (e) return { created: false };
     }
-    if (exists !== true) {
-      const r = await this.retry(() => this.client.mkdir(dir, { signal }), { signal });
-      if (r === 'created') return { created: true, listing: new Map() };
+    const r = await this.retry(() => this.client.mkdir(dir, { signal }), { signal });
+    if (r === 'created') {
+      this.createdDirs.add(dir);
+      return { created: true };
     }
-    if (!this.options.skipExisting) return { created: false, listing: null };
-    const entries = await this.retry(() => this.client.list(dir, { signal }), { signal });
-    return { created: false, listing: new Map(entries.map((e) => [e.name, e])) };
+    return { created: false };
+  }
+
+  /** Children of a NAS folder (memoised; folders created in this session are known to be empty). */
+  listDir(dir) {
+    dir = normalizePath(dir);
+    if (this.knownListings.has(dir)) return Promise.resolve(this.knownListings.get(dir));
+    if (this.createdDirs.has(dir)) return Promise.resolve(new Map());
+    let p = this.listMemo.get(dir);
+    if (!p) {
+      const signal = this.session.signal;
+      p = this.retry(() => this.client.list(dir, { signal }), { signal }).then((entries) => new Map(entries.map((e) => [e.name, e])));
+      this.listMemo.set(dir, p);
+      p.catch(() => {
+        if (this.listMemo.get(dir) === p) this.listMemo.delete(dir);
+      });
+    }
+    return p;
+  }
+
+  uploadTask(task, signal) {
+    return this.retry(
+      () => {
+        task.loaded = 0;
+        return this.client.upload(task.destPath, task.file, {
+          signal,
+          onProgress: (loaded) => {
+            const delta = loaded - task.loaded;
+            if (delta > 0) this.sentBytes += delta;
+            task.loaded = loaded;
+          },
+        });
+      },
+      {
+        signal,
+        onRetry: (err, attempt, delay, offline) => {
+          task.note = offline ? 'Waiting for internet connection…' : `Retry ${attempt}/${this.options.maxAttempts - 1} in ${Math.round(delay / 1000)}s — ${err.message}`;
+          this.emit();
+        },
+      },
+    );
   }
 
   async runTask(task) {
@@ -212,44 +367,64 @@ export class TransferManager extends EventTarget {
     session.signal.addEventListener('abort', onSessionAbort, { once: true });
     this.active.add(task);
     const signal = task.controller.signal;
+    const aborted = () => new WebDAVError('Cancelled', { aborted: true });
     try {
       if (task.kind === 'dir') {
         await this.prepareDir(task.destPath);
         task.status = 'done';
-        return;
-      }
-      const dirInfo = await this.prepareDir(task.destDir);
-      if (signal.aborted) throw new WebDAVError('Cancelled', { aborted: true });
-      if (this.options.skipExisting && dirInfo.listing) {
-        const existing = dirInfo.listing.get(task.name);
-        if (existing && !existing.isDir && existing.size === task.size) {
-          task.status = 'skipped';
-          return;
-        }
-        if (existing && existing.isDir) throw new WebDAVError(`A folder named "${task.name}" already exists on the NAS where this file should go`);
-      }
-      await this.retry(
-        () => {
-          task.loaded = 0;
-          return this.client.upload(task.destPath, task.file, {
+      } else if (task.kind === 'delete') {
+        await this.retry(() => this.client.remove(task.destPath, { dir: task.dir, ignoreMissing: true, signal }), { signal });
+        task.status = 'done';
+      } else if (task.kind === 'move') {
+        await this.prepareDir(task.destDir);
+        if (signal.aborted) throw aborted();
+        try {
+          // A refused move (e.g. 502 "Destination refers to a different scheme" behind a proxy) won't succeed on
+          // retry; only connection trouble and "busy" answers are worth retrying before falling back.
+          await this.retry(() => this.client.move(task.from, task.destPath, { signal }), {
             signal,
-            onProgress: (loaded) => {
-              const delta = loaded - task.loaded;
-              if (delta > 0) this.sentBytes += delta;
-              task.loaded = loaded;
-            },
+            retryIf: (e) => e?.status === 0 || e?.status === 503 || e?.status === 429,
           });
-        },
-        {
-          signal,
-          onRetry: (err, attempt, delay, offline) => {
-            task.note = offline ? 'Waiting for internet connection…' : `Retry ${attempt}/${this.options.maxAttempts - 1} in ${Math.round(delay / 1000)}s — ${err.message}`;
-            this.emit();
-          },
-        },
-      );
-      task.status = 'done';
-      task.verified = false;
+        } catch (err) {
+          if (err?.aborted || signal.aborted || err?.status === 0) throw err;
+          // The NAS refused the server-side move (some do behind proxies): send the file instead, then remove
+          // the old copy along with the other deletions.
+          task.fellBack = true;
+          task.size = task.file.size;
+          task.note = 'The NAS could not move it, uploading instead…';
+          this.emit();
+          await this.uploadTask(task, signal);
+          const old = this.newTask({
+            kind: 'delete',
+            dir: false,
+            rel: task.mirrorFrom || task.from,
+            name: baseName(task.from),
+            destPath: task.from,
+            destDir: parentPath(task.from),
+            batch: task.batch,
+            mirrorRel: task.mirrorFrom,
+            count: 1,
+          });
+          task.batch?.tasks.push(old);
+          this.deferred.push(old);
+        }
+        task.status = 'done';
+      } else {
+        const dirInfo = await this.prepareDir(task.destDir);
+        if (signal.aborted) throw aborted();
+        if (!task.force && this.options.skipExisting) {
+          const listing = dirInfo.created ? null : await this.listDir(task.destDir);
+          const existing = listing?.get(task.name);
+          if (existing && existing.isDir) throw new WebDAVError(`A folder named "${task.name}" already exists on the NAS where this file should go`);
+          if (existing && existing.size === task.size && remoteIsUpToDate(existing.modified, task.file.lastModified)) {
+            task.status = 'skipped';
+            return;
+          }
+        }
+        await this.uploadTask(task, signal);
+        task.status = 'done';
+        task.verified = false;
+      }
     } catch (err) {
       if (task.pauseRequested) {
         task.status = 'pending';
@@ -258,9 +433,10 @@ export class TransferManager extends EventTarget {
         task.status = 'cancelled';
       } else if (err?.retryable && err.status === 0 && (task.netRounds = (task.netRounds || 0) + 1) < 3) {
         // The NAS stayed unreachable through every retry. Don't burn through the whole queue marking files as
-        // failed: put this file at the back, pause, and try again automatically in a minute.
+        // failed: put this one at the back, pause, and try again automatically in a minute.
         task.status = 'pending';
-        this.queue.push(task);
+        if (task.kind === 'delete') this.deferred.push(task);
+        else this.queue.push(task);
         this.connectionLost(err);
       } else {
         task.status = 'failed';
@@ -282,7 +458,7 @@ export class TransferManager extends EventTarget {
   async finishRun() {
     if (this.state !== 'running' || this.verifying) return;
     if (this.options.verify) {
-      const toVerify = this.tasks.filter((t) => t.kind === 'file' && t.status === 'done' && !t.verified);
+      const toVerify = this.tasks.filter((t) => (t.kind === 'file' || t.kind === 'move') && t.status === 'done' && !t.verified);
       if (toVerify.length) {
         this.verifying = true;
         this.setState('verifying');
@@ -300,9 +476,15 @@ export class TransferManager extends EventTarget {
     }
     this.finishedAt = Date.now();
     this.setState('done');
+    this.settled();
   }
 
-  /** Re-list every folder we uploaded into and confirm each file is there with the right size. */
+  /** Tell listeners (mirror bookkeeping) that a run has ended, successfully or not. */
+  settled() {
+    this.dispatchEvent(new CustomEvent('settled', { detail: { batches: this.batches.slice() } }));
+  }
+
+  /** Re-list every folder we wrote into and confirm each file is there with the right size. */
   async verify(tasks) {
     const byDir = new Map();
     for (const t of tasks) {
@@ -322,12 +504,13 @@ export class TransferManager extends EventTarget {
           const map = new Map(entries.map((e) => [e.name, e]));
           for (const t of group) {
             const e = map.get(t.name);
+            const expected = t.expectSize ?? t.size;
             if (!e || e.isDir) {
               t.status = 'failed';
-              t.error = 'Verification failed: file is missing on the NAS after upload';
-            } else if (e.size !== null && e.size !== t.size) {
+              t.error = 'Verification failed: file is missing on the NAS afterwards';
+            } else if (e.size !== null && e.size !== expected) {
               t.status = 'failed';
-              t.error = `Verification failed: NAS has ${e.size} bytes, expected ${t.size}`;
+              t.error = `Verification failed: NAS has ${e.size} bytes, expected ${expected}`;
             } else {
               t.verified = true;
               t.file = null;
@@ -374,7 +557,7 @@ export class TransferManager extends EventTarget {
     this.clearConnectionIssue();
     this.setState('paused');
     for (const t of this.active) {
-      if (t.kind === 'file') {
+      if (t.kind === 'file' || (t.kind === 'move' && t.fellBack)) {
         t.pauseRequested = true;
         t.controller?.abort();
       }
@@ -396,10 +579,13 @@ export class TransferManager extends EventTarget {
     this.front = [];
     this.queue = [];
     this.qi = 0;
+    this.deferred = [];
     this.finishedAt = Date.now();
     this.setState('cancelled');
     this.session = new AbortController();
     this.dirMemo.clear();
+    this.listMemo.clear();
+    this.settled();
   }
 
   retryFailed() {
@@ -408,19 +594,20 @@ export class TransferManager extends EventTarget {
     if (!this.busy) {
       this.session = new AbortController();
       this.dirMemo.clear();
+      this.listMemo.clear();
       this.sentBytes = 0;
       this.samples = [];
       this.startedAt = Date.now();
     }
     for (const t of failed) {
-      if (t.kind === 'file' && !t.file) continue;
+      if ((t.kind === 'file' || t.kind === 'move') && !t.file) continue;
       t.status = 'pending';
       t.error = null;
       t.verified = false;
-      this.queue.push(t);
+      if (t.kind === 'delete') this.deferred.push(t);
+      else this.queue.push(t);
     }
-    if (this.state !== 'paused') this.setState('running');
-    this.pump();
+    this.start();
   }
 
   clearFinished() {
@@ -450,12 +637,43 @@ export class TransferManager extends EventTarget {
       pendingFiles: 0,
       dirsDone: 0,
       dirsFailed: 0,
+      moves: 0,
+      movesDone: 0,
+      movesFellBack: 0,
+      deletes: 0,
+      deletesDone: 0,
+      deletedFiles: 0,
+      opsFailed: 0,
+      opsPending: 0,
     };
     for (const t of this.tasks) {
       if (t.kind === 'dir') {
         s.dirs++;
         if (t.status === 'done') s.dirsDone++;
         if (t.status === 'failed') s.dirsFailed++;
+        continue;
+      }
+      if (t.kind === 'delete' || t.kind === 'move') {
+        const isMove = t.kind === 'move';
+        if (isMove) s.moves++;
+        else s.deletes++;
+        if (t.status === 'done') {
+          if (isMove) {
+            s.movesDone++;
+            if (t.fellBack) s.movesFellBack++;
+            if (t.verified) s.verifiedFiles++;
+          } else {
+            s.deletesDone++;
+            s.deletedFiles += t.count || 1;
+          }
+        } else if (t.status === 'failed') s.opsFailed++;
+        else if (t.status === 'cancelled') s.cancelledFiles++;
+        else s.opsPending++;
+        if (isMove && t.fellBack) {
+          s.totalBytes += t.size;
+          if (t.status === 'done') s.doneBytes += t.size;
+          if (t.status === 'active') s.inflightBytes += t.loaded;
+        }
         continue;
       }
       s.files++;

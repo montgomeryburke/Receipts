@@ -209,14 +209,16 @@ export class WebDAVClient {
     return entries;
   }
 
-  async propfind(path, depth, opts = {}) {
+  async propfind(path, depth, { dir, ...opts } = {}) {
     const body =
       '<?xml version="1.0" encoding="utf-8"?>' +
       '<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>';
     const res = await this.request('PROPFIND', path, {
       headers: { Depth: String(depth), 'Content-Type': 'application/xml; charset=utf-8' },
       body,
-      dir: depth > 0,
+      // Folders are always addressed with a trailing slash: otherwise many servers answer with a redirect,
+      // which breaks behind HTTPS reverse proxies (the redirect points at http://).
+      dir: dir ?? depth > 0,
       okStatuses: [207, 200],
       timeout: 300000, // listings of huge folders can be large
       ...opts,
@@ -231,11 +233,11 @@ export class WebDAVClient {
     return entries.filter((e) => e.path !== target && e.name);
   }
 
-  /** Info about a single path, or null if it does not exist. */
+  /** Info about a single path, or null if it does not exist. Pass {dir: true} when it should be a folder. */
   async stat(path, opts) {
     try {
       const entries = await this.propfind(normalizePath(path), 0, opts);
-      return entries[0] || null;
+      return entries.find((e) => e.path === normalizePath(path)) || entries[0] || null;
     } catch (err) {
       if (err.status === 404) return null;
       throw err;
@@ -252,7 +254,7 @@ export class WebDAVClient {
     } catch (err) {
       if (err.aborted || err.retryable || err.status === 401 || err.status === 507) throw err;
       // 405 (exists) is the normal answer for an existing folder; some servers use 301/302/409/403. Check.
-      const info = await this.stat(p, opts).catch(() => null);
+      const info = (await this.stat(p, { ...opts, dir: true }).catch(() => null)) || (await this.stat(p, opts).catch(() => null));
       if (info && info.isDir) return 'exists';
       if (info && !info.isDir) {
         throw new WebDAVError(`A file named "${baseName(p)}" already exists where a folder is needed`, { status: err.status });
@@ -269,9 +271,37 @@ export class WebDAVClient {
     return this.request('PUT', path, { headers, body: file, timeout: 0, signal, onUploadProgress: onProgress });
   }
 
-  async remove(path, { dir = false, ...opts } = {}) {
+  async remove(path, { dir = false, ignoreMissing = false, ...opts } = {}) {
     const p = normalizePath(path);
     if (p === '/') throw new WebDAVError('Refusing to delete the root folder');
-    await this.request('DELETE', p, { dir, ...opts });
+    try {
+      await this.request('DELETE', p, { dir, ...opts });
+    } catch (err) {
+      if (ignoreMissing && err.status === 404) return;
+      throw err;
+    }
+  }
+
+  /** Server-side rename/move. Never overwrites: fails with 412 if the destination exists. */
+  async move(from, to, { dir = false, ...opts } = {}) {
+    const src = normalizePath(from);
+    const dst = normalizePath(to);
+    if (src === '/' || dst === '/') throw new WebDAVError('Refusing to move the root folder');
+    await this.request('MOVE', src, { dir, headers: { Destination: this.url(dst, { dir }), Overwrite: 'F' }, ...opts });
+  }
+
+  /** Read a small text file; resolves to null if it does not exist. */
+  async getText(path, opts) {
+    try {
+      const res = await this.request('GET', normalizePath(path), { headers: { 'Cache-Control': 'no-cache' }, ...opts });
+      return res.text;
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  putText(path, text, { contentType = 'application/json; charset=utf-8', ...opts } = {}) {
+    return this.request('PUT', normalizePath(path), { headers: { 'Content-Type': contentType }, body: text, ...opts });
   }
 }

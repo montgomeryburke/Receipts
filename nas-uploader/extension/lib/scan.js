@@ -8,10 +8,18 @@ import { isJunkDir, isJunkFile } from './util.js';
 export function captureDrop(dataTransfer) {
   const entries = [];
   const looseFiles = [];
+  const handlePromises = []; // FileSystemHandles, so a dropped folder can be remembered for one-click mirroring
   const items = dataTransfer.items ? Array.from(dataTransfer.items) : [];
   if (items.length) {
     for (const item of items) {
       if (item.kind !== 'file') continue;
+      if (typeof item.getAsFileSystemHandle === 'function') {
+        try {
+          const p = item.getAsFileSystemHandle();
+          p.catch(() => {});
+          handlePromises.push(p);
+        } catch {}
+      }
       const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
       if (entry) entries.push(entry);
       else {
@@ -22,7 +30,7 @@ export function captureDrop(dataTransfer) {
   } else if (dataTransfer.files) {
     looseFiles.push(...Array.from(dataTransfer.files));
   }
-  return { entries, looseFiles };
+  return { entries, looseFiles, handlePromises };
 }
 
 function readBatch(reader) {
@@ -156,4 +164,89 @@ export function scanFileList(fileList, { skipJunk = true } = {}) {
   }
   out.dirs = [...dirs].sort();
   return out;
+}
+
+/**
+ * Walk a folder chosen with the folder picker or remembered from an earlier mirror (FileSystemDirectoryHandle).
+ * Paths are relative to that folder (its own name is not included). Empty folders are kept.
+ */
+export async function scanDirectoryHandle(rootHandle, { skipJunk = true, onProgress, signal } = {}) {
+  const out = newResult();
+  let lastReport = 0;
+  const report = (force) => {
+    const now = Date.now();
+    if (onProgress && (force || now - lastReport > 200)) {
+      lastReport = now;
+      onProgress({ files: out.files.length, dirs: out.dirs.length, bytes: out.totalBytes });
+    }
+  };
+  const stack = [{ handle: rootHandle, prefix: '' }];
+  while (stack.length) {
+    if (signal?.aborted) throw new DOMException('Scan cancelled', 'AbortError');
+    const { handle, prefix } = stack.pop();
+    const children = [];
+    try {
+      for await (const child of handle.values()) children.push(child);
+    } catch (err) {
+      out.errors.push({ rel: prefix || './', message: 'Could not read folder: ' + errMsg(err) });
+      continue;
+    }
+    children.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const fileChildren = [];
+    for (const c of children) {
+      if (c.kind !== 'file') continue;
+      if (skipJunk && isJunkFile(c.name)) out.skippedJunk++;
+      else fileChildren.push(c);
+    }
+    for (let i = 0; i < fileChildren.length; i += 64) {
+      if (signal?.aborted) throw new DOMException('Scan cancelled', 'AbortError');
+      const chunk = fileChildren.slice(i, i + 64);
+      const results = await Promise.allSettled(chunk.map((c) => c.getFile()));
+      results.forEach((r, j) => {
+        const rel = prefix + chunk[j].name;
+        if (r.status === 'fulfilled') {
+          out.files.push({ rel, file: r.value });
+          out.totalBytes += r.value.size;
+        } else out.errors.push({ rel, message: 'Could not read file: ' + errMsg(r.reason) });
+      });
+      report();
+    }
+    const dirChildren = children.filter((c) => c.kind === 'directory');
+    for (let i = dirChildren.length - 1; i >= 0; i--) {
+      const d = dirChildren[i];
+      if (skipJunk && isJunkDir(d.name)) {
+        out.skippedJunk++;
+        continue;
+      }
+      out.dirs.push(prefix + d.name);
+      stack.push({ handle: d, prefix: prefix + d.name + '/' });
+    }
+  }
+  out.dirs.sort();
+  report(true);
+  return out;
+}
+
+/** Make scan results relative to their single top-level folder ("Photos/2024/a.jpg" -> "2024/a.jpg"). */
+export function stripTopFolder(result) {
+  const top = result.files[0]?.rel.split('/')[0] ?? result.dirs[0]?.split('/')[0];
+  const strip = (p) => p.slice(top.length + 1);
+  return {
+    ...result,
+    top,
+    files: result.files.map((f) => ({ ...f, rel: strip(f.rel) })),
+    dirs: result.dirs.filter((d) => d !== top).map(strip),
+    errors: result.errors.map((e) => ({ ...e, rel: e.rel === top + '/' || e.rel === top ? './' : e.rel.startsWith(top + '/') ? strip(e.rel) : e.rel })),
+  };
+}
+
+/** The single folder a scan result consists of, or null if it has loose files or several folders. */
+export function singleTopFolder(result) {
+  const tops = new Set();
+  for (const f of result.files) {
+    if (!f.rel.includes('/')) return null;
+    tops.add(f.rel.split('/')[0]);
+  }
+  for (const d of result.dirs) tops.add(d.split('/')[0]);
+  return tops.size === 1 ? [...tops][0] : null;
 }

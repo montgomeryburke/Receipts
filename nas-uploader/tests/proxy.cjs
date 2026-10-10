@@ -2,6 +2,8 @@
 //   --mode flaky     : first attempt of some PUTs gets a 503 or a dropped connection; some PROPFINDs get a 502;
 //                      any PUT whose path contains "FORBIDDEN" always gets a 403.
 //   --mode throttle  : passes everything through but limits upload speed (--rate bytes/sec).
+//   --mode tls       : HTTPS in front of a plain-HTTP server (--cert/--key), like Tailscale Funnel or any
+//                      TLS-terminating reverse proxy. Headers (including WebDAV's Destination) pass unchanged.
 // Usage: node proxy.cjs --listen 18084 --target 18081 --mode flaky
 const http = require('http');
 
@@ -27,7 +29,11 @@ function forward(req, res, bodySource) {
     res.writeHead(upRes.statusCode, upRes.headers);
     upRes.pipe(res);
   });
-  up.on('error', () => res.destroy());
+  // If the server already answered (e.g. a 404 sent before reading the request body) and then hung up, let that
+  // answer reach the browser instead of tearing it down, as real reverse proxies do.
+  up.on('error', () => {
+    if (!res.headersSent) res.destroy();
+  });
   // If the browser aborts the upload, abort the upstream request too (like a direct connection would),
   // so the WebDAV server discards the partial file instead of waiting for the rest of the body.
   req.on('close', () => {
@@ -84,7 +90,7 @@ function throttled(req) {
   return out;
 }
 
-const server = http.createServer((req, res) => {
+const handler = (req, res) => {
   if (req.url === '/__proxy_stats') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(stats));
@@ -150,5 +156,9 @@ const server = http.createServer((req, res) => {
     return;
   }
   forward(req, res, req);
-});
+};
+const server =
+  MODE === 'tls'
+    ? require('https').createServer({ cert: require('fs').readFileSync(args.cert), key: require('fs').readFileSync(args.key) }, handler)
+    : http.createServer(handler);
 server.listen(LISTEN, '127.0.0.1', () => console.log(`proxy ${MODE} :${LISTEN} -> :${TARGET}`));

@@ -48,7 +48,7 @@ const log = (...a) => console.log('   ', ...a);
 const browsers = [];
 let extCounter = 0;
 
-async function launch(config, { colorScheme } = {}) {
+async function launch(config, { colorScheme, ignoreHTTPSErrors = false } = {}) {
   const name = `${++extCounter}`;
   const ext = path.join(WORK, 'ext-' + name);
   fs.rmSync(ext, { recursive: true, force: true });
@@ -61,6 +61,7 @@ async function launch(config, { colorScheme } = {}) {
     headless: !process.env.HEADED,
     viewport: { width: 1280, height: 860 },
     colorScheme,
+    ignoreHTTPSErrors,
     acceptDownloads: true,
     // Real desktops use a Unicode locale; without one Chromium on Linux cannot read non-ASCII file names.
     env: { ...process.env, LANG: 'C.UTF-8' },
@@ -178,7 +179,7 @@ function sha256(file) {
 }
 
 /** Byte-for-byte comparison of a local tree with what landed on the server. */
-async function assertSameTree(src, dst, { ignoreEmptyDirs = false, exclude = [] } = {}) {
+async function assertSameTree(src, dst, { ignoreEmptyDirs = false, exclude = [], ignoreRemote = () => false } = {}) {
   assert(fs.existsSync(dst), `destination ${dst} exists`);
   const a = walk(src);
   // Apache writes uploads to .davfs.tmp* files and deletes them as soon as an aborted upload's connection
@@ -191,7 +192,7 @@ async function assertSameTree(src, dst, { ignoreEmptyDirs = false, exclude = [] 
   }
   for (const x of exclude) a.files.delete(x);
   const missing = [...a.files.keys()].filter((k) => !b.files.has(k));
-  const extra = [...b.files.keys()].filter((k) => !a.files.has(k));
+  const extra = [...b.files.keys()].filter((k) => !a.files.has(k) && !ignoreRemote(k));
   assert(missing.length === 0, `files missing on NAS: ${missing.slice(0, 10).join(', ')}`);
   assert(extra.length === 0, `unexpected files on NAS: ${extra.slice(0, 10).join(', ')}`);
   if (!ignoreEmptyDirs) {
@@ -242,6 +243,37 @@ function proxyStats(port) {
 
 async function shot(page, name) {
   await page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage: true });
+}
+
+
+// ---- mirror helpers ---------------------------------------------------------
+const MANIFEST = '.nas-uploader-mirror.json';
+const ACCESS_LOG = path.join(DATA, 'logs', 'apache-access.log');
+const logMark = () => (fs.existsSync(ACCESS_LOG) ? fs.readFileSync(ACCESS_LOG, 'utf8').split('\n').length - 1 : 0);
+const logSince = (mark) => fs.readFileSync(ACCESS_LOG, 'utf8').split('\n').slice(mark).filter(Boolean);
+
+function writeFileAt(p, data, mtime) {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, data);
+  if (mtime) fs.utimesSync(p, mtime, mtime);
+}
+
+/** Drop a folder, choose "Mirror…", and return the review (or "Already in sync") dialog's title and text. */
+async function dropAndMirror(page, folder) {
+  page.__run = await currentRun(page);
+  await drop(page, [folder]);
+  await page.waitForSelector('dialog[open] #dialog-alt:not([hidden])', { timeout: 60000 });
+  await page.click('#dialog-alt');
+  return readMirrorDialog(page);
+}
+
+async function readMirrorDialog(page) {
+  await page.waitForFunction(() => {
+    const d = document.getElementById('dialog');
+    const title = document.getElementById('dialog-title').textContent;
+    return d.open && /^(Mirror: review the changes|Already in sync|Couldn't)/.test(title);
+  }, null, { timeout: 120000 });
+  return { title: await page.textContent('#dialog-title'), text: await page.textContent('#dialog-body') };
 }
 
 const full = path.join(DS, 'full', 'Project Archive');
@@ -733,6 +765,423 @@ test('dropping a folder and loose files together, and dropping more while an upl
   await assertSameTree(media, path.join(SERVERS.apache.root, 'queue-test', 'Media Set'));
   await assertSameTree(small, path.join(SERVERS.apache.root, 'queue-test', 'Small Set'));
   eq(await sha256(path.join(SERVERS.apache.root, 'queue-test', 'single file.pdf')), await sha256(looseFile), 'loose file');
+  eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+});
+
+
+// ---- mirror -------------------------------------------------------------------
+
+test('unit: mirror planning (changes, renames, deletions, Jellyfin metadata, safety checks)', async () => {
+  const { page, errors } = await launch(null);
+  const r = await page.evaluate(async () => {
+    const { planMirror, buildManifest, isProtectedName } = await import('./lib/mirror.js');
+    const out = [];
+    const check = (name, got, want) => out.push({ name, ok: JSON.stringify(got) === JSON.stringify(want), got, want });
+    const T0 = Date.UTC(2026, 0, 1);
+    const f = (name, size, mtime) => new File([new Uint8Array(size)], name, { lastModified: mtime });
+    const remoteOf = (files, dirs = []) => ({
+      exists: true,
+      files: new Map(files.map(([rel, size, modified]) => [rel.normalize('NFC'), { rel, size, modified: new Date(modified) }])),
+      dirs: new Map(dirs.map((d) => [d.normalize('NFC'), { rel: d, listed: true }])),
+    });
+    const BIG = 300 * 1024;
+
+    // 1. First sync of an existing NAS copy (no manifest): same size + written after local change = unchanged.
+    let p = planMirror({
+      local: { files: [{ rel: 'a.txt', file: f('a.txt', 5, T0) }, { rel: 'b.txt', file: f('b.txt', 5, T0 + 60000) }, { rel: 'c.txt', file: f('c.txt', 7, T0) }], dirs: [] },
+      remote: remoteOf([['a.txt', 5, T0 + 1000], ['b.txt', 5, T0 + 1000], ['c.txt', 6, T0 + 1000]]),
+      manifest: null,
+    });
+    check('first sync: unchanged / changed', [p.unchanged.map((u) => u.key), p.uploads.map((u) => [u.rel, u.reason])], [['a.txt'], [['b.txt', 'changed'], ['c.txt', 'changed']]]);
+
+    // 2. With a manifest: same size but different local mtime = changed; rename detected via size+mtime.
+    const manifest = { version: 1, files: { 'x.txt': { size: 4, mtime: T0 }, 'old name.mkv': { size: BIG, mtime: T0 + 5 }, 'gone.txt': { size: 1, mtime: T0 } } };
+    p = planMirror({
+      local: { files: [{ rel: 'x.txt', file: f('x.txt', 4, T0 + 99) }, { rel: 'new name.mkv', file: f('new name.mkv', BIG, T0 + 5) }], dirs: [] },
+      remote: remoteOf([['x.txt', 4, T0], ['old name.mkv', BIG, T0], ['gone.txt', 1, T0]]),
+      manifest,
+    });
+    check('manifest: same-size edit is changed', p.uploads.map((u) => [u.rel, u.reason]), [['x.txt', 'changed']]);
+    check('manifest: rename becomes a move', p.moves.map((m) => [m.from, m.to]), [['old name.mkv', 'new name.mkv']]);
+    check('manifest: deleted file is deleted', p.deletes.map((d) => d.rel), ['gone.txt']);
+
+    // 3. Ambiguous rename candidates (two identical signatures) are uploaded, not guessed.
+    p = planMirror({
+      local: { files: [{ rel: 'n1.bin', file: f('n1.bin', BIG, T0) }, { rel: 'n2.bin', file: f('n2.bin', BIG, T0) }], dirs: [] },
+      remote: remoteOf([['o1.bin', BIG, T0], ['o2.bin', BIG, T0]]),
+      manifest: { version: 1, files: { 'o1.bin': { size: BIG, mtime: T0 }, 'o2.bin': { size: BIG, mtime: T0 } } },
+    });
+    check('ambiguous renames are uploaded', [p.moves.length, p.uploads.length, p.deletes.length], [0, 2, 2]);
+
+    // 4. Jellyfin metadata on the NAS only is kept; a stray file is deleted; whole folders deleted top-most only.
+    p = planMirror({
+      local: { files: [{ rel: 'Movies/Film/Film.mkv', file: f('Film.mkv', 10, T0) }], dirs: ['Movies', 'Movies/Film'] },
+      remote: remoteOf(
+        [
+          ['Movies/Film/Film.mkv', 10, T0 + 1000],
+          ['Movies/Film/poster.jpg', 1, T0],
+          ['Movies/Film/movie.nfo', 1, T0],
+          ['Movies/Film/Film-fanart.jpg', 1, T0],
+          ['Movies/Film/Film.trickplay/320 - 10x10/0.jpg', 1, T0],
+          ['Movies/Film/stray.txt', 1, T0],
+          ['Movies/Old/Old.mkv', 1, T0],
+          ['Movies/Old/sub/x.srt', 1, T0],
+          ['.nas-uploader-mirror.json', 1, T0],
+          ['Movies/Film/.davfs.tmp123', 1, T0],
+        ],
+        ['Movies', 'Movies/Film', 'Movies/Film/Film.trickplay', 'Movies/Film/Film.trickplay/320 - 10x10', 'Movies/Old', 'Movies/Old/sub'],
+      ),
+      manifest: null,
+    });
+    check('metadata kept', p.keptProtected, 4);
+    check('stray deleted', p.deletes.map((d) => d.rel), ['Movies/Film/stray.txt']);
+    check('top-most folder deleted', p.deleteDirs.map((d) => [d.rel, d.files]), [['Movies/Old', 2]]);
+    check('protect off deletes metadata', planMirror({ local: { files: [], dirs: [] }, remote: remoteOf([['poster.jpg', 1, T0]]), manifest: null, options: { protectMetadata: false } }).deletes.length, 1);
+
+    // 5. Unicode: NFD names on one side match NFC on the other.
+    const nfd = 'Café'.normalize('NFD') + '.txt';
+    p = planMirror({ local: { files: [{ rel: nfd, file: f(nfd, 3, T0) }], dirs: [] }, remote: remoteOf([['Café.txt', 3, T0 + 1000]]), manifest: null });
+    check('NFC/NFD match', [p.unchanged.length, p.uploads.length, p.deletes.length], [1, 0, 0]);
+
+    // 6. Safety: an empty local folder never silently wipes the NAS copy.
+    p = planMirror({ local: { files: [], dirs: [] }, remote: remoteOf([['a', 1, T0], ['b', 1, T0]]), manifest: null });
+    check('empty local warns', p.warnings.length > 0 && /empty/.test(p.warnings[0]), true);
+    p = planMirror({ local: { files: [{ rel: 'keep', file: f('keep', 1, T0) }], dirs: [] }, remote: remoteOf([['keep', 1, T0 + 1000], ...Array.from({ length: 30 }, (_, i) => [`x${i}`, 1, T0])]), manifest: null });
+    check('mass deletion warns', p.warnings.length, 1);
+
+    // 7. Folder picker can't see empty folders: don't delete empty NAS folders in that case.
+    p = planMirror({ local: { files: [], dirs: [] }, remote: remoteOf([], ['empty']), manifest: null, options: { localKnowsEmptyDirs: false } });
+    check('picker: empty NAS folder kept', p.deleteDirs.length, 0);
+    p = planMirror({ local: { files: [], dirs: [] }, remote: remoteOf([], ['empty']), manifest: null });
+    check('drop: empty NAS folder deleted', p.deleteDirs.map((d) => d.rel), ['empty']);
+
+    // 8. Deletions off: nothing deleted, NAS-only files reported as kept.
+    p = planMirror({ local: { files: [], dirs: [] }, remote: remoteOf([['a', 1, T0]]), manifest: null, options: { deletions: false } });
+    check('deletions off', [p.deletes.length, p.keptOnNas], [0, 1]);
+
+    // 8b. Files/folders that couldn't be read locally are never deleted from the NAS.
+    p = planMirror({
+      local: { files: [{ rel: 'ok.txt', file: f('ok.txt', 1, T0) }], dirs: ['locked dir'], errors: [{ rel: 'locked.docx', message: 'x' }, { rel: 'locked dir/', message: 'x' }] },
+      remote: remoteOf([['ok.txt', 1, T0 + 1000], ['locked.docx', 5, T0], ['locked dir/a.txt', 1, T0], ['really gone.txt', 1, T0]], ['locked dir']),
+      manifest: null,
+    });
+    check('unreadable local items kept on NAS', [p.deletes.map((d) => d.rel), p.deleteDirs.length], [['really gone.txt'], 0]);
+    p = planMirror({ local: { files: [], dirs: [], errors: [{ rel: './', message: 'denied' }] }, remote: remoteOf([['a', 1, T0]]), manifest: null });
+    check('unreadable root deletes nothing', p.deletes.length + p.deleteDirs.length, 0);
+    check('subtitles on NAS only are kept', planMirror({ local: { files: [], dirs: [] }, remote: remoteOf([['Film.en.srt', 1, T0]]), manifest: null }).keptProtected, 1);
+
+    // 9. Manifest after a run: done uploads/moves recorded, deletes removed, failures leave old entries.
+    const remote = remoteOf([['keep.txt', 1, T0], ['moved-from.bin', BIG, T0], ['del.txt', 1, T0], ['failed.txt', 2, T0]]);
+    const prev = { version: 1, files: { 'keep.txt': { size: 1, mtime: 1 }, 'moved-from.bin': { size: BIG, mtime: 2 }, 'del.txt': { size: 1, mtime: 3 }, 'failed.txt': { size: 2, mtime: 4 } } };
+    const m = buildManifest({
+      previous: prev,
+      plan: { unchanged: [{ key: 'keep.txt', file: f('keep.txt', 1, 1) }] },
+      remote,
+      tasks: [
+        { kind: 'move', status: 'done', mirrorRel: 'moved-to.bin', mirrorFrom: 'moved-from.bin', localSize: BIG, localMtime: 2 },
+        { kind: 'delete', status: 'done', mirrorRel: 'del.txt' },
+        { kind: 'file', status: 'failed', mirrorRel: 'failed.txt', localSize: 3, localMtime: 9 },
+        { kind: 'file', status: 'done', mirrorRel: 'new.txt', localSize: 5, localMtime: 6 },
+      ],
+    });
+    check('manifest after run', Object.keys(m.files).sort(), ['failed.txt', 'keep.txt', 'moved-to.bin', 'new.txt']);
+    check('failed upload keeps old entry', m.files['failed.txt'], { size: 2, mtime: 4 });
+    check('protected names', [isProtectedName('poster.jpg', false), isProtectedName('Film (2020)-poster.png', false), isProtectedName('tvshow.nfo', false), isProtectedName('holiday.jpg', false), isProtectedName('Film.trickplay', true), isProtectedName('Season 01', true)], [true, true, true, false, true, false]);
+    return out;
+  });
+  const bad = r.filter((x) => !x.ok);
+  log(`${r.length - bad.length}/${r.length} checks passed`);
+  assert(bad.length === 0, 'failed checks: ' + JSON.stringify(bad, null, 1));
+  eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+});
+
+const mirrorSrcParent = path.join(WORK, 'mirror-src');
+const mirrorSrc = path.join(mirrorSrcParent, 'Holiday Videos');
+const MIRROR_NAS = path.join(SERVERS.apache.root, 'mirror-test', 'Holiday Videos');
+const HOUR_AGO = new Date(Date.now() - 3600 * 1000);
+const isNasExtra = (rel) => rel === MANIFEST || /(^|\/)(poster\.jpg|movie\.nfo)$/.test(rel) || rel.includes('.trickplay/');
+
+function makeMirrorSource() {
+  fs.rmSync(mirrorSrcParent, { recursive: true, force: true });
+  const t = (s) => new Date(HOUR_AGO.getTime() + s * 1000);
+  writeFileAt(path.join(mirrorSrc, 'Movies', 'Film A (2020)', 'Film A (2020).mkv'), crypto.randomBytes(3 * 1024 * 1024), t(1));
+  writeFileAt(path.join(mirrorSrc, 'Movies', 'Film B (2021)', 'Film B (2021).mkv'), crypto.randomBytes(2 * 1024 * 1024), t(2));
+  writeFileAt(path.join(mirrorSrc, 'Movies', 'Film B (2021)', 'subs', 'en.srt'), 'subtitles', t(3));
+  writeFileAt(path.join(mirrorSrc, 'TV', 'Show', 'Season 01', 'S01E01.mkv'), crypto.randomBytes(1024 * 1024), t(4));
+  writeFileAt(path.join(mirrorSrc, 'TV', 'Show', 'Season 01', 'S01E02.mkv'), crypto.randomBytes(1024 * 1024 + 7), t(5));
+  writeFileAt(path.join(mirrorSrc, 'notes.txt'), 'notes v1', t(6));
+  writeFileAt(path.join(mirrorSrc, 'todo.txt'), 'todo', t(7));
+  writeFileAt(path.join(mirrorSrc, 'same-size.txt'), 'AAAA', t(8));
+  writeFileAt(path.join(mirrorSrc, 'old folder', 'a.txt'), 'a', t(9));
+  writeFileAt(path.join(mirrorSrc, 'old folder', 'b.txt'), 'b', t(10));
+  fs.mkdirSync(path.join(mirrorSrc, 'empty'), { recursive: true });
+}
+
+test('mirror (drop a folder, choose Mirror…): first sync uploads everything and records a manifest', async () => {
+  makeMirrorSource();
+  const { page, errors } = main;
+  await dav('apache', 'MKCOL', 'mirror-test/');
+  await goTo(page, '/mirror-test');
+  const d = await dropAndMirror(page, mirrorSrc);
+  eq(d.title, 'Mirror: review the changes', 'review dialog');
+  assert(d.text.includes('10 new files to upload'), 'plan counts new files: ' + d.text);
+  await page.click('#dialog-ok');
+  const s = await waitFinished(page);
+  eq(s.failedFiles + s.opsFailed, 0, 'no failures ' + JSON.stringify(await failedList(page)));
+  eq(s.uploadedFiles, 10, 'uploaded');
+  await assertSameTree(mirrorSrc, MIRROR_NAS, { ignoreRemote: isNasExtra });
+  await page.waitForFunction(() => true);
+  const manifest = JSON.parse(fs.readFileSync(path.join(MIRROR_NAS, MANIFEST), 'utf8'));
+  eq(Object.keys(manifest.files).length, 10, 'manifest entries');
+  eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+});
+
+test('mirror again without changes: "Already in sync", nothing sent', async () => {
+  const { page } = main;
+  const mark = logMark();
+  const d = await dropAndMirror(page, mirrorSrc);
+  eq(d.title, 'Already in sync', 'dialog title');
+  await page.click('#dialog-ok');
+  const puts = logSince(mark).filter((l) => l.includes('"PUT ') && !l.includes(encodeURIComponent(MANIFEST).replace(/%2E/g, '.')) && !l.includes(MANIFEST));
+  eq(puts.length, 0, 'no file uploads: ' + puts.join('\n'));
+});
+
+test('mirror sends only the changes: edits, renames as server-side moves, deletions; keeps Jellyfin artwork', async () => {
+  const { page, errors } = main;
+  // Jellyfin-style metadata and a stray file appear on the NAS.
+  const film = 'mirror-test/Holiday Videos/Movies/Film B (2021)/';
+  await dav('apache', 'PUT', film + 'poster.jpg', 'jpg');
+  await dav('apache', 'PUT', film + 'movie.nfo', '<movie/>');
+  await dav('apache', 'MKCOL', film + 'Film B (2021).trickplay/');
+  await dav('apache', 'PUT', film + 'Film B (2021).trickplay/0.jpg', 'tile');
+  await dav('apache', 'PUT', 'mirror-test/Holiday Videos/Movies/stray.txt', 'stray');
+  // Local changes on the "offsite" computer.
+  fs.writeFileSync(path.join(mirrorSrc, 'notes.txt'), 'notes version 2 is longer');
+  fs.writeFileSync(path.join(mirrorSrc, 'same-size.txt'), 'BBBB');
+  fs.renameSync(path.join(mirrorSrc, 'Movies', 'Film A (2020)', 'Film A (2020).mkv'), path.join(mirrorSrc, 'Movies', 'Film A (2020)', 'Film A.mkv'));
+  fs.renameSync(path.join(mirrorSrc, 'TV', 'Show'), path.join(mirrorSrc, 'TV', 'The Show'));
+  fs.rmSync(path.join(mirrorSrc, 'todo.txt'));
+  fs.rmSync(path.join(mirrorSrc, 'old folder'), { recursive: true });
+  writeFileAt(path.join(mirrorSrc, 'new', 'hello.txt'), 'hello');
+
+  const mark = logMark();
+  const d = await dropAndMirror(page, mirrorSrc);
+  eq(d.title, 'Mirror: review the changes', 'review dialog');
+  for (const expected of ['1 new file', '2 changed files', '3 renamed or moved files', 'todo.txt', 'old folder/', 'stray.txt', 'artwork/metadata']) {
+    assert(d.text.includes(expected), `review mentions "${expected}": ${d.text}`);
+  }
+  assert(await page.isChecked('#plan-delete'), 'delete box ticked by default');
+  await shot(page, '11-mirror-review');
+  await page.click('#dialog-ok');
+  const s = await waitFinished(page);
+  eq(s.failedFiles + s.opsFailed, 0, 'no failures ' + JSON.stringify(await failedList(page)));
+  eq(s.uploadedFiles, 3, 'uploaded only the 3 new/changed files');
+  eq(s.movesDone, 3, 'moved 3 renamed files on the NAS');
+  eq(s.movesFellBack, 0, 'no move fell back to uploading');
+  await shot(page, '12-mirror-done');
+  const lines = logSince(mark);
+  eq(lines.filter((l) => l.includes('"MOVE ') && / 201 /.test(l)).length, 3, 'three MOVE requests');
+  assert(!lines.some((l) => l.includes('"PUT ') && l.includes('.mkv')), 'no video was uploaded again');
+  await assertSameTree(mirrorSrc, MIRROR_NAS, { ignoreRemote: isNasExtra });
+  for (const kept of ['Movies/Film B (2021)/poster.jpg', 'Movies/Film B (2021)/movie.nfo', 'Movies/Film B (2021)/Film B (2021).trickplay/0.jpg']) {
+    assert(fs.existsSync(path.join(MIRROR_NAS, kept)), 'Jellyfin file kept: ' + kept);
+  }
+  assert(!fs.existsSync(path.join(MIRROR_NAS, 'Movies', 'stray.txt')), 'stray file deleted');
+  assert(!fs.existsSync(path.join(MIRROR_NAS, 'TV', 'Show')), 'old folder of renamed show removed');
+  // And a third run is a no-op again.
+  const again = await dropAndMirror(page, mirrorSrc);
+  eq(again.title, 'Already in sync', 'in sync after changes');
+  await page.click('#dialog-ok');
+  eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+});
+
+test('mirror safety: an empty folder warns and does not tick "delete" by default', async () => {
+  const { page } = main;
+  const emptyParent = path.join(WORK, 'mirror-empty');
+  fs.rmSync(emptyParent, { recursive: true, force: true });
+  fs.mkdirSync(path.join(emptyParent, 'Holiday Videos'), { recursive: true });
+  const before = walk(MIRROR_NAS, { skipJunk: false }).files.size;
+  const d = await dropAndMirror(page, path.join(emptyParent, 'Holiday Videos'));
+  eq(d.title, 'Mirror: review the changes', 'review dialog');
+  assert(d.text.includes('looks empty'), 'warning shown: ' + d.text);
+  eq(await page.isChecked('#plan-delete'), false, 'delete not ticked by default');
+  await page.click('#dialog-cancel');
+  eq(walk(MIRROR_NAS, { skipJunk: false }).files.size, before, 'nothing deleted');
+});
+
+test('saved mirror: remembered folder, one-click Sync sends only changes (survives a page reload)', async () => {
+  await dav('apache', 'MKCOL', 'saved-mirror/');
+  const { page, errors } = await launch(cfg('apache'));
+  await waitConnected(page);
+  await goTo(page, '/saved-mirror');
+  // A real folder picker can't be driven by automation, so hand the app a folder from the browser's private
+  // file system instead. Everything after the picker is the normal code path.
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    try {
+      await root.removeEntry('Saved Project', { recursive: true });
+    } catch {}
+    const dir = await root.getDirectoryHandle('Saved Project', { create: true });
+    const write = async (d, name, data) => {
+      const fh = await d.getFileHandle(name, { create: true });
+      const w = await fh.createWritable();
+      await w.write(data);
+      await w.close();
+    };
+    await write(dir, 'readme.txt', 'version 1');
+    await write(dir, 'delete-me.txt', 'bye');
+    const sub = await dir.getDirectoryHandle('assets', { create: true });
+    await write(sub, 'big.bin', new Uint8Array(400 * 1024).map((_, i) => i % 251));
+    await sub.getDirectoryHandle('empty', { create: true });
+    window.nasUploader.pickDirectory = async () => dir;
+    window.nasUploader.renderMirrors();
+  });
+  await page.waitForSelector('#mirrors-card:not([hidden]) #btn-new-mirror:not([hidden])');
+  await page.click('#btn-new-mirror');
+  await page.waitForSelector('dialog[open] #mirror-nas-path');
+  eq(await page.inputValue('#mirror-nas-path'), '/saved-mirror/Saved Project', 'default NAS folder');
+  page.__run = await currentRun(page);
+  await page.click('#dialog-ok');
+  let d = await readMirrorDialog(page);
+  eq(d.title, 'Mirror: review the changes', 'review dialog');
+  await page.click('#dialog-ok');
+  let s = await waitFinished(page);
+  eq(s.failedFiles + s.opsFailed, 0, 'no failures');
+  const NAS = path.join(SERVERS.apache.root, 'saved-mirror', 'Saved Project');
+  eq(fs.readFileSync(path.join(NAS, 'readme.txt'), 'utf8'), 'version 1', 'file on NAS');
+  eq(fs.statSync(path.join(NAS, 'assets', 'big.bin')).size, 400 * 1024, 'big file on NAS');
+  assert(fs.statSync(path.join(NAS, 'assets', 'empty')).isDirectory(), 'empty folder on NAS');
+  await page.waitForFunction(() => /Last synced/.test(document.querySelector('#mirror-list li .m-last')?.textContent || ''));
+
+  // Reload: the mirror is remembered. Change things locally, then one click.
+  await page.reload();
+  await waitConnected(page);
+  await page.waitForSelector('#mirror-list li .m-sync');
+  await page.evaluate(async () => {
+    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('Saved Project');
+    const fh = await dir.getFileHandle('readme.txt');
+    const w = await fh.createWritable();
+    await w.write('version 2!');
+    await w.close();
+    await dir.removeEntry('delete-me.txt');
+    const assets = await dir.getDirectoryHandle('assets');
+    await assets.getFileHandle('big.bin').then((h) => h.move('renamed.bin'));
+  });
+  const mark = logMark();
+  page.__run = await currentRun(page);
+  await page.click('#mirror-list li .m-sync');
+  d = await readMirrorDialog(page);
+  eq(d.title, 'Mirror: review the changes', 'review dialog after reload');
+  assert(d.text.includes('1 changed file') && d.text.includes('1 renamed or moved') && d.text.includes('delete-me.txt'), 'plan: ' + d.text);
+  await page.click('#dialog-ok');
+  s = await waitFinished(page);
+  eq(s.failedFiles + s.opsFailed, 0, 'no failures');
+  eq(fs.readFileSync(path.join(NAS, 'readme.txt'), 'utf8'), 'version 2!', 'edit synced');
+  assert(!fs.existsSync(path.join(NAS, 'delete-me.txt')), 'deletion synced');
+  assert(fs.existsSync(path.join(NAS, 'assets', 'renamed.bin')) && !fs.existsSync(path.join(NAS, 'assets', 'big.bin')), 'rename synced');
+  assert(logSince(mark).some((l) => l.includes('"MOVE ')), 'rename done as a server-side move');
+  await shot(page, '13-saved-mirror');
+  // Removing the shortcut doesn't touch any files.
+  await page.click('#mirror-list li .m-remove');
+  await page.waitForSelector('dialog[open]');
+  await page.click('#dialog-ok');
+  await page.waitForFunction(() => document.querySelectorAll('#mirror-list li').length === 0);
+  assert(fs.existsSync(path.join(NAS, 'readme.txt')), 'files untouched after removing the mirror');
+  eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+});
+
+test('mirror through an HTTPS reverse proxy that breaks server-side moves: falls back to uploading, result still exact', async () => {
+  await dav('apache', 'MKCOL', 'proxy-mirror/');
+  const { page, errors } = await launch(cfg('apache', { serverUrl: 'https://127.0.0.1:18446/' }), { ignoreHTTPSErrors: true });
+  await waitConnected(page);
+  await goTo(page, '/proxy-mirror');
+  const src = path.join(WORK, 'proxy-src', 'Clips');
+  fs.rmSync(path.dirname(src), { recursive: true, force: true });
+  writeFileAt(path.join(src, 'clip-one.mp4'), crypto.randomBytes(512 * 1024), HOUR_AGO);
+  writeFileAt(path.join(src, 'keep.txt'), 'keep', HOUR_AGO);
+  let d = await dropAndMirror(page, src);
+  await page.click('#dialog-ok');
+  await waitFinished(page);
+  fs.renameSync(path.join(src, 'clip-one.mp4'), path.join(src, 'clip-renamed.mp4'));
+  d = await dropAndMirror(page, src);
+  assert(d.text.includes('1 renamed or moved'), 'rename detected: ' + d.text);
+  await page.click('#dialog-ok');
+  const s = await waitFinished(page);
+  eq(s.failedFiles + s.opsFailed, 0, 'no failures ' + JSON.stringify(await failedList(page)));
+  eq(s.movesFellBack, 1, 'the move fell back to an upload');
+  await assertSameTree(src, path.join(SERVERS.apache.root, 'proxy-mirror', 'Clips'), { ignoreRemote: (r) => r === MANIFEST });
+  eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+});
+
+// ---- the server set up by server/setup-webdav.sh (run by tests/test-setup-script.sh) ----------------
+const SETUP = {
+  url: process.env.SETUP_LOCAL_URL,
+  proxyUrl: process.env.SETUP_PROXY_URL,
+  root: process.env.SETUP_ROOT,
+  pass: process.env.SETUP_PASS,
+  owner: process.env.SETUP_OWNER,
+};
+const setupCfg = (url) => ({ serverUrl: url, username: 'uploader', password: SETUP.pass, startFolder: '/', parallelUploads: 3 });
+function ownerOf(p) {
+  return require('child_process').execFileSync('stat', ['-c', '%U', p]).toString().trim();
+}
+function readableBy(user, p) {
+  try {
+    require('child_process').execFileSync('setpriv', ['--reuid=' + user, '--regid=' + user, '--init-groups', '--', 'test', '-r', p]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test('server from setup-webdav.sh: upload + mirror into the Jellyfin library; files owned like the rest and readable by Jellyfin', async () => {
+  if (!SETUP.url) return log('skipped (run tests/test-setup-script.sh)');
+  makeMirrorSource();
+  const { page, errors } = await launch(setupCfg(SETUP.url), { ignoreHTTPSErrors: true });
+  await waitConnected(page);
+  const names = await listingNames(page);
+  assert(names.includes('Movies') && names.includes('TV'), 'Jellyfin library folders listed: ' + names);
+  await goTo(page, '/Movies');
+  await drop(page, [small]);
+  await confirmUpload(page);
+  let s = await waitFinished(page);
+  eq(s.failedFiles, 0, 'failed ' + JSON.stringify(await failedList(page)));
+  await assertSameTree(small, path.join(SETUP.root, 'Movies', 'Small Set'));
+  const sample = path.join(SETUP.root, 'Movies', 'Small Set', 'notes.txt');
+  eq(ownerOf(sample), SETUP.owner, 'uploaded file owner');
+  assert(readableBy('jellyfin', sample), 'jellyfin can read uploads');
+  // Mirror into the library too.
+  await goTo(page, '/TV');
+  const d = await dropAndMirror(page, mirrorSrc);
+  eq(d.title, 'Mirror: review the changes', 'review');
+  await page.click('#dialog-ok');
+  s = await waitFinished(page);
+  eq(s.failedFiles + s.opsFailed, 0, 'mirror failures');
+  await assertSameTree(mirrorSrc, path.join(SETUP.root, 'TV', 'Holiday Videos'), { ignoreRemote: (r) => r === MANIFEST });
+  eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+});
+
+test('server from setup-webdav.sh behind an HTTPS proxy (Funnel mode): renames are real server-side moves', async () => {
+  if (!SETUP.proxyUrl) return log('skipped (run tests/test-setup-script.sh)');
+  const { page, errors } = await launch(setupCfg(SETUP.proxyUrl), { ignoreHTTPSErrors: true });
+  await waitConnected(page);
+  await goTo(page, '/TV');
+  const src = path.join(WORK, 'funnel-src', 'Funnel Clips');
+  fs.rmSync(path.dirname(src), { recursive: true, force: true });
+  writeFileAt(path.join(src, 'episode.mkv'), crypto.randomBytes(600 * 1024), HOUR_AGO);
+  writeFileAt(path.join(src, 'info.txt'), 'info', HOUR_AGO);
+  await dropAndMirror(page, src);
+  await page.click('#dialog-ok');
+  await waitFinished(page);
+  fs.renameSync(path.join(src, 'episode.mkv'), path.join(src, 'S01E01 - Pilot.mkv'));
+  const d = await dropAndMirror(page, src);
+  assert(d.text.includes('1 renamed or moved'), 'rename detected: ' + d.text);
+  await page.click('#dialog-ok');
+  const s = await waitFinished(page);
+  eq(s.failedFiles + s.opsFailed, 0, 'failures ' + JSON.stringify(await failedList(page)));
+  eq(s.movesDone, 1, 'moved');
+  eq(s.movesFellBack, 0, 'the move worked on the server (no re-upload)');
+  await assertSameTree(src, path.join(SETUP.root, 'TV', 'Funnel Clips'), { ignoreRemote: (r) => r === MANIFEST });
   eq(errors.length, 0, 'page errors: ' + errors.join('; '));
 });
 

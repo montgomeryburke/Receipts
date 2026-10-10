@@ -706,3 +706,91 @@ dialog::backdrop {
   background: var(--danger);
   border-color: var(--danger);
 }
+
+/* Mirrors */
+.mirrors-intro {
+  margin: 4px 0 0;
+  max-width: 640px;
+}
+
+.mirror-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mirror-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.mirror-list .m-main {
+  flex: 1;
+  min-width: 220px;
+}
+
+.mirror-list .m-name {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.mirror-list .m-dest,
+.mirror-list .m-last {
+  font-size: 12.5px;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.plan-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+}
+
+.plan-list li {
+  padding: 3px 0;
+}
+
+.plan-list .n {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-del {
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+
+.plan-del ul {
+  margin: 6px 0 0;
+  max-height: 150px;
+  overflow: auto;
+  font-size: 12.5px;
+}
+
+.plan-warn {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+#dialog-body label.check {
+  margin: 6px 0;
+}
+
+#dialog-body .field {
+  display: block;
+  margin: 10px 0;
+}
+
+#dialog-body .field input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+}
