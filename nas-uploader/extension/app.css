@@ -745,10 +745,13 @@ dialog::backdrop {
   word-break: break-word;
 }
 
-.plan-list {
+.plan-list,
+#dialog-body .plan-list {
   list-style: none;
   padding: 0;
   margin: 0 0 10px;
+  max-height: none;
+  overflow: visible;
 }
 
 .plan-list li {

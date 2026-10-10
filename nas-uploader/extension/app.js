@@ -487,12 +487,16 @@ async function startScan(scanFn, { handlePromise = null, knowsEmptyDirs = true }
       const h = await handlePromise;
       if (h && h.kind === 'directory') handle = h;
     } catch {}
+    const nasRoot = joinPath(dest, top);
+    // Already a saved mirror for this folder? Then this run updates it instead of offering to save it again.
+    const existing = await findSavedMirror(nasRoot, handle);
     await mirrorFolder({
       name: top,
-      nasRoot: joinPath(dest, top),
+      nasRoot,
       local: stripTopFolder(result),
-      options: { deletions: true, protectMetadata: true, localKnowsEmptyDirs: knowsEmptyDirs },
-      rememberHandle: handle,
+      options: existing ? { deletions: existing.deletions, protectMetadata: existing.protectMetadata, localKnowsEmptyDirs: knowsEmptyDirs } : { deletions: true, protectMetadata: true, localKnowsEmptyDirs: knowsEmptyDirs },
+      record: existing,
+      rememberHandle: existing ? null : handle,
     });
     return;
   }
@@ -649,6 +653,17 @@ async function reviewMirrorPlan({ plan, name, nasRoot, firstSync, canRemember, d
   const ok = await dialog({ title: 'Mirror: review the changes', bodyNodes: nodes, okText: 'Start mirror' });
   if (!ok) return null;
   return { deletions: !!delBox?.checked, remember: !!rememberBox?.checked };
+}
+
+async function findSavedMirror(nasPath, handle) {
+  const candidates = state.mirrors.filter((m) => m.nasPath === normalizePath(nasPath));
+  for (const m of candidates) {
+    if (!handle) return m;
+    try {
+      if (await handle.isSameEntry(m.handle)) return m;
+    } catch {}
+  }
+  return null;
 }
 
 async function rememberMirror(handle, name, nasPath, options) {

@@ -992,6 +992,9 @@ test('mirror sends only the changes: edits, renames as server-side moves, deleti
   const again = await dropAndMirror(page, mirrorSrc);
   eq(again.title, 'Already in sync', 'in sync after changes');
   await page.click('#dialog-ok');
+  // Mirroring the same folder by dropping it again updates the saved mirror instead of adding duplicates.
+  const saved = await page.$$eval('#mirror-list li .m-dest', (els) => els.map((e) => e.textContent));
+  eq(saved.filter((x) => x.includes('/mirror-test/Holiday Videos')).length, 1, 'one saved mirror for the folder: ' + JSON.stringify(saved));
   eq(errors.length, 0, 'page errors: ' + errors.join('; '));
 });
 
