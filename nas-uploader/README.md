@@ -22,10 +22,32 @@ It talks to the NAS over **WebDAV**, the standard file-sharing protocol.
 
 ## 1. Set up the server on the HP (Proxmox), once
 
-Your media lives in a Proxmox container on the HP, and Jellyfin reads it from there. The script in
-`server/setup-webdav.sh` turns that folder into something the extension can upload into:
+**Nothing is ever installed on the offsite computer.** It only needs Chrome and this extension. Everything
+below happens on the HP at home.
 
-- it finds the folders Jellyfin uses (from Jellyfin's own library settings) and lets you pick;
+### 1a. Add the drive for the mirror (Proxmox web interface)
+
+1. Fit the new drive in the HP and start it up.
+2. In Proxmox, click the HP (the node) → **Disks**. Find the new drive by its model and size; **Usage** should
+   say *No*. If it was used before, select it and click **Wipe Disk**. This erases *that drive only*, so double-check
+   the model and size.
+3. **Disks → Directory → Create: Directory**: choose the new drive, filesystem **ext4**, name **mirror**, keep
+   **Add Storage** ticked → **Create**.
+4. Open the container that will run the uploader, then **Resources → Add → Mount Point**:
+   - **Storage**: `mirror`
+   - **Disk size**: nearly the whole drive (for a 4 TB drive, about 3600 GiB)
+   - **Path**: `/mnt/mirror`
+   - leave **Backup** unticked, so Proxmox backups don't try to copy the whole drive.
+
+   Then click **Create** and restart the container. You can use the Jellyfin container or a small new Debian
+   container. The uploader only ever gets access to `/mnt/mirror`, never to your Jellyfin media.
+
+### 1b. Run the setup script in that container
+
+The script in `server/setup-webdav.sh` turns the drive into something the extension can upload into:
+
+- it shares only the folder you give it (`/mnt/mirror`), or without `--folder` it offers Jellyfin's
+  library folders and other mounted drives to pick from;
 - it installs a WebDAV server (Apache) with a login, no upload size limit, and nothing uploaded is ever executed;
 - it sorts out permissions so uploads are written like your existing files and **Jellyfin can read them**;
 - it makes it reachable from outside your home (see the choices below);
@@ -36,17 +58,18 @@ Your media lives in a Proxmox container on the HP, and Jellyfin reads it from th
 ```bash
 apt-get update && apt-get install -y curl
 curl -fsSL https://raw.githubusercontent.com/montgomeryburke/Receipts/claude/friendly-pasteur-uixwht/nas-uploader/server/setup-webdav.sh -o setup-webdav.sh
-bash setup-webdav.sh
+bash setup-webdav.sh --folder /mnt/mirror
 ```
 
 (Once this is merged, `claude/friendly-pasteur-uixwht` in that address becomes `main`.)
 
-It asks how the offsite computer should reach the HP:
+It asks how the offsite computer should reach the HP. With every choice the offsite computer needs **nothing
+installed**: it just uses Chrome with the extension.
 
-| Choice | What you do | Good for |
+| Choice | What you do (at home) | Good for |
 |---|---|---|
-| **1. Tailscale Funnel** | Sign in to Tailscale once when asked. No router changes. | Easiest. Real HTTPS certificate. Tailscale caps the speed somewhat. |
-| **2. Port forward** | Forward TCP **443** and **80** on your router to the container, and get a free name at [duckdns.org](https://www.duckdns.org). The script keeps the name updated and gets a free Let's Encrypt certificate. | Fastest for very large transfers. Failed logins are blocked after 10 tries. |
+| **1. Port forward** | Forward TCP **443** and **80** on your router to the container, and get a free name at [duckdns.org](https://www.duckdns.org). The script keeps the name updated and gets a free Let's Encrypt certificate. | Fastest. Best for large mirrors. Failed logins are blocked after 10 tries. |
+| **2. Tailscale Funnel** | Tailscale is installed **on the HP's container only** and gives it a normal public `https://…ts.net` address that any browser can open, no Tailscale needed on the visiting computer. No router changes. | When you can't change router settings. Tailscale caps the speed somewhat. |
 | **3. Home network only** | Nothing. | Trying it out first. You can re-run the script later and pick 1 or 2. |
 
 Re-running the script is safe: it keeps your password unless you pass a new one with `--password`.

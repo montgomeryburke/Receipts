@@ -76,6 +76,18 @@ check "upload into a subfolder works ($code)" [ "$code" = 201 ]
 check "jellyfin can read it" setpriv --reuid=jellyfin --regid=jellyfin --init-groups -- test -r /srv/test-media-root/Movies/new.txt
 check "existing file ownership untouched" [ "$(stat -c %U /srv/test-media-root/Movies)" = root ]
 
+echo "• a new drive added just for the mirror (fresh ext4 mount point: root-owned, locked lost+found)"
+rm -rf /srv/test-mirror-disk && mkdir -p /srv/test-mirror-disk/lost+found && chmod 700 /srv/test-mirror-disk/lost+found && chown -R root:root /srv/test-mirror-disk
+out="$("$SCRIPT" --yes --access local --port 18494 --folder /srv/test-mirror-disk 2>&1)"; rc=$?
+check "script succeeded" [ $rc -eq 0 ]
+check "shares only the new drive" grep -q 'DocumentRoot "/srv/test-mirror-disk"' /etc/apache2/sites-available/nas-uploader.conf
+check "no warning about lost+found" bash -c "! grep -q 'Not writable' <<<\"\$1\"" _ "$out"
+code="$(curl -sk -o /dev/null -w '%{http_code}' -X MKCOL -u "uploader:$PASS" "https://127.0.0.1:18494/Laptop%20Backup/")"
+check "create a folder on the drive ($code)" [ "$code" = 201 ]
+code="$(curl -sk -o /dev/null -w '%{http_code}' -T - -u "uploader:$PASS" "https://127.0.0.1:18494/Laptop%20Backup/notes.txt" <<<'hello')"
+check "upload onto the drive ($code)" [ "$code" = 201 ]
+check "Jellyfin media not reachable through this login" [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "uploader:$PASS" "https://127.0.0.1:18494/Movies/")" = 404 ]
+
 echo "• folder owned by 'nobody' (unprivileged container, unmapped owner): explains the Proxmox fix"
 mkdir -p /srv/test-media-nobody && chown nobody:nogroup /srv/test-media-nobody
 out="$("$SCRIPT" --yes --access local --port 18493 --folder /srv/test-media-nobody 2>&1)"; rc=$?

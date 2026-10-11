@@ -17,7 +17,8 @@
 #    bash setup-webdav.sh --uninstall           # remove (your files are never touched)
 #
 #  Other options:
-#    --folder PATH        folder to share (default: Jellyfin's library folder, detected)
+#    --folder PATH        folder to share, e.g. /mnt/mirror for a drive added just for this
+#                         (default: offers Jellyfin's library folder and other mounted drives)
 #    --user NAME          WebDAV username (default: uploader)
 #    --password PASS      password (default: keep the existing one, or generate one)
 #    --port N             HTTPS port for local/port-forward (default 443)
@@ -266,7 +267,7 @@ chown -R "$RUN_USER:$RUN_GROUP" "$LOCK_DIR" /var/lock/apache2
 unwritable=()
 while IFS= read -r -d '' d; do
   as_user "$RUN_USER" test -w "$d" 2>/dev/null || unwritable+=("$d")
-done < <(find "$FOLDER" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+done < <(find "$FOLDER" -mindepth 1 -maxdepth 1 -type d ! -name lost+found -print0 2>/dev/null)
 if [[ ${#unwritable[@]} -gt 0 ]]; then warn "Not writable by the uploader (uploads into these will fail): ${unwritable[*]}"; fi
 
 # ----------------------------------------------------------------------------- 4. credentials
@@ -293,16 +294,17 @@ if [[ -z "$ACCESS" ]]; then
   else
     cat <<'EOF'
 
-How should the offsite computer reach this?
-  1) Tailscale Funnel: nothing to change on your router, real HTTPS certificate.
-     Easiest. Tailscale limits the speed somewhat (fine for most uploads).
-  2) Port forward on your router + free DuckDNS name + Let's Encrypt certificate.
-     Fastest for very large transfers. Needs router access (ports 443 and 80).
+How should the offsite computer reach this? (With every choice, the offsite computer
+needs nothing but Chrome and the extension. Nothing gets installed there.)
+  1) Port forward on your router + free DuckDNS name + Let's Encrypt certificate.
+     Fastest, best for very large mirrors. Needs access to your router (ports 443 and 80).
+  2) Tailscale Funnel: Tailscale runs on THIS machine only and publishes a normal
+     https:// address. No router changes. Tailscale limits the speed somewhat.
   3) Home network only for now (self-signed certificate). You can re-run later.
 EOF
     case "$(ask 'Choose 1, 2 or 3' 1)" in
-      1) ACCESS=funnel ;;
-      2) ACCESS=port-forward ;;
+      1) ACCESS=port-forward ;;
+      2) ACCESS=funnel ;;
       *) ACCESS=local ;;
     esac
   fi
