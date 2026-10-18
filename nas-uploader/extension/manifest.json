@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "NAS Uploader",
+  "version": "1.0.0",
+  "description": "Browse your NAS and drag-and-drop whole folder trees onto it over WebDAV, from any computer.",
+  "minimum_chrome_version": "116",
+  "action": {
+    "default_title": "Open NAS Uploader",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "power", "downloads"],
+  "host_permissions": ["http://*/*", "https://*/*"]
+}

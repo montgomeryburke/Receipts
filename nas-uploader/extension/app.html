@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NAS Uploader</title>
+    <link rel="icon" href="icons/icon32.png" />
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="icons/icon48.png" alt="" width="28" height="28" />
+        <span>NAS Uploader</span>
+      </div>
+      <div class="conn" id="conn" data-state="connecting">
+        <span class="dot"></span>
+        <span id="conn-text">Connecting…</span>
+      </div>
+      <button class="btn small ghost" id="btn-lock" hidden title="Forget the password for this browser session">Lock</button>
+    </header>
+
+    <main>
+      <!-- Shown when config.js still has the example values -->
+      <section class="card notice" id="setup" hidden>
+        <h2>One-time setup needed</h2>
+        <p>Open <code>config.js</code> in the extension folder, fill in your NAS address, username and password, save it, then click the reload icon for NAS Uploader on <code>chrome://extensions</code>.</p>
+        <p class="muted" id="setup-detail"></p>
+      </section>
+
+      <!-- Shown when config.js has no password (ask once per browser session) -->
+      <section class="card notice" id="login" hidden>
+        <h2>Sign in to your NAS</h2>
+        <form id="login-form" autocomplete="off">
+          <label>Username <input id="login-user" type="text" required autocomplete="off" spellcheck="false" /></label>
+          <label>Password <input id="login-pass" type="password" required autocomplete="off" /></label>
+          <p class="error" id="login-error" hidden></p>
+          <button class="btn primary" type="submit" id="login-submit">Connect</button>
+          <p class="muted small">The password is kept in memory until this browser is closed or you click Lock.</p>
+        </form>
+      </section>
+
+      <!-- Shown when the NAS can't be reached -->
+      <section class="card notice error-card" id="conn-error" hidden>
+        <h2>Can't connect to your NAS</h2>
+        <p id="conn-error-msg"></p>
+        <ul class="muted small" id="conn-error-tips"></ul>
+        <div class="row">
+          <button class="btn primary" id="btn-retry-conn">Try again</button>
+          <button class="btn" id="btn-open-nas">Open the NAS address in a tab</button>
+        </div>
+      </section>
+
+      <section id="app" hidden>
+        <div class="card">
+          <div class="toolbar">
+            <nav class="crumbs" id="crumbs" aria-label="Current folder"></nav>
+            <div class="tools">
+              <button class="btn small" id="btn-up" title="Parent folder">↑ Up</button>
+              <button class="btn small" id="btn-refresh" title="Refresh">⟳ Refresh</button>
+              <button class="btn small" id="btn-mkdir">＋ New folder</button>
+            </div>
+          </div>
+
+          <div class="dropzone" id="dropzone" tabindex="0">
+            <div class="dz-icon"><svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.9-8.9A6 6 0 0 1 17.7 8 4 4 0 0 1 17 18"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg></div>
+            <div class="dz-main">Drag &amp; drop folders or files here</div>
+            <div class="dz-sub">They will be uploaded into <strong id="dz-dest">/</strong>, keeping their folder structure.</div>
+            <div class="row center">
+              <button class="btn primary" id="btn-pick-folder">Choose a folder…</button>
+              <button class="btn" id="btn-pick-files">Choose files…</button>
+            </div>
+            <div class="scan-status" id="scan-status" hidden>
+              <span class="spinner" aria-hidden="true"></span>
+              <span id="scan-text">Reading dropped items…</span>
+              <button class="btn small" id="btn-cancel-scan">Cancel</button>
+            </div>
+          </div>
+
+          <details class="options" id="options">
+            <summary>Upload options</summary>
+            <label class="check"><input type="checkbox" id="opt-skip" checked /> Skip files that are already on the NAS <span class="muted">(same size and not changed since; to resume an interrupted upload, drop the same folder again)</span></label>
+            <label class="check"><input type="checkbox" id="opt-verify" checked /> Double-check every file on the NAS after uploading</label>
+            <label class="check"><input type="checkbox" id="opt-junk" checked /> Leave out system junk files <span class="muted">(.DS_Store, Thumbs.db, desktop.ini, ._*)</span></label>
+            <label class="inline">Parallel uploads
+              <select id="opt-parallel">
+                <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option>
+              </select>
+            </label>
+          </details>
+        </div>
+
+        <!-- Saved mirrors: a local folder kept in step with a NAS folder -->
+        <div class="card mirrors" id="mirrors-card" hidden>
+          <div class="tr-head">
+            <div>
+              <h2>Mirrors</h2>
+              <p class="muted small mirrors-intro">Pick a folder on this computer once. After that, <strong>Sync</strong> sends only what changed: new and edited files, renames, and deletions.</p>
+            </div>
+            <button class="btn small" id="btn-new-mirror">＋ New mirror…</button>
+          </div>
+          <ul class="mirror-list" id="mirror-list"></ul>
+        </div>
+
+        <!-- Transfer status -->
+        <div class="card transfers" id="transfers" hidden>
+          <div class="tr-head">
+            <h2 id="tr-title">Uploading</h2>
+            <div class="row">
+              <button class="btn small" id="btn-pause">Pause</button>
+              <button class="btn small" id="btn-resume" hidden>Resume</button>
+              <button class="btn small danger" id="btn-cancel">Cancel</button>
+              <button class="btn small primary" id="btn-retry" hidden>Retry failed</button>
+              <button class="btn small ghost" id="btn-clear" hidden>Clear</button>
+            </div>
+          </div>
+          <div class="bar"><div class="fill" id="tr-fill"></div></div>
+          <div class="tr-stats" id="tr-stats"></div>
+          <div class="tr-sub muted" id="tr-sub"></div>
+          <ul class="active-list" id="active-list"></ul>
+          <details class="failed" id="failed-box" hidden>
+            <summary id="failed-summary">Problems</summary>
+            <ul id="failed-list"></ul>
+          </details>
+        </div>
+
+        <!-- Folder listing -->
+        <div class="card listing-card">
+          <table class="listing" id="listing">
+            <thead>
+              <tr><th class="c-name">Name</th><th class="c-size">Size</th><th class="c-date">Modified</th><th class="c-act"><span class="sr">Actions</span></th></tr>
+            </thead>
+            <tbody id="listing-body"></tbody>
+          </table>
+          <p class="empty muted" id="listing-empty" hidden>This folder is empty.</p>
+          <p class="error" id="listing-error" hidden></p>
+          <p class="muted small" id="listing-loading" hidden>Loading…</p>
+        </div>
+      </section>
+    </main>
+
+    <div class="drop-overlay" id="drop-overlay" hidden>
+      <div class="drop-overlay-inner">
+        <div class="dz-icon"><svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.9-8.9A6 6 0 0 1 17.7 8 4 4 0 0 1 17 18"/><path d="M12 12v9"/><path d="m8.5 15.5 3.5-3.5 3.5 3.5"/></svg></div>
+        <div>Drop to upload into</div>
+        <strong id="overlay-dest">/</strong>
+      </div>
+    </div>
+
+    <dialog id="dialog">
+      <form method="dialog" id="dialog-form">
+        <h3 id="dialog-title"></h3>
+        <div id="dialog-body"></div>
+        <input id="dialog-input" type="text" spellcheck="false" autocomplete="off" hidden />
+        <p class="error" id="dialog-error" hidden></p>
+        <div class="row end">
+          <button class="btn" type="button" id="dialog-cancel">Cancel</button>
+          <button class="btn" type="button" id="dialog-alt" hidden>Other</button>
+          <button class="btn primary" value="ok" id="dialog-ok">OK</button>
+        </div>
+      </form>
+    </dialog>
+
+    <input type="file" id="pick-folder" webkitdirectory multiple hidden />
+    <input type="file" id="pick-files" multiple hidden />
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
