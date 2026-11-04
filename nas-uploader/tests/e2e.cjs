@@ -65,7 +65,7 @@ async function launch(config, { colorScheme, ignoreHTTPSErrors = false } = {}) {
     acceptDownloads: true,
     // Real desktops use a Unicode locale; without one Chromium on Linux cannot read non-ASCII file names.
     env: { ...process.env, LANG: 'C.UTF-8' },
-    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
+    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, ...JSON.parse(process.env.SETUP_CHROME_ARGS || '[]')],
   });
   browsers.push(ctx);
   let [sw] = ctx.serviceWorkers();
@@ -1142,6 +1142,12 @@ test('server from setup-webdav.sh: upload + mirror into the Jellyfin library; fi
   makeMirrorSource();
   const { page, errors } = await launch(setupCfg(SETUP.url), { ignoreHTTPSErrors: true });
   await waitConnected(page);
+  if (process.env.SETUP_NO_JELLYFIN_DIRS) {
+    // A drive added just for the mirror: make the same two folders the Jellyfin case has.
+    for (const d of ['Movies', 'TV']) await page.evaluate((p) => window.nasUploader.client.mkdir(p), '/' + d);
+    await page.click('#btn-refresh');
+    await page.waitForSelector('#listing-body tr[data-name="TV"]');
+  }
   const names = await listingNames(page);
   assert(names.includes('Movies') && names.includes('TV'), 'Jellyfin library folders listed: ' + names);
   await goTo(page, '/Movies');

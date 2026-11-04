@@ -58,8 +58,11 @@ The script in `server/setup-webdav.sh` turns the drive into something the extens
 ```bash
 apt-get update && apt-get install -y curl
 curl -fsSL https://raw.githubusercontent.com/montgomeryburke/Receipts/claude/friendly-pasteur-uixwht/nas-uploader/server/setup-webdav.sh -o setup-webdav.sh
-bash setup-webdav.sh --folder /mnt/mirror
+bash setup-webdav.sh --folder /mnt/mirror --access port-forward --domain YOURNAME.duckdns.org --duckdns-token YOUR-TOKEN
 ```
+
+Your router must forward **TCP 443 to this container's address** (for example `192.168.1.187`), *not* to the
+router's own address (`192.168.1.1`). Using your own domain instead of DuckDNS also needs TCP 80 forwarded.
 
 (Once this is merged, `claude/friendly-pasteur-uixwht` in that address becomes `main`.)
 
@@ -68,7 +71,7 @@ installed**: it just uses Chrome with the extension.
 
 | Choice | What you do (at home) | Good for |
 |---|---|---|
-| **1. Port forward** | Forward TCP **443** and **80** on your router to the container, and get a free name at [duckdns.org](https://www.duckdns.org). The script keeps the name updated and gets a free Let's Encrypt certificate. | Fastest. Best for large mirrors. Failed logins are blocked after 10 tries. |
+| **1. Port forward** | Get a free name at [duckdns.org](https://www.duckdns.org) and forward TCP **443** on your router to the container. The script keeps the name pointed at your home, gets a free Let's Encrypt certificate through DuckDNS (so port 80 isn't needed), and renews it automatically. | Fastest. Best for large mirrors. Failed logins are blocked after 10 tries; security updates install automatically. |
 | **2. Tailscale Funnel** | Tailscale is installed **on the HP's container only** and gives it a normal public `https://…ts.net` address that any browser can open, no Tailscale needed on the visiting computer. No router changes. | When you can't change router settings. Tailscale caps the speed somewhat. |
 | **3. Home network only** | Nothing. | Trying it out first. You can re-run the script later and pick 1 or 2. |
 
@@ -221,8 +224,9 @@ Proxies inject failures (503s, 502s, dropped connections, permanent 403s), throt
 offline mid-transfer. Every uploaded file is compared byte-for-byte (SHA-256) with the original.
 
 `tests/test-setup-script.sh` runs `server/setup-webdav.sh` for real in a container made to look like the HP's
-(media owned by a user, Jellyfin libraries), then drives the extension against the result. It changes the system
-Apache, so it only runs in a throwaway container.
+(media owned by a user, Jellyfin libraries, a freshly added drive), then drives the extension against the result.
+Port-forward mode is tested with real certificates from Pebble (Let's Encrypt's test CA): issuance through DuckDNS
+and through port 80, renewal, fail2ban. It changes the system Apache, so it only runs in a throwaway container.
 
 ```bash
 sudo apt-get install apache2 apache2-utils      # mod_dav

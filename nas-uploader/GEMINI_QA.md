@@ -31,8 +31,9 @@ lib/store.js (saved mirrors with folder handles in IndexedDB), lib/util.js, conf
 
 Also review server/setup-webdav.sh: a bash script run as root inside a Proxmox LXC (Debian/Ubuntu) that installs
 Apache mod_dav for the folder Jellyfin uses, fixes permissions (runs Apache as the folder owner, or grants
-www-data access via ACLs/group), and exposes it via Tailscale Funnel, port-forward + DuckDNS + Let's Encrypt, or
-LAN-only self-signed HTTPS.
+www-data access via ACLs/group), and exposes it via port-forward + DuckDNS + Let's Encrypt (DNS-01 through the
+DuckDNS TXT API, or HTTP-01 webroot for other domains; fail2ban; unattended security upgrades), Tailscale Funnel,
+or LAN-only self-signed HTTPS. The user's router forwards TCP 443 to the container.
 
 Please review for, and report concrete findings with file + line + a reproduction scenario:
 1. Correctness bugs: path encoding (#, %, ?, unicode, emoji, leading spaces), href parsing of PROPFIND

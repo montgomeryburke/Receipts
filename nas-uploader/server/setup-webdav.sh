@@ -12,7 +12,8 @@
 #    bash setup-webdav.sh                       # asks a few questions
 #    bash setup-webdav.sh --access funnel       # Tailscale Funnel: no router changes
 #    bash setup-webdav.sh --access port-forward --domain NAME.duckdns.org \
-#         --email you@example.com --duckdns-token TOKEN
+#         --duckdns-token TOKEN --folder /mnt/mirror
+#                                               # router: forward TCP 443 to this container
 #    bash setup-webdav.sh --access local        # home network only (self-signed HTTPS)
 #    bash setup-webdav.sh --uninstall           # remove (your files are never touched)
 #
@@ -25,6 +26,8 @@
 #    --access proxy --public-url https://files.example.com/
 #                         behind your own reverse proxy (Nginx Proxy Manager, Caddy…)
 #    --local-port N       plain-HTTP port Apache uses behind Funnel / a proxy (default 8090)
+#    --email ADDR         optional, given to Let's Encrypt
+#    --acme-server URL    certificate authority (default Let's Encrypt); e.g. Let's Encrypt staging for a dry run
 #    --yes                don't ask questions; use defaults
 #
 #  Safe to run again (e.g. to change the password or the folder).
@@ -44,6 +47,11 @@ PUBLIC_URL=""
 ASSUME_YES=0
 UNINSTALL=0
 SKIP_TAILSCALE=0 # for testing the Apache side of Funnel mode without Tailscale
+ACME_SERVER=""
+# Overridable for automated tests only.
+DUCKDNS_URL="${NAS_UPLOADER_DUCKDNS_URL:-https://www.duckdns.org}"
+DNS_WAIT="${NAS_UPLOADER_DNS_WAIT:-60}"
+ACME_ROOT=/var/lib/nas-uploader/acme
 
 SITE=/etc/apache2/sites-available/nas-uploader.conf
 HTPASSWD=/etc/apache2/nas-uploader.htpasswd
@@ -77,6 +85,7 @@ while [[ $# -gt 0 ]]; do
     --yes|-y) ASSUME_YES=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --skip-tailscale) SKIP_TAILSCALE=1; shift ;;
+    --acme-server) ACME_SERVER="${2:?}"; shift 2 ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown option: $1" >&2; usage 2 ;;
   esac
@@ -114,7 +123,8 @@ apache_reload() {
 if [[ $UNINSTALL -eq 1 ]]; then
   say "Removing the NAS Uploader server (your files are not touched)"
   a2dissite nas-uploader >/dev/null 2>&1 || true
-  rm -f "$SITE" "$HTPASSWD" /etc/cron.d/nas-uploader-duckdns /usr/local/sbin/nas-uploader-duckdns
+  rm -f "$SITE" "$HTPASSWD" /etc/cron.d/nas-uploader-duckdns /usr/local/sbin/nas-uploader-duckdns \
+    /usr/local/sbin/nas-uploader-dns-auth /usr/local/sbin/nas-uploader-dns-cleanup /etc/fail2ban/jail.d/nas-uploader.conf
   if [[ -f "$STATE_DIR/envvars.backup" ]]; then cp "$STATE_DIR/envvars.backup" /etc/apache2/envvars; fi
   if command -v tailscale >/dev/null && [[ -f "$STATE_DIR/funnel" ]]; then
     tailscale funnel --https=443 off >/dev/null 2>&1 || tailscale funnel reset >/dev/null 2>&1 || true
@@ -191,6 +201,13 @@ for p in "${PKGS[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
 if [[ ${#missing[@]} -gt 0 ]]; then
   apt-get update -qq
   apt-get install -y -qq "${missing[@]}" >/dev/null
+fi
+# Security fixes for Apache (and the rest of this container) install automatically.
+if dpkg -s unattended-upgrades >/dev/null 2>&1 || apt-get install -y -qq unattended-upgrades >/dev/null 2>&1; then
+  printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > /etc/apt/apt.conf.d/52nas-uploader-auto-upgrades
+  ok "Security updates will install automatically"
+else
+  warn "Couldn't set up automatic security updates; run 'apt-get upgrade' now and then."
 fi
 a2enmod -q dav dav_fs auth_basic authn_file headers ssl >/dev/null
 # Silence Apache's "could not determine the server's fully qualified domain name" notice.
@@ -361,19 +378,38 @@ elif [[ "$ACCESS" == "port-forward" ]]; then
   if [[ "$DOMAIN" == *.duckdns.org && -z "$DUCKDNS_TOKEN" ]]; then
     DUCKDNS_TOKEN="$(ask 'DuckDNS token (from duckdns.org, keeps the name pointing at your home; Enter to skip)')"
   fi
+  if [[ -z "$DUCKDNS_TOKEN" && -f "$STATE_DIR/duckdns.env" ]] && grep -qx "DOMAIN='${DOMAIN%.duckdns.org}'" "$STATE_DIR/duckdns.env"; then
+    DUCKDNS_TOKEN="$(sed -n "s/^TOKEN='\(.*\)'$/\1/p" "$STATE_DIR/duckdns.env")" # keep the one from an earlier run
+  fi
   if [[ -n "$DUCKDNS_TOKEN" ]]; then
+    [[ "$DOMAIN" == *.duckdns.org ]] || die "--duckdns-token only works with a NAME.duckdns.org name"
+    [[ "$DUCKDNS_TOKEN" =~ ^[A-Za-z0-9-]+$ ]] || die "That doesn't look like a DuckDNS token (letters, digits and dashes)."
     say "Keeping $DOMAIN pointed at your home's internet address (DuckDNS, every 5 minutes)"
     sub="${DOMAIN%.duckdns.org}"
-    printf 'DOMAIN=%s\nTOKEN=%s\n' "$sub" "$DUCKDNS_TOKEN" > "$STATE_DIR/duckdns.env"
-    chmod 600 "$STATE_DIR/duckdns.env"
+    ( umask 077
+      printf "DOMAIN='%s'\nTOKEN='%s'\nURL='%s'\nWAIT='%s'\n" "$sub" "$DUCKDNS_TOKEN" "$DUCKDNS_URL" "$DNS_WAIT" > "$STATE_DIR/duckdns.env" )
     cat > /usr/local/sbin/nas-uploader-duckdns <<'EOF'
 #!/bin/sh
+# Points NAME.duckdns.org at this home's current internet address.
 . /etc/nas-uploader/duckdns.env
-curl -fsS --max-time 30 "https://www.duckdns.org/update?domains=$DOMAIN&token=$TOKEN&ip="
+curl -fsS --max-time 30 "$URL/update?domains=$DOMAIN&token=$TOKEN&ip="
 EOF
-    chmod 700 /usr/local/sbin/nas-uploader-duckdns
+    # Let's Encrypt "DNS" check through DuckDNS: proves the name is ours without needing port 80.
+    cat > /usr/local/sbin/nas-uploader-dns-auth <<'EOF'
+#!/bin/sh
+. /etc/nas-uploader/duckdns.env
+r="$(curl -fsS --max-time 30 "$URL/update?domains=$DOMAIN&token=$TOKEN&txt=$CERTBOT_VALIDATION")" || exit 1
+case "$r" in OK*) ;; *) echo "DuckDNS refused the update ($r). Check the token." >&2; exit 1 ;; esac
+sleep "$WAIT"
+EOF
+    cat > /usr/local/sbin/nas-uploader-dns-cleanup <<'EOF'
+#!/bin/sh
+. /etc/nas-uploader/duckdns.env
+curl -fsS --max-time 30 "$URL/update?domains=$DOMAIN&token=$TOKEN&txt=removed&clear=true" >/dev/null || true
+EOF
+    chmod 700 /usr/local/sbin/nas-uploader-duckdns /usr/local/sbin/nas-uploader-dns-auth /usr/local/sbin/nas-uploader-dns-cleanup
     echo '*/5 * * * * root /usr/local/sbin/nas-uploader-duckdns >/dev/null 2>&1' > /etc/cron.d/nas-uploader-duckdns
-    if [[ "$(/usr/local/sbin/nas-uploader-duckdns 2>/dev/null || true)" == OK* ]]; then ok "DuckDNS updated"; else warn "DuckDNS update failed. Check the token at duckdns.org."; fi
+    if [[ "$(/usr/local/sbin/nas-uploader-duckdns 2>/dev/null || true)" == OK* ]]; then ok "DuckDNS updated"; else warn "DuckDNS update failed. Check the name and token at duckdns.org."; fi
   fi
   PUBLIC_URL="https://$DOMAIN$([[ "$PORT" != 443 ]] && echo ":$PORT")/"
 elif [[ "$ACCESS" == "proxy" ]]; then
@@ -438,51 +474,75 @@ $COMMON
 </VirtualHost>
 EOF
 else
-  if [[ "$ACCESS" == "port-forward" ]]; then
-    say "Getting a free Let's Encrypt certificate for $DOMAIN (needs port 80 forwarded to $LAN_IP)"
-    dpkg -s certbot >/dev/null 2>&1 || apt-get install -y -qq certbot python3-certbot-apache >/dev/null
-    a2ensite -q 000-default >/dev/null 2>&1 || true
-    apache_reload
-    if certbot certonly --apache -d "$DOMAIN" --non-interactive --agree-tos ${EMAIL:+-m "$EMAIL"} ${EMAIL:---register-unsafely-without-email} \
-        --deploy-hook "apache2ctl -k graceful" >/dev/null 2>&1; then
-      CERT="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
-      KEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
-      ok "Certificate issued (renews automatically)"
-    else
-      warn "Let's Encrypt failed. Is TCP port 80 forwarded from your router to $LAN_IP, and does $DOMAIN point at your home?"
-      warn "Using a self-signed certificate for now; just run this script again once the port forward works."
-      self_signed
-    fi
-  else
-    self_signed
-  fi
-  LISTEN_LINE=""
-  if ! grep -qE "^\s*Listen\s+$PORT\b" /etc/apache2/ports.conf; then LISTEN_LINE="Listen $PORT"; fi
-  HTTP_VHOST=""
-  if [[ "$ACCESS" == "port-forward" ]]; then
-    # Port 80 only redirects to HTTPS, except for Let's Encrypt's renewal checks.
-    a2dissite -q 000-default >/dev/null 2>&1 || true
-    HTTP_VHOST="<VirtualHost *:80>
+  write_tls_site() { # write_tls_site CERT KEY
+    local listen_line="" http_vhost=""
+    grep -qE "^\s*Listen\s+$PORT\b" /etc/apache2/ports.conf || listen_line="Listen $PORT"
+    if [[ "$ACCESS" == "port-forward" ]]; then
+      # Port 80 answers Let's Encrypt's checks (when the DNS method isn't used) and sends everything else to HTTPS.
+      a2dissite -q 000-default >/dev/null 2>&1 || true
+      mkdir -p "$ACME_ROOT/.well-known/acme-challenge"
+      http_vhost="<VirtualHost *:80>
     ServerName $DOMAIN
+    Alias /.well-known/acme-challenge/ \"$ACME_ROOT/.well-known/acme-challenge/\"
+    <Directory \"$ACME_ROOT\">
+        Options None
+        AllowOverride None
+        Require all granted
+    </Directory>
     RedirectMatch 301 ^/(?!\.well-known/acme-challenge/)(.*)\$ ${PUBLIC_URL}\$1
 </VirtualHost>"
-  fi
-  cat > "$SITE" <<EOF
+    fi
+    cat > "$SITE" <<EOF
 # Managed by NAS Uploader setup-webdav.sh. Re-run the script instead of editing.
-$LISTEN_LINE
-$HTTP_VHOST
+$listen_line
+$http_vhost
 <VirtualHost *:$PORT>
     ServerName ${DOMAIN:-$LAN_IP}
     ServerAlias localhost $LAN_IP
     SSLEngine on
-    SSLCertificateFile "$CERT"
-    SSLCertificateKeyFile "$KEY"
+    SSLCertificateFile "$1"
+    SSLCertificateKeyFile "$2"
 $COMMON
 </VirtualHost>
 EOF
+    a2ensite -q nas-uploader >/dev/null
+    apache_reload
+  }
+
+  LE_LIVE="/etc/letsencrypt/live/$DOMAIN"
+  if [[ "$ACCESS" == "port-forward" && -n "$DOMAIN" && -f "$LE_LIVE/fullchain.pem" ]]; then
+    CERT="$LE_LIVE/fullchain.pem"; KEY="$LE_LIVE/privkey.pem"
+    write_tls_site "$CERT" "$KEY"
+    ok "Using the Let's Encrypt certificate from an earlier run (it renews automatically)"
+  else
+    self_signed # also the stand-in while Let's Encrypt checks the name
+    write_tls_site "$CERT" "$KEY"
+    if [[ "$ACCESS" == "port-forward" ]]; then
+      command -v certbot >/dev/null || apt-get install -y -qq certbot >/dev/null
+      args=(certonly --non-interactive --agree-tos --cert-name "$DOMAIN" -d "$DOMAIN" --deploy-hook "apache2ctl -k graceful")
+      if [[ -n "$EMAIL" ]]; then args+=(-m "$EMAIL"); else args+=(--register-unsafely-without-email); fi
+      [[ -n "$ACME_SERVER" ]] && args+=(--server "$ACME_SERVER")
+      if [[ -n "$DUCKDNS_TOKEN" ]]; then
+        say "Getting a free Let's Encrypt certificate for $DOMAIN (checked through DuckDNS, no port 80 needed; about a minute)"
+        args+=(--manual --preferred-challenges dns --manual-auth-hook /usr/local/sbin/nas-uploader-dns-auth --manual-cleanup-hook /usr/local/sbin/nas-uploader-dns-cleanup)
+        hint="Check the DuckDNS name and token at duckdns.org."
+      else
+        say "Getting a free Let's Encrypt certificate for $DOMAIN (needs TCP port 80 forwarded to $LAN_IP)"
+        args+=(--webroot -w "$ACME_ROOT")
+        hint="Is TCP port 80 forwarded from your router to $LAN_IP, and does $DOMAIN point at your home?"
+      fi
+      if certbot "${args[@]}" >"$STATE_DIR/certbot.log" 2>&1; then
+        CERT="$LE_LIVE/fullchain.pem"; KEY="$LE_LIVE/privkey.pem"
+        write_tls_site "$CERT" "$KEY"
+        ok "Certificate issued (renews automatically)"
+      else
+        warn "Let's Encrypt didn't issue a certificate. $hint"
+        warn "Details: $STATE_DIR/certbot.log. Using a self-signed certificate for now; run this script again to retry."
+      fi
+    fi
+  fi
 fi
-a2ensite -q nas-uploader >/dev/null
-apache_reload
+[[ "$ACCESS" == "funnel" || "$ACCESS" == "proxy" ]] && { a2ensite -q nas-uploader >/dev/null; apache_reload; }
 ok "Web server running"
 
 if [[ "$ACCESS" == "funnel" && $SKIP_TAILSCALE -eq 0 ]]; then
@@ -550,8 +610,13 @@ echo "(Saved to $SUMMARY, readable only by root.)"
 case "$ACCESS" in
   port-forward)
     echo
-    echo "On your router, forward TCP ports 443 and 80 to $LAN_IP (this container)."
-    echo "Give this container a fixed address in your router's DHCP settings so the forward keeps working." ;;
+    if [[ -n "$DUCKDNS_TOKEN" ]]; then
+      echo "On your router, forward TCP port $PORT to $LAN_IP (this container). Port 80 isn't needed."
+    else
+      echo "On your router, forward TCP ports $PORT and 80 to $LAN_IP (this container)."
+    fi
+    echo "Give this container a fixed address in your router's DHCP settings so the forward keeps working."
+    echo "Then check from your phone with Wi-Fi off: $PUBLIC_URL should ask for a login." ;;
   local)
     echo
     echo "This only works on your home network. Run the script again with --access funnel or"
