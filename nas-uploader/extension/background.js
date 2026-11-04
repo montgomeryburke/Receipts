@@ -176,6 +176,14 @@ const handlers = {
       return { none: true };
     }
   },
+  // The NAS address and login saved from the setup form (when config.js is not filled in), for the engine.
+  'nas.config': async () => {
+    try {
+      return (await chrome.storage.local.get('nasConfig')).nasConfig || { none: true };
+    } catch {
+      return { none: true };
+    }
+  },
   'app.open': async (m) => {
     await openApp(m.hash || '');
     return { ok: true };

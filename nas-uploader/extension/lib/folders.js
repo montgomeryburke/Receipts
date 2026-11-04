@@ -3,13 +3,14 @@
 // Paths in the index are the files' NAS paths without the leading slash ("Projects/2024-017 Alert/Specs/x.pdf"),
 // so a file means the same thing on this computer and on the NAS (where the deep OCR index is built).
 
-import { CONFIG } from '../config.js';
+import { CONFIG, loadConfig } from './config-store.js';
 import { listMirrors } from './store.js';
 import { getSettings } from './db.js';
 import { permissionState } from './fsutil.js';
 
 /** [{id, name, handle, nasPath, prefix, index, projectMode, lastSync, perm}] for this NAS. */
 export async function projectFolders({ withPerm = true } = {}) {
+  await loadConfig();
   const settings = await getSettings();
   let mirrors = [];
   try {

@@ -126,8 +126,15 @@ The extension works with any WebDAV server reachable over HTTPS:
 ## 2. Put your details into the extension
 
 Download **`nas-uploader-extension.zip`** from this folder on GitHub (open the file, then **Download raw file**)
-and unzip it. You get a folder called `nas-uploader`. Open `config.js` in it with any text editor (Notepad is
-fine) and paste the lines the setup script printed:
+and unzip it. You get a folder called `nas-uploader`. Then either:
+
+- **Easiest:** skip this step. After installing (step 3), the extension opens a **Connect to your NAS** form: type
+  the address, username and password the setup script printed, once. They're kept in Chrome on that computer
+  (untick *Remember the password* to type it once per browser session instead). Change or forget them later in
+  **Settings → NAS connection**.
+- **Or build them in:** open `config.js` with any text editor (Notepad is fine) and paste the lines the setup
+  script printed. Values in `config.js` always win over the form, so every computer you install that folder on
+  connects straight away:
 
 ```js
 export const CONFIG = {

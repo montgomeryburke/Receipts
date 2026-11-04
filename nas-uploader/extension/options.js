@@ -4,6 +4,7 @@ import { getRules, deleteRule, addHint } from './lib/teach.js';
 import { splitList } from './lib/text.js';
 import { projectFolders } from './lib/folders.js';
 import { listInstructions, addInstruction, removeInstruction } from './lib/memory.js';
+import { CONFIG, loadConfig, forgetSavedConfig } from './lib/config-store.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -120,6 +121,25 @@ async function renderFolderList() {
     </div>`;
   }).join('');
 }
+
+async function renderNas() {
+  await loadConfig({ fresh: true });
+  const url = CONFIG.serverUrl && !/your-nas\.example/.test(CONFIG.serverUrl) ? CONFIG.serverUrl : '';
+  $('nasInfo').innerHTML = !url
+    ? 'Not set up yet. Click below (or fill in <code>config.js</code> in the extension folder).'
+    : CONFIG.source === 'config.js'
+      ? `<b>${esc(url)}</b> as <b>${esc(CONFIG.username || '?')}</b> — built into <code>config.js</code> (change it there).`
+      : `<b>${esc(url)}</b> as <b>${esc(CONFIG.username || '?')}</b> — saved on this computer${CONFIG.password ? ' with the password' : '; the password is asked once per browser session'}.`;
+  $('nasChange').hidden = CONFIG.source === 'config.js' && !!url;
+  $('nasForget').hidden = CONFIG.source !== 'settings';
+}
+$('nasChange').addEventListener('click', () => bg('app.open', { hash: '#nas-setup' }));
+$('nasForget').addEventListener('click', async () => {
+  if (!confirm('Forget the NAS address and login on this computer? Your files are not touched.')) return;
+  await forgetSavedConfig();
+  $('nasOut').textContent = 'Forgotten.';
+  renderNas();
+});
 
 $('addFolder').addEventListener('click', () => bg('app.open', { hash: '#new-mirror' }));
 
@@ -434,6 +454,7 @@ $('importSetup').addEventListener('click', () => {
 (async () => {
   settings = await getSettings();
   fillFields();
+  renderNas();
   renderFolders();
   renderActions();
   renderRules();

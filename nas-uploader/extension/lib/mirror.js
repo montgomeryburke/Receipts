@@ -224,11 +224,16 @@ export function planMirror({ local, remote, manifest, options = {} }) {
     // Files that are being moved out don't count as deleted with their old folder (moves run before deletions).
     const dirFileCount = new Map();
     const dirBytes = new Map();
+    // Files other than Jellyfin/Kodi artwork and metadata, per folder: a NAS folder holding only those can be a
+    // folder that still exists on this computer but is empty (which the folder picker can't see).
+    const dirContentCount = new Map();
     for (const [k, r] of remoteFiles) {
       if (movedFrom.has(k)) continue;
+      const meta = protectMetadata && isProtectedName(baseName('/' + k), false);
       for (let d = parentPath('/' + k).slice(1); d; d = parentPath('/' + d).slice(1)) {
         dirFileCount.set(d, (dirFileCount.get(d) || 0) + 1);
         dirBytes.set(d, (dirBytes.get(d) || 0) + (r.size || 0));
+        if (!meta) dirContentCount.set(d, (dirContentCount.get(d) || 0) + 1);
       }
     }
     const deletedDirKeys = new Set();
@@ -251,8 +256,11 @@ export function planMirror({ local, remote, manifest, options = {} }) {
       if (protectMetadata && isProtectedName(name, true)) {
         keptDirKeys.add(k);
         plan.keptProtected += files;
-      } else if (!localKnowsEmptyDirs && files === 0 && !hadMoveSource) {
-        keptDirKeys.add(k); // the folder picker can't see empty folders, so don't assume this one is gone
+      } else if (!localKnowsEmptyDirs && !(dirContentCount.get(k) || 0) && !hadMoveSource) {
+        // The folder picker can't see empty folders, so don't assume this one is gone — and don't take the
+        // artwork Jellyfin put in it with it. (After a rename, hadMoveSource lets the old folder go.)
+        keptDirKeys.add(k);
+        if (files) plan.keptProtected += files;
       } else {
         deletedDirKeys.add(k);
         plan.deleteDirs.push({ rel: remoteDirs.get(k).rel, files, bytes: dirBytes.get(k) || 0 });

@@ -1,4 +1,4 @@
-import { CONFIG } from './config.js';
+import { CONFIG, loadConfig, saveConfig, problemWith } from './lib/config-store.js';
 import { WebDAVClient } from './lib/webdav.js';
 import { captureDrop, scanEntries, scanFileList, scanDirectoryHandle, stripTopFolder, singleTopFolder } from './lib/scan.js';
 import { TransferManager } from './lib/transfer.js';
@@ -31,7 +31,7 @@ const state = {
   awake: false,
   manager: null,
   prefs: { skipExisting: true, verify: true, skipJunk: true, parallel: 3 },
-  passwordBuiltIn: !!CONFIG.password,
+  passwordBuiltIn: false, // set once the configuration is loaded
   lastFailedSig: '',
   mirrors: [],
   pickDirectory: null, // tests can replace the native folder picker
@@ -42,18 +42,7 @@ const state = {
 // ---------------------------------------------------------------------------
 
 function configProblem() {
-  const url = String(CONFIG?.serverUrl || '').trim();
-  if (!url || /your-nas\.example\.com/i.test(url)) return 'serverUrl is still set to the example address.';
-  let u;
-  try {
-    u = new URL(url);
-  } catch {
-    return `serverUrl "${url}" is not a valid web address.`;
-  }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return 'serverUrl must start with https:// (or http://).';
-  if (CONFIG.username === 'your-nas-username') return 'username is still set to the example value.';
-  if (CONFIG.password === 'your-nas-password') return 'password is still set to the example value.';
-  return null;
+  return problemWith(CONFIG);
 }
 
 function serverLabel() {
@@ -89,7 +78,7 @@ function showOnly(sectionId) {
 }
 
 // "#/Projects/x" opens a NAS folder; "#sync=<id>" and "#new-mirror" are commands from the side panel.
-const COMMAND_HASH = /^#(sync=|new-mirror)/;
+const COMMAND_HASH = /^#(sync=|new-mirror|nas-setup)/;
 
 function folderFromHash() {
   const h = location.hash.replace(/^#/, '');
@@ -104,7 +93,7 @@ const CONN_TIPS = {
     'If the NAS uses a self-signed certificate, click "Open the NAS address in a tab", accept the warning once, then try again — or install a free Let\'s Encrypt certificate on the NAS.',
     'Some work or hotel networks block unusual ports; HTTPS on port 443 is the most likely to get through.',
   ],
-  auth: ['Check username and password in config.js.', 'Make sure this account is allowed to use WebDAV on the NAS (Synology: WebDAV Server → Settings / user permissions).'],
+  auth: ['Check the username and password (in config.js, or with "Change the NAS address or login" below).', 'Make sure this account is allowed to use WebDAV on the NAS (Synology: WebDAV Server → Settings / user permissions).'],
   protocol: [
     'The address answered, but not like a WebDAV server. Make sure serverUrl points at the WebDAV service (e.g. port 5006 on Synology), not the NAS\'s normal login page.',
   ],
@@ -117,6 +106,40 @@ function showConnError(err) {
   const tips = err?.status === 401 || err?.status === 403 ? CONN_TIPS.auth : err?.status === 0 ? CONN_TIPS.network : CONN_TIPS.protocol;
   const ul = $('conn-error-tips');
   ul.replaceChildren(...tips.map((t) => Object.assign(document.createElement('li'), { textContent: t })));
+  $('btn-change-nas').hidden = CONFIG.source !== 'settings';
+}
+
+/** The setup form: shown when config.js isn't filled in (or to change what was typed before). */
+function showSetup(problem) {
+  showOnly('setup');
+  setConn('error', 'Not set up');
+  $('setup-detail').textContent = problem || '';
+  if (CONFIG.source === 'settings') {
+    $('setup-url').value = CONFIG.serverUrl || '';
+    $('setup-user').value = CONFIG.username || '';
+  }
+  $('setup-error').hidden = true;
+  ($('setup-url').value ? $('setup-pass') : $('setup-url')).focus();
+}
+
+function wireSetup() {
+  $('setup-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('setup-error').hidden = true;
+    $('setup-submit').disabled = true;
+    try {
+      await saveConfig({ serverUrl: $('setup-url').value, username: $('setup-user').value, password: $('setup-pass').value, remember: $('setup-remember').checked });
+      state.passwordBuiltIn = !!CONFIG.password;
+      $('setup-pass').value = '';
+      await init();
+    } catch (err) {
+      $('setup-error').textContent = err.message || String(err);
+      $('setup-error').hidden = false;
+    } finally {
+      $('setup-submit').disabled = false;
+    }
+  });
+  $('btn-change-nas').addEventListener('click', () => showSetup(''));
 }
 
 async function connect(creds, { fromLogin = false } = {}) {
@@ -1240,10 +1263,9 @@ function wireAssistantButton() {
 
 async function init() {
   const problem = configProblem();
-  if (problem) {
-    showOnly('setup');
-    setConn('error', 'Not configured');
-    $('setup-detail').textContent = problem;
+  if (problem || location.hash === '#nas-setup') {
+    if (location.hash === '#nas-setup') history.replaceState(null, '', location.pathname + location.search);
+    showSetup(problem);
     return;
   }
   const creds = await storedCreds();
@@ -1257,7 +1279,10 @@ async function init() {
 // Exposed for automated tests and troubleshooting from DevTools.
 window.nasUploader = state;
 state.renderMirrors = () => renderMirrors();
+await loadConfig();
+state.passwordBuiltIn = !!CONFIG.password;
 await loadPrefs();
 wireUi();
+wireSetup();
 wireAssistantButton();
 await init();

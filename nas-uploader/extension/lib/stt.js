@@ -5,7 +5,7 @@
 import { encodeWav, toBase64, SAMPLE_RATE } from './audio.js';
 import { resolveGeminiModel, LLMError } from './llm.js';
 import { basicAuthHeader } from './util.js';
-import { CONFIG } from '../config.js';
+import { CONFIG } from './config-store.js';
 import { nasCreds } from './nas.js';
 
 export class Transcriber extends EventTarget {

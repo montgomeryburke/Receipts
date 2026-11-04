@@ -14,7 +14,7 @@ import { projectFolders } from './lib/folders.js';
 import { nasClient, configProblem, writeTextFile } from './lib/nas.js';
 import { sendChat, chatHistory, clearChat, runPendingTest } from './lib/chat.js';
 import { listChanges, undoChange } from './lib/memory.js';
-import { CONFIG } from './config.js';
+import { CONFIG, loadConfig } from './lib/config-store.js';
 
 const ui = (type, data) => chrome.runtime.sendMessage({ to: 'ui', type, ...data }).catch(() => {});
 const bg = (type, data) => chrome.runtime.sendMessage({ to: 'bg', type, ...data }).catch(() => {});
@@ -132,7 +132,7 @@ const queue = [];
 let draining = false;
 const onItem = (item) => {
   ui('item', { id: item.id, status: item.status });
-  updateBadge();
+updateBadge();
 };
 
 async function drain() {
@@ -328,4 +328,5 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true;
 });
 
+await loadConfig();
 updateBadge();

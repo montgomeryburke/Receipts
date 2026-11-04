@@ -374,16 +374,22 @@ input[type='password'] {
   padding: 6px 9px;
 }
 
-#login-form label {
+#login-form label,
+#setup-form label {
   display: block;
   margin-bottom: 10px;
 }
 
-#login-form input {
+#login-form input,
+#setup-form input:not([type='checkbox']) {
   display: block;
   width: 100%;
   max-width: 340px;
   margin-top: 4px;
+}
+
+#setup-form label.check input {
+  margin-right: 6px;
 }
 
 /* Transfers */

@@ -1,28 +1,18 @@
 // The NAS connection for every part of the extension (file manager, engine, meeting window, side panel).
-// The address and login come from config.js; if config.js has no password, the login typed into
-// "NAS files" is kept for this browser session only.
+// The address and login come from config.js, or from the setup form in "NAS files" (lib/config-store.js); a
+// password that isn't remembered is typed once per browser session.
 
-import { CONFIG } from '../config.js';
+import { CONFIG, problemWith, loadConfig } from './config-store.js';
 import { WebDAVClient } from './webdav.js';
 import { normalizePath, parentPath } from './util.js';
 
-/** Why config.js can't be used yet, or null. */
+/** Why the NAS connection can't be used yet, or null (call loadConfig() first). */
 export function configProblem() {
-  const url = String(CONFIG?.serverUrl || '').trim();
-  if (!url || /your-nas\.example\.com/i.test(url)) return 'serverUrl is still set to the example address.';
-  let u;
-  try {
-    u = new URL(url);
-  } catch {
-    return `serverUrl "${url}" is not a valid web address.`;
-  }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return 'serverUrl must start with https:// (or http://).';
-  if (CONFIG.username === 'your-nas-username') return 'username is still set to the example value.';
-  if (CONFIG.password === 'your-nas-password') return 'password is still set to the example value.';
-  return null;
+  return problemWith(CONFIG);
 }
 
 export async function nasCreds() {
+  await loadConfig();
   if (CONFIG.username && CONFIG.password) return { username: CONFIG.username, password: CONFIG.password };
   try {
     if (chrome.storage?.session) {
@@ -45,8 +35,9 @@ export async function nasCreds() {
 }
 
 export async function nasClient() {
+  await loadConfig();
   const problem = configProblem();
-  if (problem) throw new Error(`The NAS isn't set up in config.js yet: ${problem}`);
+  if (problem) throw new Error(`The NAS isn't set up yet (open NAS files to enter its address): ${problem}`);
   const creds = await nasCreds();
   if (!creds) throw new Error('Not signed in to the NAS — open "NAS files" once and sign in.');
   return new WebDAVClient({ serverUrl: CONFIG.serverUrl, ...creds });

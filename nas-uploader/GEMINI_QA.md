@@ -77,4 +77,16 @@ H. Recorder: losing data on long recordings, files left half-written, recording 
 
 For each finding give: severity (critical/high/medium/low), file:line, what goes wrong, a concrete reproduction,
 and a suggested fix. No style preferences. Say explicitly when you are unsure.
+
+Previously reported and already resolved — re-check the CURRENT code and only report one again if it is still wrong:
+1. Mirror deleting a NAS folder that holds only Jellyfin metadata when the folder picker can't see an empty local
+   folder: fixed in lib/mirror.js (dirContentCount ignores protected metadata for that safeguard; renames still
+   clean up via hadMoveSource).
+2. NAS folder listing freezing on 100k entries: app.js renders 1,000 rows and a "Show more" row (LISTING_PAGE).
+3. Credentials only in config.js: the setup form in app.html + lib/config-store.js (chrome.storage.local, optional
+   session-only password, Settings → NAS connection); config.js still wins when filled in.
+4. "Memory leak" from keeping t.file after a failed upload: intentional — Retry failed needs it (transfer.js
+   retryFailed skips tasks without a file), and a File from a dropped folder is a disk reference, not a copy in memory.
+5. Background-tab timer throttling: retry back-off and auto-resume use a dedicated worker's timers (lib/util.js
+   after()/sleep(), lib/timer-worker.js); chrome.alarms (30 s minimum) would be worse.
 ```

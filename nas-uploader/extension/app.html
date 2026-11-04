@@ -24,9 +24,18 @@
     <main>
       <!-- Shown when config.js still has the example values -->
       <section class="card notice" id="setup" hidden>
-        <h2>One-time setup needed</h2>
-        <p>Open <code>config.js</code> in the extension folder, fill in your NAS address, username and password, save it, then click the reload icon for NAS Uploader on <code>chrome://extensions</code>.</p>
-        <p class="muted" id="setup-detail"></p>
+        <h2>Connect to your NAS</h2>
+        <p>Type your NAS's address and login once; they are kept in this browser on this computer.</p>
+        <form id="setup-form" autocomplete="off">
+          <label>NAS address <input id="setup-url" type="text" required spellcheck="false" placeholder="https://yourname.duckdns.org/" /></label>
+          <label>Username <input id="setup-user" type="text" required autocomplete="off" spellcheck="false" /></label>
+          <label>Password <input id="setup-pass" type="password" autocomplete="off" /></label>
+          <label class="check"><input id="setup-remember" type="checkbox" checked /> Remember the password on this computer (untick to type it once per browser session)</label>
+          <p class="error" id="setup-error" hidden></p>
+          <button class="btn primary" type="submit" id="setup-submit">Save and connect</button>
+        </form>
+        <p class="muted small">Or fill in <code>config.js</code> in the extension folder before installing (the HP's setup script prints the values); then this form isn't needed.</p>
+        <p class="muted small" id="setup-detail"></p>
       </section>
 
       <!-- Shown when config.js has no password (ask once per browser session) -->
@@ -49,6 +58,7 @@
         <div class="row">
           <button class="btn primary" id="btn-retry-conn">Try again</button>
           <button class="btn" id="btn-open-nas">Open the NAS address in a tab</button>
+          <button class="btn" id="btn-change-nas" hidden>Change the NAS address or login</button>
         </div>
       </section>
 

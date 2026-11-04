@@ -367,6 +367,49 @@ test('shipped config.js (example values) shows the setup screen', async () => {
   eq(errors.length, 0, 'page errors: ' + errors.join('; '));
 });
 
+test('no config.js needed: the setup form saves the NAS address and login; remembered, usable by the whole extension', async () => {
+  const { page, errors, sw, id } = await launch(null);
+  await page.waitForSelector('#setup:not([hidden]) #setup-form', { timeout: 10000 });
+  await page.fill('#setup-url', SERVERS.apache.url.replace(/^http:\/\//, 'http://'));
+  await page.fill('#setup-user', USER);
+  await page.fill('#setup-pass', 'wrong password');
+  await page.click('#setup-submit');
+  await page.waitForSelector('#conn-error:not([hidden])', { timeout: 15000 });
+  eq(await page.isVisible('#btn-change-nas'), true, 'wrong login: offers to change it');
+  await page.click('#btn-change-nas');
+  await page.waitForSelector('#setup:not([hidden])');
+  eq(await page.inputValue('#setup-url'), SERVERS.apache.url, 'address kept in the form');
+  await page.fill('#setup-pass', PASSWORD);
+  await page.click('#setup-submit');
+  await waitConnected(page);
+  // Remembered after a reload; the background engine (no chrome.storage of its own) can use it too.
+  await page.reload();
+  await waitConnected(page);
+  const nas = await sw.evaluate(() => globalThis.toEngine({ type: 'nas.test' }));
+  eq(nas.ok, true, 'engine reaches the NAS with the saved settings: ' + (nas.error || ''));
+  // Settings page shows where it comes from, and can forget it.
+  const opt = await page.context().newPage();
+  await opt.goto(`chrome-extension://${id}/options.html`);
+  await opt.waitForFunction(() => /saved on this computer with the password/.test(document.getElementById('nasInfo').textContent));
+  opt.on('dialog', (d) => d.accept());
+  await opt.click('#nasForget');
+  await opt.waitForFunction(() => /Not set up yet/.test(document.getElementById('nasInfo').textContent));
+  await page.reload();
+  await page.waitForSelector('#setup:not([hidden]) #setup-form', { timeout: 10000 });
+  // Without "remember": the password stays for this browser session only.
+  await page.fill('#setup-url', SERVERS.apache.url);
+  await page.fill('#setup-user', USER);
+  await page.fill('#setup-pass', PASSWORD);
+  await page.uncheck('#setup-remember');
+  await page.click('#setup-submit');
+  await waitConnected(page);
+  const stored = await page.evaluate(async () => (await chrome.storage.local.get('nasConfig')).nasConfig);
+  eq(stored.password, '', 'password not stored when "remember" is off');
+  eq(await page.isVisible('#btn-lock'), true, 'Lock offered for a session-only password');
+  await opt.close();
+  eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+});
+
 let main; // shared Apache session for the main flow
 test('connects to NAS (Apache mod_dav at root) and lists folders — no CORS setup needed', async () => {
   await dav('apache', 'MKCOL', 'Existing Share/');
@@ -678,7 +721,7 @@ test('HTTPS with a self-signed certificate: explains it, and works after accepti
 test('wrong password: clear error, no browser login pop-up', async () => {
   const { page, errors } = await launch(cfg('apache', { password: 'wrong password' }));
   await page.waitForSelector('#conn-error:not([hidden])', { timeout: 15000 });
-  assert((await page.textContent('#conn-error-msg')).includes('username or password'), 'message');
+  assert((await page.textContent('#conn-error-msg')).includes('username or password'), 'message: ' + (await page.textContent('#conn-error-msg')));
   await shot(page, '06-wrong-password');
   eq(errors.length, 0, 'page errors: ' + errors.join('; '));
 });
@@ -891,6 +934,20 @@ test('unit: mirror planning (changes, renames, deletions, Jellyfin metadata, saf
     check('picker: empty NAS folder kept', p.deleteDirs.length, 0);
     p = planMirror({ local: { files: [], dirs: [] }, remote: remoteOf([], ['empty']), manifest: null });
     check('drop: empty NAS folder deleted', p.deleteDirs.map((d) => d.rel), ['empty']);
+    // 7b. …the same for a NAS folder that holds only Jellyfin artwork/metadata (the local folder may be empty).
+    const metaOnly = () => remoteOf([['Show/Season 2/poster.jpg', 1, T0], ['Show/Season 2/season.nfo', 1, T0], ['Show/S01E01.mkv', 5, T0]], ['Show', 'Show/Season 2']);
+    p = planMirror({ local: { files: [{ rel: 'Show/S01E01.mkv', file: f('S01E01.mkv', 5, T0) }], dirs: [] }, remote: metaOnly(), manifest: null, options: { localKnowsEmptyDirs: false } });
+    check('picker: folder with only artwork kept, artwork kept', [p.deleteDirs.length, p.deletes.length, p.keptProtected], [0, 0, 2]);
+    p = planMirror({ local: { files: [{ rel: 'Show/S01E01.mkv', file: f('S01E01.mkv', 5, T0) }], dirs: ['Show'] }, remote: metaOnly(), manifest: null });
+    check('drop: a folder that is really gone is removed with its artwork', p.deleteDirs.map((d) => [d.rel, d.files]), [['Show/Season 2', 2]]);
+    // 7c. Picker + a renamed folder: the old folder (artwork left behind) is still cleaned up.
+    p = planMirror({
+      local: { files: [{ rel: 'New Name/a.mkv', file: f('a.mkv', BIG, T0 + 5) }], dirs: [] },
+      remote: remoteOf([['Old Name/a.mkv', BIG, T0], ['Old Name/poster.jpg', 1, T0]], ['Old Name']),
+      manifest: { version: 1, files: { 'Old Name/a.mkv': { size: BIG, mtime: T0 + 5 } } },
+      options: { localKnowsEmptyDirs: false },
+    });
+    check('picker: rename moves the file and removes the old folder', [p.moves.map((m) => m.to), p.deleteDirs.map((d) => d.rel)], [['New Name/a.mkv'], ['Old Name']]);
 
     // 8. Deletions off: nothing deleted, NAS-only files reported as kept.
     p = planMirror({ local: { files: [], dirs: [] }, remote: remoteOf([['a', 1, T0]]), manifest: null, options: { deletions: false } });
