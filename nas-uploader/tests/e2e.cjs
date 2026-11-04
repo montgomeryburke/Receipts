@@ -52,7 +52,12 @@ async function launch(config, { colorScheme, ignoreHTTPSErrors = false } = {}) {
   const name = `${++extCounter}`;
   const ext = path.join(WORK, 'ext-' + name);
   fs.rmSync(ext, { recursive: true, force: true });
-  fs.cpSync(EXT_SRC, ext, { recursive: true });
+  // Copy the extension, but link the big vendor folder (speech model runtime) instead of copying ~30 MB each time.
+  fs.mkdirSync(ext, { recursive: true });
+  for (const entry of fs.readdirSync(EXT_SRC)) {
+    if (entry === 'vendor') fs.symlinkSync(path.join(EXT_SRC, 'vendor'), path.join(ext, 'vendor'));
+    else fs.cpSync(path.join(EXT_SRC, entry), path.join(ext, entry), { recursive: true });
+  }
   if (config) fs.writeFileSync(path.join(ext, 'config.js'), 'export const CONFIG = ' + JSON.stringify(config, null, 2) + ';\n');
   const udd = path.join(WORK, 'profile-' + name);
   fs.rmSync(udd, { recursive: true, force: true });

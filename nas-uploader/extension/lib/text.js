@@ -142,6 +142,46 @@ export function makeMatcher(patterns) {
   };
 }
 
+/** "p. 3" for documents, "email 3" for a mailbox (.pst) whose "pages" are emails. */
+export function pageLabel(path, page) {
+  if (!page) return '';
+  return /\.pst$/i.test(path || '') ? `email ${page}` : `p. ${page}`;
+}
+
+/**
+ * An email copied from the Outlook desktop app (or anywhere): pulls From / Sent / To / Cc / Subject from a header
+ * block at the top if there is one (English or French Outlook), the rest is the body.
+ */
+export function parseCopiedEmail(text) {
+  const t = String(text || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').trim();
+  const out = { from: '', to: '', cc: '', subject: '', receivedAt: '', body: t };
+  const keys = {
+    from: /^(from|de)\s*:\s*(.*)$/i, sent: /^(sent|date|envoy[ée]|re[çc]u)\s*:\s*(.*)$/i, to: /^(to|[àa])\s*:\s*(.*)$/i,
+    cc: /^cc\s*:\s*(.*)$/i, subject: /^(subject|objet)\s*:\s*(.*)$/i,
+  };
+  const lines = t.split('\n');
+  let i = 0;
+  let found = 0;
+  for (; i < Math.min(lines.length, 14); i++) {
+    const l = lines[i].trim();
+    if (!l) {
+      if (found) break;
+      continue;
+    }
+    let m;
+    if ((m = keys.from.exec(l))) out.from = m[2].trim();
+    else if ((m = keys.sent.exec(l))) out.receivedAt = m[2].trim();
+    else if ((m = keys.to.exec(l))) out.to = m[2].trim();
+    else if ((m = keys.cc.exec(l))) out.cc = m[1].trim();
+    else if ((m = keys.subject.exec(l))) out.subject = m[2].trim();
+    else if (found) break;
+    else continue;
+    found++;
+  }
+  if (found >= 2) out.body = lines.slice(i).join('\n').trim();
+  return out;
+}
+
 export function extOf(name) {
   const i = name.lastIndexOf('.');
   return i > 0 ? name.slice(i + 1).toLowerCase() : '';

@@ -135,6 +135,7 @@ export const DEFAULT_SETTINGS = {
   excludePatterns: '.git, node_modules, ~$*, *.tmp, Thumbs.db, .DS_Store, desktop.ini',
   maxFileMB: 150,
   maxCharsPerFile: 1000000,
+  maxCharsPerMailbox: 8000000,        // .pst archives unpacked on the HP: newest emails first, up to this much text
   autoIndexMinutes: 60,
   // OCR / deep index built on the NAS (the HP or a Pi) for scanned PDFs, applied to the same files here.
   deepIndexFile: '/.assistant/deep-index.jsonl.gz',

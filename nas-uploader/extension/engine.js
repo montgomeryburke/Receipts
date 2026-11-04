@@ -3,7 +3,7 @@
 // it can use folder handles, DOMParser and pdf.js, and it is not stopped after 30 s idle the way the service
 // worker is. (Mirroring itself runs in "NAS files", which has to stay open for big uploads anyway.)
 
-import { getSettings, kvGet, getAll, log } from './lib/db.js';
+import { getSettings, kvGet, kvSet, getAll, log } from './lib/db.js';
 import { runIndex, applyDeepIndex } from './lib/indexer.js';
 import { search, indexSummary, RECENCY_WORDS } from './lib/index.js';
 import { getRootHandle, permissionState } from './lib/fsutil.js';
@@ -11,7 +11,7 @@ import { processEmail, regenerate, decideRequest, runItemAction, applyFolderResu
 import { pollFolderResponses } from './lib/automate.js';
 import { listModels, hasKey, activeModel } from './lib/llm.js';
 import { projectFolders } from './lib/folders.js';
-import { nasClient, configProblem } from './lib/nas.js';
+import { nasClient, configProblem, writeTextFile } from './lib/nas.js';
 import { sendChat, chatHistory, clearChat, runPendingTest } from './lib/chat.js';
 import { listChanges, undoChange } from './lib/memory.js';
 import { CONFIG } from './config.js';
@@ -72,29 +72,51 @@ async function indexRoots() {
   return granted.map((f) => ({ root: f.handle, prefix: f.prefix, folderId: f.id, projectMode: f.projectMode }));
 }
 
-// The deep (OCR) index is built on the NAS by the HP or a Pi and fetched over WebDAV.
-async function deepSource(settings) {
+// The deep (OCR) index is built on the NAS by the HP (or a Pi) and fetched over WebDAV. Its size and date are
+// checked first, so an unchanged index costs one small request instead of a download.
+async function deepSource(settings, { force = false } = {}) {
+  let stamp = null;
   return {
-    get: async () => (await nasClient()).getBlob(settings.deepIndexFile),
+    get: async () => {
+      const client = await nasClient();
+      const st = await client.stat(settings.deepIndexFile);
+      if (!st || st.isDir) return null;
+      stamp = `${st.size}|${st.modified?.getTime() || 0}`;
+      if (!force && (await kvGet('deepRemoteStamp')) === stamp) return { upToDate: true };
+      return client.getBlob(settings.deepIndexFile);
+    },
+    done: async () => {
+      if (stamp) await kvSet('deepRemoteStamp', stamp);
+    },
     from: 'NAS',
   };
+}
+
+// Tells the HP which NAS folders are project folders, so its OCR job reads only those (never the media library).
+async function publishProjectFolders() {
+  const folders = (await projectFolders({ withPerm: false })).filter((f) => f.index).map((f) => f.nasPath).sort();
+  const stamp = JSON.stringify(folders);
+  if ((await kvGet('projectFoldersPublished')) === stamp) return;
+  const client = await nasClient();
+  await writeTextFile(client, '/.assistant/project-folders.json', JSON.stringify({ updated: new Date().toISOString(), folders }, null, 2), 'application/json; charset=utf-8');
+  await kvSet('projectFoldersPublished', stamp);
 }
 
 async function doIndex({ signal, onProgress }) {
   const settings = await getSettings();
   const roots = await indexRoots();
+  if (!configProblem()) await publishProjectFolders().catch((err) => log('error', `publishing project folders: ${err.message}`));
   const status = await runIndex(roots, settings, { signal, onProgress, rootName: 'local' });
-  if (!signal.aborted && !configProblem()) {
-    const src = await deepSource(settings);
-    status.deep = await applyDeepIndex(src.get, settings, { signal, onProgress, from: src.from });
-  }
+  if (!signal.aborted && !configProblem()) status.deep = await doDeep({ signal, onProgress, force: false, settings });
   return status;
 }
 
-async function doDeep({ signal, onProgress, force }) {
-  const settings = await getSettings();
-  const src = await deepSource(settings);
-  return applyDeepIndex(src.get, settings, { signal, onProgress, force, from: src.from });
+async function doDeep({ signal, onProgress, force, settings }) {
+  settings = settings || (await getSettings());
+  const src = await deepSource(settings, { force });
+  const res = await applyDeepIndex(src.get, settings, { signal, onProgress, force, from: src.from });
+  if (res.found && !res.error && !signal?.aborted) await src.done();
+  return res;
 }
 
 // ---------- email queue (one draft at a time) ----------

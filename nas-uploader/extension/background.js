@@ -14,6 +14,7 @@ const OUTLOOK_URLS = [
 
 const APP_URL = chrome.runtime.getURL('app.html');
 const MEETING_URL = chrome.runtime.getURL('meeting.html');
+const RECORDER_URL = chrome.runtime.getURL('recorder.html');
 
 // ---------- engine (offscreen document) ----------
 
@@ -77,16 +78,18 @@ async function openApp(hash = '') {
   return { tabId: tab.id, windowId: tab.windowId };
 }
 
-/** The meeting assistant gets its own small window so it keeps listening when the side panel is closed. */
-async function openMeeting() {
-  const existing = await findTab(MEETING_URL);
+/** The meeting assistant and the recorder get their own small windows, so they keep going when the side panel closes. */
+async function openWindow(url, width, height) {
+  const existing = await findTab(url);
   if (existing) {
     if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
     return existing;
   }
-  const win = await chrome.windows.create({ url: MEETING_URL, type: 'popup', width: 460, height: 780 });
+  const win = await chrome.windows.create({ url, type: 'popup', width, height });
   return { windowId: win.id, tabId: win.tabs?.[0]?.id };
 }
+const openMeeting = () => openWindow(MEETING_URL, 460, 780);
+const openRecorder = () => openWindow(RECORDER_URL, 420, 640);
 
 // ---------- Outlook ----------
 
@@ -181,6 +184,10 @@ const handlers = {
     await openMeeting();
     return { ok: true };
   },
+  'recorder.open': async () => {
+    await openRecorder();
+    return { ok: true };
+  },
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -214,4 +221,5 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // Used by the automated tests.
 globalThis.openApp = openApp;
 globalThis.openMeeting = openMeeting;
+globalThis.openRecorder = openRecorder;
 globalThis.toEngine = toEngine;

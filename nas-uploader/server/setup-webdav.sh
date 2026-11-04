@@ -29,6 +29,8 @@
 #    --email ADDR         optional, given to Let's Encrypt
 #    --acme-server URL    certificate authority (default Let's Encrypt); e.g. Let's Encrypt staging for a dry run
 #    --yes                don't ask questions; use defaults
+#    --no-ocr             don't set up the OCR job for scanned PDFs (Project Assistant's "deep index")
+#    --no-whisper         don't copy the free speech-to-text model to the NAS
 #
 #  Safe to run again (e.g. to change the password or the folder).
 # =============================================================================
@@ -48,9 +50,13 @@ ASSUME_YES=0
 UNINSTALL=0
 SKIP_TAILSCALE=0 # for testing the Apache side of Funnel mode without Tailscale
 ACME_SERVER=""
+NO_OCR=0
+NO_WHISPER=0
 # Overridable for automated tests only.
 DUCKDNS_URL="${NAS_UPLOADER_DUCKDNS_URL:-https://www.duckdns.org}"
 DNS_WAIT="${NAS_UPLOADER_DNS_WAIT:-60}"
+HF_URL="${NAS_UPLOADER_HF_URL:-https://huggingface.co}"
+RAW_BASE="${NAS_UPLOADER_RAW_BASE:-https://raw.githubusercontent.com/montgomeryburke/Receipts/claude/friendly-pasteur-uixwht/nas-uploader/server}"
 ACME_ROOT=/var/lib/nas-uploader/acme
 
 SITE=/etc/apache2/sites-available/nas-uploader.conf
@@ -66,7 +72,7 @@ warn() { printf '\033[1;33m !\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m ✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 usage() {
-  if [[ -f "$0" ]]; then sed -n '2,32p' "$0" | sed 's/^#  \{0,1\}//'; else echo "See the comments at the top of setup-webdav.sh for options."; fi
+  if [[ -f "$0" ]]; then sed -n '2,35p' "$0" | sed 's/^# \{0,2\}//'; else echo "See the comments at the top of setup-webdav.sh for options."; fi
   exit "${1:-0}"
 }
 
@@ -86,6 +92,8 @@ while [[ $# -gt 0 ]]; do
     --uninstall) UNINSTALL=1; shift ;;
     --skip-tailscale) SKIP_TAILSCALE=1; shift ;;
     --acme-server) ACME_SERVER="${2:?}"; shift 2 ;;
+    --no-ocr) NO_OCR=1; shift ;;
+    --no-whisper) NO_WHISPER=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown option: $1" >&2; usage 2 ;;
   esac
@@ -123,6 +131,8 @@ apache_reload() {
 if [[ $UNINSTALL -eq 1 ]]; then
   say "Removing the NAS Uploader server (your files are not touched)"
   a2dissite nas-uploader >/dev/null 2>&1 || true
+  if have_systemd; then systemctl disable --now nas-uploader-ocr.timer >/dev/null 2>&1 || true; fi
+  rm -f /etc/systemd/system/nas-uploader-ocr.service /etc/systemd/system/nas-uploader-ocr.timer /etc/cron.d/nas-uploader-ocr /usr/local/lib/nas-uploader/assistant-ocr-index.py
   rm -f "$SITE" "$HTPASSWD" /etc/cron.d/nas-uploader-duckdns /usr/local/sbin/nas-uploader-duckdns \
     /usr/local/sbin/nas-uploader-dns-auth /usr/local/sbin/nas-uploader-dns-cleanup /etc/fail2ban/jail.d/nas-uploader.conf
   if [[ -f "$STATE_DIR/envvars.backup" ]]; then cp "$STATE_DIR/envvars.backup" /etc/apache2/envvars; fi
@@ -586,6 +596,87 @@ if [[ $JELLYFIN_HERE -eq 1 ]] && id jellyfin >/dev/null 2>&1; then
 fi
 curl -sk -o /dev/null -X DELETE -u "$WEB_USER:$WEB_PASS" "$TEST_URL$probe" || true
 ok "Upload test passed"
+
+# ----------------------------------------------------------------------------- 7b. Project Assistant helpers
+# OCR for scanned PDFs and photos (so the extension can search them), done here instead of on the work computer,
+# and a copy of the free speech-to-text model for computers that can't reach huggingface.co.
+ASSIST_DIR="$FOLDER/.assistant"
+mkdir -p "$ASSIST_DIR"
+chown "$RUN_USER:$RUN_GROUP" "$ASSIST_DIR"
+OCR_OK=0
+if [[ $NO_OCR -eq 0 ]]; then
+  say "Setting up OCR for scanned PDFs (Project Assistant)"
+  ocr_missing=()
+  for p in tesseract-ocr poppler-utils python3; do dpkg -s "$p" >/dev/null 2>&1 || ocr_missing+=("$p"); done
+  if [[ ${#ocr_missing[@]} -gt 0 ]] && ! { apt-get update -qq && apt-get install -y -qq "${ocr_missing[@]}" >/dev/null; }; then
+    warn "Couldn't install ${ocr_missing[*]}; OCR skipped (run the script again later)."
+  else
+    mkdir -p /usr/local/lib/nas-uploader
+    here="$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)"
+    if [[ -n "$here" && -f "$here/assistant-ocr-index.py" ]]; then
+      cp "$here/assistant-ocr-index.py" /usr/local/lib/nas-uploader/assistant-ocr-index.py
+    else
+      curl -fsSL "$RAW_BASE/assistant-ocr-index.py" -o /usr/local/lib/nas-uploader/assistant-ocr-index.py || true
+    fi
+    # Outlook archives: readpst unpacks .pst files, msgconvert saved .msg emails (optional — OCR works without them).
+    mail_missing=()
+    for p in pst-utils libemail-outlook-message-perl; do dpkg -s "$p" >/dev/null 2>&1 || mail_missing+=("$p"); done
+    if [[ ${#mail_missing[@]} -gt 0 ]] && ! apt-get install -y -qq "${mail_missing[@]}" >/dev/null 2>&1; then
+      warn "Couldn't install ${mail_missing[*]}; .pst/.msg emails won't be unpacked."
+    fi
+    if python3 -I -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" /usr/local/lib/nas-uploader/assistant-ocr-index.py 2>/dev/null; then
+      chmod 755 /usr/local/lib/nas-uploader/assistant-ocr-index.py
+      if have_systemd; then
+        cat > /etc/systemd/system/nas-uploader-ocr.service <<UNIT
+[Unit]
+Description=Project Assistant: OCR scanned PDFs and photos in the project folders
+After=network.target
+
+[Service]
+Type=oneshot
+User=$RUN_USER
+Group=$RUN_GROUP
+Nice=19
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 -I /usr/local/lib/nas-uploader/assistant-ocr-index.py "$FOLDER" --max-minutes 240
+UNIT
+        cat > /etc/systemd/system/nas-uploader-ocr.timer <<UNIT
+[Unit]
+Description=Project Assistant OCR, every 2 hours
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+        systemctl daemon-reload
+        systemctl enable --now nas-uploader-ocr.timer >/dev/null 2>&1 && OCR_OK=1
+      else
+        echo "17 */2 * * * $RUN_USER nice -n 19 /usr/bin/python3 -I /usr/local/lib/nas-uploader/assistant-ocr-index.py '$FOLDER' --max-minutes 100 >/dev/null 2>&1" > /etc/cron.d/nas-uploader-ocr
+        OCR_OK=1
+      fi
+      if [[ $OCR_OK -eq 1 ]]; then ok "OCR runs every 2 hours on the project folders the extension lists (never on your media)"; else warn "Couldn't start the OCR timer."; fi
+    else
+      warn "Couldn't get assistant-ocr-index.py (put it next to this script); OCR skipped."
+    fi
+  fi
+fi
+if [[ $NO_WHISPER -eq 0 ]]; then
+  say "Copying the free speech-to-text model to the NAS (about 80 MB, once)"
+  MODEL=Xenova/whisper-base.en
+  MDIR="$ASSIST_DIR/models/$MODEL"
+  mkdir -p "$MDIR/onnx"
+  got=1
+  for f in config.json generation_config.json preprocessor_config.json tokenizer.json tokenizer_config.json onnx/encoder_model_quantized.onnx onnx/decoder_model_merged_quantized.onnx; do
+    [[ -s "$MDIR/$f" ]] && continue
+    curl -fsSL --retry 2 "$HF_URL/$MODEL/resolve/main/$f" -o "$MDIR/$f.part" && mv "$MDIR/$f.part" "$MDIR/$f" || { got=0; rm -f "$MDIR/$f.part"; break; }
+  done
+  chown -R "$RUN_USER:$RUN_GROUP" "$ASSIST_DIR/models"
+  if [[ $got -eq 1 ]]; then ok "Speech model on the NAS: the extension uses it when a computer can't reach huggingface.co"; else warn "Couldn't download the speech model (no internet here?). The extension downloads it itself instead."; fi
+fi
 
 # ----------------------------------------------------------------------------- 8. summary
 {

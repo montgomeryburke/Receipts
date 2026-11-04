@@ -10,7 +10,7 @@
 import { get, put, getAll, del, kvGet, getSettings, log } from './db.js';
 import { search, selectQueryTerms, leadChunks, RECENCY_WORDS } from './index.js';
 import { callLLM, costOf, activeModel } from './llm.js';
-import { cleanEmailBody, tokenize, splitList, hashString } from './text.js';
+import { cleanEmailBody, tokenize, splitList, hashString, pageLabel } from './text.js';
 import { matchRules, learnFromItem } from './teach.js';
 import { instructionsBlock, memoryBlock } from './memory.js';
 import {
@@ -91,7 +91,7 @@ Style: ${s.styleNotes || 'Concise and professional.'}${s.signature ? `\nSignatur
 
 function snippetsBlock(snips, label = 'project_files') {
   if (!snips.length) return `<${label}>\n(no matching project files found)\n</${label}>`;
-  const body = snips.map((s) => `[${s.sid}] ${s.path}${s.page ? ` (p. ${s.page})` : ''}${s.taught ? ' (user-taught source)' : ''}\n${s.text}`).join('\n\n');
+  const body = snips.map((s) => `[${s.sid}] ${s.path}${s.page ? ` (${pageLabel(s.path, s.page)})` : ''}${s.taught ? ' (user-taught source)' : ''}\n${s.text}`).join('\n\n');
   return `<${label}>\n${body}\n</${label}>`;
 }
 

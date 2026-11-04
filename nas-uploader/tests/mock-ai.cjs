@@ -112,7 +112,10 @@ async function startMockAI({ port = 0 } = {}) {
   });
   await new Promise((r) => server.listen(port, '127.0.0.1', r));
   ai.url = `http://127.0.0.1:${server.address().port}`;
-  ai.close = () => new Promise((r) => server.close(r));
+  ai.close = () => new Promise((r) => {
+    server.closeAllConnections?.();
+    server.close(r);
+  });
   return ai;
 }
 

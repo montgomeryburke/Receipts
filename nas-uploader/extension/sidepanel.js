@@ -2,6 +2,7 @@ import { getSettings, saveSettings, getAll, get, put, kvGet } from './lib/db.js'
 import { getRootHandle, permissionState, requestPermission, getFileByPath } from './lib/fsutil.js';
 import { listMirrors } from './lib/store.js';
 import { nasClient } from './lib/nas.js';
+import { pageLabel, parseCopiedEmail } from './lib/text.js';
 import { updateItem, deleteItem, summarize, emailId } from './lib/assistant.js';
 import { paramSpec, defaultParams } from './lib/automate.js';
 
@@ -270,7 +271,7 @@ function cardBody(it) {
       const fname = s.path.slice(slash + 1);
       const folder = slash > 0 ? s.path.slice(0, slash) : '';
       parts.push(`<div class="src" data-path="${esc(s.path)}" data-page="${s.page || 0}">
-        <span class="tag">${tag}</span><span class="path" title="${esc(s.path)}"><b>${esc(fname)}</b>${s.page ? ` · p.${s.page}` : ''}${s.taught ? ' · taught' : ''} <span class="muted">${esc(folder)}</span></span>
+        <span class="tag">${tag}</span><span class="path" title="${esc(s.path)}"><b>${esc(fname)}</b>${s.page ? ` · ${pageLabel(s.path, s.page)}` : ''}${s.taught ? ' · taught' : ''} <span class="muted">${esc(folder)}</span></span>
         <button data-act="open" title="Open">Open</button>
         ${seen.has(key) ? '' : `<button data-act="good" class="${taught[key] === 'prefer' ? 'on' : ''}" title="Right document — use it for emails like this">👍</button>
         <button data-act="bad" class="${taught[key] === 'avoid' ? 'off' : ''}" title="Wrong document — don't use it for emails like this">👎</button>`}
@@ -289,8 +290,12 @@ function cardBody(it) {
   }
   const btns = [];
   if (it.draft) {
-    btns.push('<button class="primary" data-act="insert">Insert into Outlook reply</button>');
-    btns.push('<button data-act="copy">Copy</button>');
+    // Emails copied from the Outlook desktop app go back the same way: copy, then paste into the reply there.
+    if (it.source === 'manual') btns.push('<button class="primary" data-act="copy">Copy reply</button>');
+    else {
+      btns.push('<button class="primary" data-act="insert">Insert into Outlook reply</button>');
+      btns.push('<button data-act="copy">Copy</button>');
+    }
   }
   if (['ready', 'needs-info', 'inserted', 'error', 'needs-approval'].includes(it.status)) btns.push('<button data-act="deeper" title="Redraft with more thinking">Redraft (deeper)</button>');
   if (['skipped', 'error', 'no-reply', 'dismissed'].includes(it.status)) btns.push('<button data-act="reprocess">Draft anyway</button>');
@@ -439,6 +444,14 @@ async function openLocalFile(rec, path) {
 async function openSource(path, page) {
   const ext = (path.split('.').pop() || '').toLowerCase();
   const rec0 = await get('files', path);
+  if (ext === 'pst') {
+    const chunks = (await Promise.all((rec0?.chunkIds || []).map((id) => get('chunks', id)))).filter((c) => c && (!page || c.page === page));
+    $('pvTitle').textContent = `${path.split('/').pop()} · ${pageLabel(path, page) || 'mailbox'}`;
+    $('pvText').textContent = chunks.map((c) => c.text).join('\n\n') || '(no text indexed for this email)';
+    $('pvDownload').hidden = true;
+    $('previewDlg').showModal();
+    return;
+  }
   let file = await openLocalFile(rec0, path);
   if (file && VIEWABLE.has(ext)) {
     const url = URL.createObjectURL(file) + (ext === 'pdf' && page ? `#page=${page}` : '');
@@ -734,6 +747,7 @@ $('mirrorFolders').addEventListener('click', (e) => {
 });
 $('openNas').addEventListener('click', () => bg('app.open', { hash: '' }));
 $('openMeeting').addEventListener('click', () => bg('meeting.open'));
+$('openRecorder').addEventListener('click', () => bg('recorder.open'));
 
 $('reconnectBtn').addEventListener('click', async () => {
   const bridge = await getRootHandle('bridge');
@@ -778,6 +792,28 @@ $('scanNow').addEventListener('click', async () => {
 });
 
 $('pasteBtn').addEventListener('click', () => $('pasteDlg').showModal());
+
+// Outlook desktop app: copy the email there (click in the message, Ctrl+A, Ctrl+C), then this button.
+$('clipBtn').addEventListener('click', async () => {
+  let text = '';
+  try {
+    text = await navigator.clipboard.readText();
+  } catch (err) {
+    toast(`Couldn't read the clipboard (${err.message}). Use Paste… instead.`, 6000);
+    $('pasteDlg').showModal();
+    return;
+  }
+  if (!text.trim()) {
+    toast('The clipboard is empty. In Outlook, click in the email, press Ctrl+A then Ctrl+C, and try again.', 7000);
+    return;
+  }
+  const e = parseCopiedEmail(text);
+  $('pFrom').value = e.from;
+  $('pSubject').value = e.subject;
+  $('pBody').value = e.body;
+  $('pasteDlg').showModal();
+  ($('pSubject').value ? $('pGo') : $('pSubject')).focus();
+});
 $('pGo').addEventListener('click', async (e) => {
   e.preventDefault();
   const email = { from: $('pFrom').value.trim(), subject: $('pSubject').value.trim(), body: $('pBody').value, source: 'manual', receivedAt: new Date().toLocaleString() };
@@ -837,7 +873,7 @@ $('searchBox').addEventListener('input', () => {
     if (q.length < 2) { $('searchResults').innerHTML = ''; return; }
     const res = await engine('search', { q, k: 12 });
     if (res?.error) { $('searchResults').innerHTML = `<div class="err">${esc(res.error)}</div>`; return; }
-    $('searchResults').innerHTML = (res.hits || []).map((h) => `<div class="hit"><div class="path" data-path="${esc(h.path)}" data-page="${h.page || 0}">${esc(h.path)}${h.page ? ` · p.${h.page}` : ''}</div><div class="text">${esc(h.text)}</div></div>`).join('') || '<div class="muted small">No matches.</div>';
+    $('searchResults').innerHTML = (res.hits || []).map((h) => `<div class="hit"><div class="path" data-path="${esc(h.path)}" data-page="${h.page || 0}">${esc(h.path)}${h.page ? ` · ${pageLabel(h.path, h.page)}` : ''}</div><div class="text">${esc(h.text)}</div></div>`).join('') || '<div class="muted small">No matches.</div>';
   }, 250);
 });
 $('searchResults').addEventListener('click', (e) => {
@@ -1040,6 +1076,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 8000);
 
+window.__openSourceForTest = openSource; // for the automated tests
 selectTab(sessionStorage.getItem('mm_tab') || 'chat');
 loadChat();
 $('filter').value = sessionStorage.getItem('mm_filter') || 'active';

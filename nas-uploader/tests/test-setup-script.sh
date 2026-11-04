@@ -29,6 +29,14 @@ printf '<LibraryOptions><PathInfos><MediaPathInfo><Path>/srv/test-media/TV</Path
 "$SCRIPT" --uninstall >/dev/null 2>&1 || true
 rm -f /etc/nas-uploader/password
 
+# A stand-in for huggingface.co serving the speech model's files (tiny dummies; only the copy is tested here).
+HF="$WORK/hf"; rm -rf "$HF"; mkdir -p "$HF/Xenova/whisper-base.en/resolve/main/onnx"
+for f in config.json generation_config.json preprocessor_config.json tokenizer.json tokenizer_config.json onnx/encoder_model_quantized.onnx onnx/decoder_model_merged_quantized.onnx; do echo "dummy $f" > "$HF/Xenova/whisper-base.en/resolve/main/$f"; done
+( cd "$HF" && exec python3 -I -m http.server 18499 --bind 127.0.0.1 ) >/dev/null 2>&1 &
+HF_PID=$!
+export NAS_UPLOADER_HF_URL=http://127.0.0.1:18499
+sleep 1
+
 echo "• local mode (self-signed HTTPS) with the detected Jellyfin folder"
 out="$("$SCRIPT" --yes --access local --port 18490 --password "$PASS" 2>&1)"; rc=$?
 check "script succeeded" [ $rc -eq 0 ]
@@ -43,6 +51,19 @@ check "no login: 401" [ "$(curl -sk -o /dev/null -w '%{http_code}' -X PROPFIND h
 check "uploaded scripts are not executed" bash -c "printf '<?php echo 1+1; ?>' | curl -sk -o /dev/null -T - -u 'uploader:$PASS' https://127.0.0.1:18490/x.php && [ \"\$(curl -sk -u 'uploader:$PASS' https://127.0.0.1:18490/x.php)\" = '<?php echo 1+1; ?>' ] && curl -sk -o /dev/null -X DELETE -u 'uploader:$PASS' https://127.0.0.1:18490/x.php"
 check "no 1 GB upload limit configured" grep -q "LimitRequestBody 0" /etc/apache2/sites-available/nas-uploader.conf
 check "automatic security updates switched on" bash -c "apt-config dump | grep -q 'APT::Periodic::Unattended-Upgrade \"1\"'"
+check "assistant: OCR job installed" bash -c "[ -x /usr/local/lib/nas-uploader/assistant-ocr-index.py ] && { [ -f /etc/systemd/system/nas-uploader-ocr.timer ] || grep -q assistant-ocr-index /etc/cron.d/nas-uploader-ocr; }"
+check "assistant: PST and MSG tools installed" bash -c "command -v readpst && command -v msgconvert" >/dev/null
+check "assistant: OCR runs as the folder owner, never as root" bash -c "grep -q mediauser /etc/cron.d/nas-uploader-ocr 2>/dev/null || grep -q 'User=mediauser' /etc/systemd/system/nas-uploader-ocr.service"
+check "assistant: speech model copied to the NAS" bash -c "[ -s /srv/test-media/.assistant/models/Xenova/whisper-base.en/onnx/encoder_model_quantized.onnx ] && [ \"\$(stat -c %U /srv/test-media/.assistant/models)\" = mediauser ]"
+check "assistant: model served over WebDAV" [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "uploader:$PASS" https://127.0.0.1:18490/.assistant/models/Xenova/whisper-base.en/config.json)" = 200 ]
+# The OCR job on a scanned PDF in a listed project folder, as the WebDAV user.
+mkdir -p /srv/test-media/Projects/Alert && chown -R mediauser:mediauser /srv/test-media/Projects
+convert -size 1700x900 xc:white -font DejaVu-Sans -pointsize 44 -fill black -annotate +150+300 'Camera mounting height 4.5 m' "$WORK/scan.png" 2>/dev/null
+python3 -I -c 'import sys; from PIL import Image; Image.open(sys.argv[1]).convert("RGB").save(sys.argv[2], "PDF", resolution=200.0)' "$WORK/scan.png" /srv/test-media/Projects/Alert/scan.pdf 2>/dev/null
+chown mediauser:mediauser /srv/test-media/Projects/Alert/scan.pdf
+printf '{"folders": ["/Projects"]}' > /srv/test-media/.assistant/project-folders.json; chown mediauser:mediauser /srv/test-media/.assistant/project-folders.json
+setpriv --reuid=mediauser --regid=mediauser --init-groups -- python3 -I /usr/local/lib/nas-uploader/assistant-ocr-index.py /srv/test-media >/dev/null 2>&1
+check "assistant: OCR index built for the project folder only" bash -c "zcat /srv/test-media/.assistant/deep-index.jsonl.gz | grep -q 'Camera mounting height' && ! zcat /srv/test-media/.assistant/deep-index.jsonl.gz | grep -q Movies"
 out2="$("$SCRIPT" --yes --access local --port 18490 2>&1)"
 check "re-run keeps the existing password" grep -q "Keeping the existing password" <<<"$out2"
 check "still answers after re-run" [ "$(propfind https://127.0.0.1:18490/)" = 207 ]
@@ -164,9 +185,12 @@ out="$("$SCRIPT" --yes --access local --port 18493 --folder /srv/test-media-nobo
 check "refuses with exit code 1" [ $rc -eq 1 ]
 check "explains the fix on the Proxmox host" grep -q "Proxmox HOST" <<<"$out"
 
+kill $HF_PID 2>/dev/null
+
 echo "• uninstall"
 "$SCRIPT" --uninstall >/dev/null 2>&1
 check "site removed" [ ! -e /etc/apache2/sites-available/nas-uploader.conf ]
+check "OCR job removed" bash -c "[ ! -e /usr/local/lib/nas-uploader/assistant-ocr-index.py ] && [ ! -e /etc/systemd/system/nas-uploader-ocr.timer ] && [ ! -e /etc/cron.d/nas-uploader-ocr ]"
 check "no longer answers" [ "$(propfind https://127.0.0.1:18492/)" != 207 ]
 check "media files untouched" [ -f "/srv/test-media/Movies/Old Film (1999)/Old Film (1999).mkv" ]
 

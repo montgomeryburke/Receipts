@@ -125,6 +125,7 @@ export async function applyDeepIndex(getFile, settings, { onProgress = () => {},
     return { found: false, error: err.message };
   }
   if (!file) return { applied: 0, found: false };
+  if (file.upToDate) return { applied: 0, found: true, upToDate: true, from };
   const last = (await kvGet('deepApplied')) || {};
   if (!force && last.mtime === file.lastModified && last.size === file.size) {
     return { applied: 0, found: true, upToDate: true, from };
@@ -149,11 +150,13 @@ export async function applyDeepIndex(getFile, settings, { onProgress = () => {},
     const chars = pages.reduce((acc, p) => acc + (p[1] || '').length, 0);
     if (!chars) { counts.kept++; return; }
     if (!(chars >= rec.chars * 0.8 || rec.chars < 500)) { counts.kept++; return; }
+    // Mailboxes (a .pst unpacked on the HP: one email per "page") may hold much more text than a document.
+    const cap = /^(pst|msg)$/.test(r.method || '') ? settings.maxCharsPerMailbox || 8000000 : settings.maxCharsPerFile;
     const capped = [];
     let total = 0;
     for (const [n, t] of pages) {
-      if (total >= settings.maxCharsPerFile) break;
-      capped.push([n, t.slice(0, settings.maxCharsPerFile - total)]);
+      if (total >= cap) break;
+      capped.push([n, t.slice(0, cap - total)]);
       total += t.length;
     }
     const next = { ...rec, method: `deep:${r.method || 'text'}`, chars, deepMtime: r.mtime, note: '', indexedAt: Date.now() };

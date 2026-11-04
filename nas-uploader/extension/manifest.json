@@ -37,7 +37,8 @@
     "alarms",
     "offscreen",
     "scripting",
-    "clipboardWrite"
+    "clipboardWrite",
+    "clipboardRead"
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
   "content_scripts": [
