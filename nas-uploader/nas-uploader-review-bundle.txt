@@ -1,4 +1,4 @@
-Project Assistant: complete source for review (8087e87 2026-11-04)
+Project Assistant: complete source for review (ade0aee 2026-11-04)
 Files: extension/ (Chrome extension, Manifest V3; third-party libraries in extension/vendor/ are left out),
 server/setup-webdav.sh (Proxmox container setup), server/assistant-ocr-index.py (OCR / mail / NAS-only text job
 on the NAS) and server/setup-drive-copy.sh (daily Google Drive copy with rclone).
@@ -6553,7 +6553,7 @@ render();
 state.ready = true;
 
 
-===== FILE: extension/agent.html (108 lines) =====
+===== FILE: extension/agent.html (117 lines) =====
 <!doctype html>
 <html lang="en">
 <head>
@@ -6584,7 +6584,7 @@ e.g. Upload the PDFs from nas:/Projects/2024-017 Alert Bridge/Drawings to the po
       <label class="field"><span>Work in</span><select id="tab"></select></label>
       <label class="field"><span>Ask me before</span>
         <select id="confirm">
-          <option value="risky">Risky steps (send, pay, delete, upload, other sites)</option>
+          <option value="risky">Risky steps (choose which below)</option>
           <option value="every">Every step</option>
         </select>
       </label>
@@ -6597,6 +6597,14 @@ e.g. Upload the PDFs from nas:/Projects/2024-017 Alert Bridge/Drawings to the po
       </label>
       <label class="field"><span>At most (steps)</span><input id="maxSteps" type="number" min="5" max="150"></label>
     </div>
+    <fieldset id="askBoxes" class="asks small">
+      <legend>Ask me before…</legend>
+      <label class="check"><input type="checkbox" data-ask="agentAskSend"> sending a form, or Send / Submit / Delete / Pay-type buttons</label>
+      <label class="check"><input type="checkbox" data-ask="agentAskSite"> going to a site my task didn’t name <span class="muted">(off: a page could steer it elsewhere)</span></label>
+      <label class="check"><input type="checkbox" data-ask="agentAskUpload"> putting files into an upload</label>
+      <label class="check"><input type="checkbox" data-ask="agentAskOverwrite"> replacing a file on the NAS</label>
+      <p class="muted">Always asked: payment fields and desktop flows. With a question off, it still asks when the second AI finds a problem with that step. It never types passwords.</p>
+    </fieldset>
     <div class="row">
       <button id="btnStart" class="primary">▶ Start</button>
       <button id="btnStop" class="danger" disabled>■ Stop</button>
@@ -6612,6 +6620,7 @@ e.g. Upload the PDFs from nas:/Projects/2024-017 Alert Bridge/Drawings to the po
     <div class="row">
       <button id="btnAllow" class="primary">Allow</button>
       <button id="btnAlways" title="Allow steps like this on this site for the rest of this task">Allow all like this</button>
+      <button id="btnNever" title="Allow, and don't ask this kind of question again (switch it back on under Ask me before)">Allow, and stop asking</button>
       <button id="btnDeny" class="danger">Don't</button>
     </div>
   </section>
@@ -6664,7 +6673,7 @@ e.g. Upload the PDFs from nas:/Projects/2024-017 Alert Bridge/Drawings to the po
 </html>
 
 
-===== FILE: extension/agent.css (30 lines) =====
+===== FILE: extension/agent.css (33 lines) =====
 body { background: var(--bg); }
 .a-top { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 10px 12px 6px; border-bottom: 1px solid var(--border); }
 .brand { font-size: 15px; margin: 0; }
@@ -6677,6 +6686,9 @@ textarea#task { width: 100%; box-sizing: border-box; resize: vertical; }
 .confirm h2 { font-size: 15px; margin: 0; }
 .confirm pre { white-space: pre-wrap; margin: 0; font-family: inherit; }
 .ask { border: 2px solid var(--accent); }
+.asks { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin: 0; display: flex; flex-direction: column; gap: 3px; }
+.asks legend { padding: 0 4px; }
+.asks p { margin: 2px 0 0; }
 .ask h2 { font-size: 14px; margin: 0; }
 
 .log { display: flex; flex-direction: column; gap: 4px; max-height: 52vh; overflow-y: auto; font-size: 12.5px; }
@@ -6697,7 +6709,7 @@ textarea#task { width: 100%; box-sizing: border-box; resize: vertical; }
 .flow .grow { overflow: hidden; text-overflow: ellipsis; }
 
 
-===== FILE: extension/agent.js (309 lines) =====
+===== FILE: extension/agent.js (342 lines) =====
 // The browser agent window: a task box, the tab to work in, a live log of every step, Allow / Don't for
 // risky steps, questions from the agent, and the user's Power Automate desktop flows.
 
@@ -6815,6 +6827,8 @@ function confirmStep(req) {
       : c.verdict === 'ok' ? `<div class="chk ok" data-check="ok">✓ ${AI_NAME[c.by]} checked the page against your task: looks right.</div>`
         : `<div class="chk warn" data-check="issues">⚠ ${AI_NAME[c.by]} checked the page against your task:<ul>${[...(c.issues || []).map((i) => `<li><b>“${esc(i.claim)}”</b> — ${esc(i.problem)}${i.fix && i.fix !== 'remove' ? ` → ${esc(i.fix)}` : ''}</li>`), ...(c.missed || []).map((m) => `<li>Missing: ${esc(m)}</li>`)].join('')}</ul></div>`;
     $('btnAlways').hidden = !!req.launchUrl || req.kind === 'overwrite';
+    $('btnNever').hidden = !req.setting;
+    $('btnNever').title = req.setting ? `Allow, and don't ask before ${req.settingLabel} again (switch it back on under Ask me before)` : '';
     $('confirmBox').hidden = false;
     $('confirmBox').scrollIntoView({ block: 'nearest' });
     $('btnAllow').focus();
@@ -6837,6 +6851,12 @@ $('btnAllow').addEventListener('click', () => {
   state.confirmResolve?.('allow');
 });
 $('btnAlways').addEventListener('click', () => state.confirmResolve?.('always'));
+$('btnNever').addEventListener('click', () => {
+  const setting = state.pendingConfirm?.setting;
+  state.confirmResolve?.('never');
+  const box = setting && document.querySelector(`[data-ask="${setting}"]`);
+  if (box) box.checked = false;
+});
 $('btnDeny').addEventListener('click', () => state.confirmResolve?.('deny'));
 
 function askUser(question) {
@@ -6874,7 +6894,7 @@ async function start() {
     toast('AI is stopped. Click ▶ Resume AI first.');
     return;
   }
-  await saveSettings({ agentConfirm: $('confirm').value, agentProvider: $('provider').value, agentMaxSteps: Number($('maxSteps').value) || 40 });
+  await saveSettings({ agentConfirm: $('confirm').value, agentProvider: $('provider').value, agentMaxSteps: Number($('maxSteps').value) || 40, ...askValues() });
   state.settings = await getSettings();
   state.entries = [];
   const tabId = Number($('tab').value) || null;
@@ -6921,6 +6941,30 @@ function stop() {
 $('btnStart').addEventListener('click', start);
 $('btnStop').addEventListener('click', stop);
 $('btnRefreshTabs').addEventListener('click', () => loadTabs());
+
+// ---------------------------------------------------------------- which questions it asks
+
+function askValues() {
+  return Object.fromEntries([...document.querySelectorAll('[data-ask]')].map((b) => [b.dataset.ask, b.checked]));
+}
+
+function renderAsks() {
+  for (const b of document.querySelectorAll('[data-ask]')) b.checked = state.settings[b.dataset.ask] !== false;
+  $('askBoxes').hidden = $('confirm').value === 'every';
+}
+
+$('confirm').addEventListener('change', () => {
+  $('askBoxes').hidden = $('confirm').value === 'every';
+  saveSettings({ agentConfirm: $('confirm').value });
+});
+$('askBoxes').addEventListener('change', async (e) => {
+  const b = e.target.closest('[data-ask]');
+  if (!b) return;
+  state.settings = await saveSettings({ [b.dataset.ask]: b.checked });
+  // A task already running picks it up for its next step.
+  if (state.agent) state.agent.settings = { ...state.agent.settings, [b.dataset.ask]: b.checked };
+  toast(b.checked ? 'It will ask again.' : 'It won’t ask that any more.');
+});
 
 // ---------------------------------------------------------------- the kill switch
 
@@ -7006,6 +7050,7 @@ const fromHash = Number(new URLSearchParams(location.hash.slice(1)).get('tab')) 
 await loadTabs(fromHash);
 renderAi();
 renderFlows();
+renderAsks();
 state.ready = true;
 
 
@@ -7399,7 +7444,7 @@ state.ready = true;
 })();
 
 
-===== FILE: extension/lib/agent.js (756 lines) =====
+===== FILE: extension/lib/agent.js (779 lines) =====
 // The browser agent: does a task in Chrome for the user with the mouse and keyboard (a general version of the
 // game-testing agent). The AI reads the page as a numbered list of elements (or a screenshot when the page is
 // visual), and acts through lib/browser.js. Files come from the NAS or the project folders on this computer.
@@ -7411,7 +7456,7 @@ state.ready = true;
 // checks a form before it is submitted and checks the result at the end.
 
 import { runChat, hasKey, pickProvider, costOf, LLMError } from './llm.js';
-import { getSettings } from './db.js';
+import { getSettings, saveSettings } from './db.js';
 import { TabControl } from './browser.js';
 import { nasClient, ensureDir } from './nas.js';
 import { projectFolders } from './folders.js';
@@ -7422,6 +7467,16 @@ import { CONFIG } from './config-store.js';
 const RISKY_WORDS = /\b(submit|send|pay|payment|purchase|buy|order|checkout|check out|confirm|delete|remove|erase|discard|sign|signature|publish|post|transfer|approve|accept|book|apply|unsubscribe|close account|cancel (my |the )?(account|subscription|order)|upload|share|invite|transmit|file it)\b/i;
 const READ_ONLY = new Set(['read_page', 'screenshot', 'list_tabs', 'nas_list', 'local_folders', 'local_list', 'desktop_flows', 'wait', 'ask_user']);
 const MAX_PUT_BYTES = 25 * 1024 * 1024;
+
+// The questions the user can switch off (Settings in the agent window, "Allow, and stop asking" on a question,
+// or the chat). Payment fields and desktop flows always ask: the second needs the click to open Power Automate.
+export const ASK_SETTINGS = {
+  agentAskSend: { kinds: ['submit', 'click', 'dialog'], label: 'sending a form, or clicking Send / Submit / Delete / Pay-type buttons' },
+  agentAskSite: { kinds: ['site'], label: 'going to a site your task didn’t name' },
+  agentAskUpload: { kinds: ['upload'], label: 'putting files into an upload on a web page' },
+  agentAskOverwrite: { kinds: ['overwrite'], label: 'replacing a file on the NAS' },
+};
+const settingFor = (kind) => Object.keys(ASK_SETTINGS).find((k) => ASK_SETTINGS[k].kinds.includes(kind)) || null;
 
 const hostOf = (url) => {
   try {
@@ -7563,13 +7618,26 @@ export class Agent extends EventTarget {
     const mode = this.settings.agentConfirm || 'risky';
     const key = `${kind}:${host}`;
     if (this.always.has(key) && !extra.launchUrl) return true;
+    const setting = mode === 'every' ? null : settingFor(kind);
+    // A question the user switched off is skipped — unless the second AI just found a problem with this step.
+    if (setting && this.settings[setting] === false) {
+      if (extra.check?.verdict !== 'issues') {
+        this.note({ type: 'info', text: `${title} — done without asking (you switched this question off).` });
+        return true;
+      }
+      this.note({ type: 'info', text: 'You switched this question off, but the second check found a problem, so asking anyway.' });
+    }
     this.note({ type: 'info', text: `Waiting for you: ${title}` });
     const answer = await Promise.race([
-      this.ui.confirm({ kind, title, detail, mode, ...extra }),
+      this.ui.confirm({ kind, title, detail, mode, setting, settingLabel: setting ? ASK_SETTINGS[setting].label : '', ...extra }),
       new Promise((_, reject) => this.signal.addEventListener('abort', () => reject(new LLMError('stopped', 'Stopped.')), { once: true })),
     ]);
     if (answer === 'always') this.always.add(key);
-    const ok = answer === 'allow' || answer === 'always';
+    if (answer === 'never' && setting) {
+      this.settings = await saveSettings({ [setting]: false });
+      this.note({ type: 'info', text: `OK — no more questions before ${ASK_SETTINGS[setting].label}. Switch it back on under “Ask me before”.` });
+    }
+    const ok = answer === 'allow' || answer === 'always' || answer === 'never';
     this.note({ type: 'info', text: ok ? 'You allowed it.' : 'You said no.' });
     return ok;
   }
@@ -9592,7 +9660,7 @@ export class TabControl {
 }
 
 
-===== FILE: extension/lib/chat.js (625 lines) =====
+===== FILE: extension/lib/chat.js (629 lines) =====
 // The assistant chat: the user tells the extension, in plain words, what isn't working the way they want,
 // and it changes itself — settings, standing instructions, which documents to use, project memory, folder
 // options and Power Automate flows. Every change goes through a tool here, is logged, and can be undone.
@@ -9655,6 +9723,10 @@ export const EDITABLE = {
   dualLookUp: [BOOL, 'With both keys: standards are looked up online by both AIs and compared'],
   agentConfirm: [STR, "Browser agent: when to ask the user first — 'risky' (send, pay, delete, upload, other sites) or 'every' step", { enum: ['risky', 'every'] }],
   agentMaxSteps: [INT, 'Browser agent: most steps (AI turns) per task', { min: 5, max: 150 }],
+  agentAskSend: [BOOL, 'Browser agent asks before sending a form or clicking Send/Submit/Delete/Pay-type buttons (it still asks if the second AI finds a problem)'],
+  agentAskSite: [BOOL, "Browser agent asks before going to a site the task didn't name (off: a web page could steer it elsewhere)"],
+  agentAskUpload: [BOOL, 'Browser agent asks before putting files into an upload on a web page'],
+  agentAskOverwrite: [BOOL, 'Browser agent asks before replacing a file on the NAS'],
   dailyBudgetUsd: [INT, 'Stop all AI calls for the day once this many dollars are spent (0 = no limit)', { min: 0, max: 1000 }],
   meetingPrompts: [STR, "Meeting prompts: 'auto' = when a question or new topic comes up; 'manual' = only when the user clicks Ask now; 'off'", { enum: ['auto', 'manual', 'off'] }],
   meetingProvider: [STR, "Which AI writes meeting prompts ('' = same as provider)", { enum: ['', 'anthropic', 'gemini'] }],
@@ -10551,7 +10623,7 @@ export async function dualLookUp(settings, { provider, what, system, signal }) {
 }
 
 
-===== FILE: extension/lib/db.js (207 lines) =====
+===== FILE: extension/lib/db.js (211 lines) =====
 // IndexedDB storage shared by every extension context (service worker,
 // offscreen engine, side panel, options page, meeting window). Everything
 // persistent lives here, including settings and folder handles, so no context
@@ -10719,6 +10791,10 @@ export const DEFAULT_SETTINGS = {
   // Browser agent
   agentProvider: '',                  // '' = same as the email assistant
   agentConfirm: 'risky',              // 'risky' = ask before send / pay / delete / upload / other sites; 'every' = every step
+  agentAskSend: true,                 // in 'risky' mode, each of these questions can be switched off
+  agentAskSite: true,
+  agentAskUpload: true,
+  agentAskOverwrite: true,
   agentMaxSteps: 40,                  // model turns per task (cost cap)
   agentEffort: 'medium',
   desktopFlows: [],                   // [{name, runUrl, inputs, description}] Power Automate desktop flows the agent may start
