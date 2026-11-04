@@ -1,24 +1,23 @@
-// Walks the designated project folders and keeps the local index current.
+// Walks the project folders (the mirrors) and keeps the local index current — on this computer, no tokens.
 // Incremental: unchanged files (same size and modified time) are skipped.
 //
-// Each designated folder has a remote path (its location on the NAS). Files
-// are indexed under that path, e.g. "2024-017 Alert/Specs/x.pdf", so the OCR
-// "deep index" the Pi builds on the NAS lines up with the same files here.
-// The deep index can be read from the NAS over HTTPS or from a local folder.
+// Files are indexed under their NAS path, e.g. "Projects/2024-017 Alert/Specs/x.pdf", so the OCR
+// "deep index" the HP (or a Pi) builds on the NAS lines up with the same files here.
 
-import { getAll, kvGet, kvSet, log } from './db.js';
+import { getAll, kvGet, kvSet, log, put } from './db.js';
 import { IndexWriter, INDEX_VERSION } from './index.js';
-import { chunkText, makeMatcher, splitList, extOf, projectOf } from './text.js';
+import { chunkText, makeMatcher, splitList, extOf } from './text.js';
+import { projectFor } from './folders.js';
 import { extractFile } from './extract.js';
-import { walk, getFileByPath, META_DIR } from './fsutil.js';
+import { walk, META_DIRS } from './fsutil.js';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-// roots: a single directory handle, or [{root, prefix, folderId}]. prefix is
-// the file path shown in the index (the folder's location on the NAS).
+// roots: a single directory handle, or [{root, prefix, folderId, projectMode}]. prefix is the folder's
+// location on the NAS (without the leading slash).
 function normalizeRoots(roots) {
   if (Array.isArray(roots)) return roots;
-  return [{ root: roots, prefix: '', folderId: 'local' }];
+  return [{ root: roots, prefix: '', folderId: 'local', projectMode: 'subfolders' }];
 }
 
 export async function runIndex(roots, settings, { onProgress = () => {}, signal, rootName = 'local' } = {}) {
@@ -40,10 +39,10 @@ export async function runIndex(roots, settings, { onProgress = () => {}, signal,
     onProgress({ phase: 'index', path, ...counts });
   };
 
-  for (const { root, prefix, folderId } of list) {
+  for (const { root, prefix, folderId, projectMode } of list) {
     const skip = (path, isDir) => {
       const vp = prefix ? `${prefix}/${path}` : path;
-      if (path === META_DIR || path.startsWith(META_DIR + '/')) return true;
+      if (META_DIRS.some((d) => path === d || path.startsWith(d + '/'))) return true;
       return exclude(vp) || (isDir && path.split('/').pop().startsWith('.'));
     };
     for await (const { path: rel, file } of walk(root, { skip, onError: (p, e) => { counts.errors++; errors.push(`${p}: ${e.message}`); } })) {
@@ -52,15 +51,18 @@ export async function runIndex(roots, settings, { onProgress = () => {}, signal,
       seen.add(path);
       counts.scanned++;
       const prev = existing.get(path);
+      const project = projectFor(prefix, rel, projectMode);
       if (prev && prev.v === INDEX_VERSION && prev.size === file.size && prev.mtime === file.lastModified) {
         counts.unchanged++;
+        // Same file, new folder settings (e.g. "one project" instead of "one per subfolder"): relabel only.
+        if (prev.project !== project || prev.folderId !== folderId) await put('files', { ...prev, project, folderId, rel });
         report(path);
         continue;
       }
       const ext = extOf(file.name);
       const rec = {
         path, rel, folderId, size: file.size, mtime: file.lastModified, ext,
-        project: projectOf(path, settings.projectDepth || 1),
+        project,
         indexedAt: Date.now(), method: 'name', chars: 0, note: '',
       };
       let chunks = [];
@@ -113,12 +115,12 @@ export async function runIndex(roots, settings, { onProgress = () => {}, signal,
   return status;
 }
 
-// Applies the Pi's deep OCR index. `getFile` returns the gz File (fetched over
-// HTTPS from the NAS, or read from a local folder) or null if there is none.
-export async function applyDeepIndex(getFile, settings, { onProgress = () => {}, force = false, signal, from = 'nas' } = {}) {
+// Applies the deep OCR index built on the NAS (by the HP or a Pi). `getFile` returns the gz File fetched
+// over WebDAV, or null if there is none yet.
+export async function applyDeepIndex(getFile, settings, { onProgress = () => {}, force = false, signal, from = 'NAS' } = {}) {
   let file;
   try {
-    file = typeof getFile === 'function' ? await getFile() : await legacyFolderFile(getFile, settings);
+    file = await getFile();
   } catch (err) {
     return { found: false, error: err.message };
   }
@@ -179,15 +181,4 @@ export async function applyDeepIndex(getFile, settings, { onProgress = () => {},
   await log('deep', `Deep index from ${from}: ${counts.applied} files improved, ${counts.stale} stale, ${counts.unmatched} not present here`);
   onProgress({ phase: 'deep', done: true, ...counts });
   return { found: true, from, ...counts };
-}
-
-// Backward-compatible folder lookup: roots = [[name, handle], ...]
-async function legacyFolderFile(roots, settings) {
-  for (const [, root] of roots) {
-    if (!root) continue;
-    try {
-      return await (await getFileByPath(root, settings.deepIndexFile)).getFile();
-    } catch { /* not in this root */ }
-  }
-  return null;
 }

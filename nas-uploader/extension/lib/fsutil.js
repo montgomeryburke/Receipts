@@ -1,9 +1,11 @@
-// Helpers around File System Access handles (local folders, mapped NAS drives,
+// Helpers around File System Access handles (local folders, the OneDrive bridge folder,
 // and OPFS in tests — they all share one interface).
 
 import { kvGet, kvSet } from './db.js';
 
-export const META_DIR = '.mailmirror';
+// The assistant's own files inside a folder (bridge requests, old MailMirror trash); never indexed.
+export const META_DIR = '.assistant';
+export const META_DIRS = ['.assistant', '.mailmirror'];
 
 export async function getRootHandle(which) {
   return (await kvGet(`handle:${which}`)) || null;

@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MailMirror Settings</title>
+<title>Project Assistant Settings</title>
 <link rel="stylesheet" href="ui.css">
 <link rel="stylesheet" href="options.css">
 </head>
 <body>
 <div class="layout">
   <nav class="side" aria-label="Sections">
-    <h1>MailMirror</h1>
+    <h1>Project Assistant</h1>
     <a href="#ai">AI provider &amp; key</a>
     <a href="#about">About you</a>
-    <a href="#folders">Folders</a>
+    <a href="#instructions">Instructions</a>
+    <a href="#folders">Project folders</a>
     <a href="#indexing">Indexing</a>
-    <a href="#mirror">Mirror</a>
+    <a href="#meetings">Meetings</a>
     <a href="#email">Email</a>
     <a href="#automate">Power Automate</a>
     <a href="#teaching">Teaching</a>
@@ -53,9 +54,9 @@
           </label>
           <label class="field"><span>Model</span><input type="text" data-key="geminiModel" list="geminiModels"></label>
           <datalist id="geminiModels">
-            <option value="gemini-2.5-flash"></option>
-            <option value="gemini-2.5-pro"></option>
+            <option value="auto"></option>
           </datalist>
+          <p class="small muted">"auto" picks the newest Gemini Flash model your key can use.</p>
           <div class="row"><button type="button" data-test="gemini">Test key &amp; list models</button><span class="small muted" data-testout="gemini"></span></div>
         </div>
       </div>
@@ -87,34 +88,27 @@
       <label class="field"><span>Writing style</span><input type="text" data-key="styleNotes"></label>
     </section>
 
-    <section id="folders" class="panel stack">
-      <h2>NAS over the internet (HTTPS)</h2>
-      <p class="small">The NAS runs the sync server (<code>nas-sync/server.py</code>). This computer reaches it directly over HTTPS with the token below — entered once, no username/password per sync, and no SFTP (a browser extension can't open one). See <code>docs/network-and-sync.md</code> for exposing the NAS with a real certificate or a tunnel.</p>
+    <section id="instructions" class="panel stack">
+      <h2>Standing instructions</h2>
+      <p class="small muted">Things you told the assistant to always (or never) do. The chat adds them when you ask; you can also add one here. Each is added to the prompts it applies to, so keep them short.</p>
       <div class="grid2">
-        <label class="field"><span>NAS URL</span><input type="url" data-key="nasUrl" placeholder="https://home.example.com:8443"></label>
-        <label class="field"><span>Base path on the NAS (optional)</span><input type="text" data-key="nasBasePath" placeholder="Projects"></label>
+        <label class="field"><span>Instruction</span><input type="text" id="instText" placeholder="Keep meeting prompts to one sentence."></label>
+        <label class="field"><span>Applies to</span>
+          <select id="instScope"><option value="all">Everything</option><option value="email">Email drafts</option><option value="meeting">Meetings</option><option value="chat">The chat</option></select>
+        </label>
       </div>
-      <label class="field"><span>Access token</span>
-        <div class="row nowrap"><input type="password" class="grow" data-key="nasToken" autocomplete="off" spellcheck="false"><button type="button" data-reveal="nasToken">Show</button></div>
-      </label>
-      <div class="row"><button type="button" id="testNas">Test connection</button><button type="button" id="allowNas" hidden>Allow this address</button><span id="nasTestOut" class="small muted"></span></div>
-
-      <h2>Folders to mirror &amp; index</h2>
-      <p class="small muted">Each folder you add is indexed here and mirrored to the NAS. The high-quality OCR / deep index built on the NAS is pulled back and applied to these same files. Give each a short remote path — its location on the NAS.</p>
-      <div id="folderList" class="stack"></div>
-      <div class="row"><button type="button" id="addFolder">Add a folder…</button></div>
-
-      <h2>Automate bridge folder</h2>
-      <div class="folder-row"><div><b>Bridge folder (optional)</b><div class="small muted">A OneDrive-synced folder your Power Automate flows watch (see Power Automate below). Separate from the NAS mirror.</div></div><span id="f-bridge" class="small"></span><button type="button" data-pick="bridge">Choose…</button></div>
-      <label class="field"><span>Project folders are at depth (within the remote path)</span>
-        <select data-key="projectDepth">
-          <option value="1">1 — each top-level folder is a project</option>
-          <option value="2">2 — e.g. Region/Project</option>
-          <option value="3">3</option>
-        </select>
-      </label>
+      <div class="row"><button type="button" id="addInst">Add instruction</button></div>
+      <div id="instList" class="stack"></div>
     </section>
 
+    <section id="folders" class="panel stack">
+      <h2>Project folders</h2>
+      <p class="small">Your project folders are the mirrors you keep in <b>NAS files</b>: each one is copied from this computer to the NAS (only changes are sent) and indexed here, on this computer. Email drafts, meeting prompts and the chat all search that one index — there is no second copy.</p>
+      <div id="folderList" class="stack"></div>
+      <div class="row"><button type="button" id="addFolder">Mirror a folder…</button><button type="button" id="openNasFiles">Open NAS files</button></div>
+      <h2>Automate bridge folder</h2>
+      <div class="folder-row"><div><b>Bridge folder (optional)</b><div class="small muted">A OneDrive-synced folder your Power Automate flows watch (see Power Automate below). Separate from the NAS mirror.</div></div><span id="f-bridge" class="small"></span><button type="button" data-pick="bridge">Choose…</button></div>
+    </section>
     <section id="indexing" class="panel stack">
       <h2>Indexing</h2>
       <label class="field"><span>Read the text of these file types</span><input type="text" data-key="includeExt"></label>
@@ -125,25 +119,50 @@
         <label class="field"><span>Max characters per file</span><input type="number" min="10000" step="10000" data-key="maxCharsPerFile"></label>
         <label class="field"><span>Re-index every (minutes, 0 = manual)</span><input type="number" min="0" data-key="autoIndexMinutes"></label>
       </div>
-      <label class="field"><span>Deep index file (relative to the sync or local folder; the NAS writes it here)</span><input type="text" data-key="deepIndexFile"></label>
+      <label class="field"><span>OCR index on the NAS (built by the HP for scanned PDFs; NAS path)</span><input type="text" data-key="deepIndexFile"></label>
+      <p class="small muted">Indexing runs on this computer and costs no AI tokens. Only short excerpts of the best-matching files are ever sent to the AI.</p>
     </section>
 
-    <section id="mirror" class="panel stack">
-      <h2>Mirror</h2>
-      <label class="field"><span>Direction</span>
-        <select data-key="mirrorMode">
-          <option value="two-way">Two-way — changes on either side are copied to the other</option>
-          <option value="push">Local → sync folder — the sync folder (and the NAS behind it) is a backup copy of this computer</option>
-          <option value="pull">Sync folder → local — this computer follows the sync folder (and the NAS behind it)</option>
-        </select>
-      </label>
+    <section id="meetings" class="panel stack">
+      <h2>Meetings</h2>
+      <p class="small muted">The meeting window listens to the Teams meeting and your microphone, transcribes, and shows prompts of what to say with quotes from your project files and standards. Transcripts are saved to the NAS.</p>
       <div class="grid2">
-        <label class="field"><span>Sync automatically every (minutes, 0 = manual)</span><input type="number" min="0" data-key="autoSyncMinutes"></label>
-        <label class="field"><span>Ask before moving more than this many files to trash</span><input type="number" min="0" data-key="deleteGuard"></label>
+        <label class="field"><span>Transcription</span>
+          <select data-key="meetingStt">
+            <option value="whisper">Free — on this computer (Whisper, no key needed)</option>
+            <option value="gemini">Gemini (needs a Gemini key; better with accents and noise)</option>
+          </select>
+        </label>
+        <label class="field"><span>Prompts</span>
+          <select data-key="meetingPrompts">
+            <option value="auto">Automatic — when a question or a new topic comes up</option>
+            <option value="manual">Only when I click "Ask now"</option>
+            <option value="off">Off — transcript only</option>
+          </select>
+        </label>
+        <label class="field"><span>AI for prompts</span>
+          <select data-key="meetingProvider">
+            <option value="">Same as above</option>
+            <option value="anthropic">Claude</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </label>
+        <label class="field"><span>At most one automatic prompt every (seconds)</span><input type="number" min="5" max="900" data-key="meetingMinGapSec"></label>
+        <label class="field"><span>Save transcripts to this NAS folder</span><input type="text" data-key="meetingFolder"></label>
+        <label class="field"><span>Label for your own voice</span><input type="text" data-key="myVoiceLabel"></label>
       </div>
-      <p class="small muted">Nothing is ever deleted outright: files removed or overwritten by a sync are kept under <code>.mailmirror/trash</code> or <code>.mailmirror/conflicts</code> on the side that lost them.</p>
+      <label class="check small"><input type="checkbox" data-key="meetingWebLookup"> If a standard isn't in my files, look it up online (e.g. BC MoTI, CSA S6)</label>
+      <label class="check small"><input type="checkbox" data-key="meetingSummary"> At the end, write a summary with decisions and action items (one call) and remember them for the project</label>
+      <details class="small"><summary>Free transcription model</summary>
+        <div class="grid2">
+          <label class="field"><span>Model</span><input type="text" data-key="whisperModel" list="whisperModels"></label>
+          <label class="field"><span>Download from</span><input type="text" data-key="whisperHost"></label>
+        </div>
+        <datalist id="whisperModels"><option value="Xenova/whisper-base.en"></option><option value="Xenova/whisper-tiny.en"></option><option value="Xenova/whisper-small.en"></option></datalist>
+        <label class="field"><span>Path template</span><input type="text" data-key="whisperPathTemplate"></label>
+        <p class="muted">Downloaded once (about 80 MB for base.en) and kept in this browser. If this computer can't reach huggingface.co, run the HP setup script with <code>--whisper-model</code> and set "Download from" to your NAS address.</p>
+      </details>
     </section>
-
     <section id="email" class="panel stack">
       <h2>Email</h2>
       <label class="check"><input type="checkbox" data-key="processOnOpen"> Draft automatically when I open a new email</label>
@@ -157,12 +176,13 @@
 
     <section id="automate" class="panel stack">
       <h2>Power Automate</h2>
-      <p class="small">Each flow below becomes an action MailMirror can run. <b>Read</b> actions fetch data (an SAP report, a row from a SharePoint Excel tracker); the AI can ask for them while drafting. <b>Write</b> actions change records (add a tracker row, file to GCdocs) and always wait for your click unless you tick "run after every draft".</p>
+      <p class="small"><b>Easiest:</b> describe the job in the side panel's <b>Chat</b> ("set up a flow that logs every email to my tracker") and it walks you through Power Automate step by step, adds the action here, and tests it.</p>
+      <p class="small">Each flow below becomes an action the assistant can run. <b>Read</b> actions fetch data (an SAP report, a row from a SharePoint Excel tracker); the AI can ask for them while drafting. <b>Write</b> actions change records (add a tracker row, file to GCdocs) and always wait for your click unless you tick "run after every draft".</p>
       <details class="small"><summary>How to connect a flow</summary>
         <ol>
           <li><b>HTTP (premium trigger):</b> create a flow starting with <i>When an HTTP request is received</i>, finish it with a <i>Response</i> action returning JSON <code>{"ok": true, "data": …, "message": "…"}</code>, and paste the trigger URL here.</li>
-          <li><b>Bridge folder (standard connectors only):</b> choose a OneDrive-synced folder above. MailMirror writes <code>requests/&lt;id&gt;.json</code>; a flow with <i>When a file is created</i> (OneDrive for Business) reads it, does the work, and creates <code>responses/&lt;id&gt;.json</code> with the same JSON shape.</li>
-          <li>The request MailMirror sends: <code>{"requestId","action","kind","params":{…},"item":{"subject","from","project","summary","status"}}</code>. See <i>docs/power-automate.md</i> for step-by-step flows for SAP, the Excel tracker and GCdocs.</li>
+          <li><b>Bridge folder (standard connectors only):</b> choose a OneDrive-synced folder above. The assistant writes <code>requests/&lt;id&gt;.json</code>; a flow with <i>When a file is created</i> (OneDrive for Business) reads it, does the work, and creates <code>responses/&lt;id&gt;.json</code> with the same JSON shape.</li>
+          <li>The request the assistant sends: <code>{"requestId","action","kind","params":{…},"item":{"subject","from","project","summary","status"}}</code>. Ask the chat for the exact schema of any action.</li>
         </ol>
       </details>
       <div id="actions" class="stack"></div>
@@ -175,7 +195,7 @@
 
     <section id="teaching" class="panel stack">
       <h2>Teaching</h2>
-      <p class="small muted">What MailMirror has learned about which documents answer which emails. Thumbs-up/down on a draft's sources adds rules here; you can also add a hint directly.</p>
+      <p class="small muted">What the assistant has learned about which documents answer which emails. Thumbs-up/down on a draft's sources adds rules here; you can also add a hint directly.</p>
       <div class="grid2">
         <label class="field"><span>When an email is about…</span><input type="text" id="hintText" placeholder="concrete strength, cylinder tests, 28-day results"></label>
         <label class="field"><span>…use this document</span><input type="text" id="hintPath" placeholder="type to search files" list="hintPaths"></label>
@@ -192,7 +212,11 @@
         <button type="button" id="clearDrafts" class="danger">Clear draft log</button>
         <button type="button" id="clearRules" class="danger">Forget all teaching</button>
       </div>
-      <p class="small muted">None of these touch your files, Outlook, or the sync folder.</p>
+      <div class="row">
+        <button type="button" id="exportSetup">Export settings (no keys)</button>
+        <button type="button" id="importSetup">Import settings…</button>
+      </div>
+      <p class="small muted">None of these touch your files, Outlook, or the NAS.</p>
     </section>
   </main>
 </div>

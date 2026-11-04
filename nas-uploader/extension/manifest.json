@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "NAS Uploader",
-  "version": "1.0.0",
-  "description": "Browse your NAS and drag-and-drop whole folder trees onto it over WebDAV, from any computer.",
+  "name": "Project Assistant — NAS, email and meetings",
+  "short_name": "Project Assistant",
+  "version": "2.0.0",
+  "description": "Mirror project folders to your NAS, draft Outlook replies from your project files, and get live prompts in Teams meetings.",
   "minimum_chrome_version": "116",
   "action": {
-    "default_title": "Open NAS Uploader",
+    "default_title": "Project Assistant",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -23,6 +24,35 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage", "power", "downloads"],
-  "host_permissions": ["http://*/*", "https://*/*"]
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_page": "options.html",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "power",
+    "downloads",
+    "sidePanel",
+    "alarms",
+    "offscreen",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://outlook.office.com/*",
+        "https://outlook.office365.com/*",
+        "https://outlook.live.com/*",
+        "https://outlook.cloud.microsoft/*"
+      ],
+      "js": ["content/outlook.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
 }

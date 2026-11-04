@@ -181,10 +181,12 @@ export async function selectQueryTerms(text, maxTerms = 24, boostText = '') {
 // query: string or Map(term -> weight).
 // Returns [{id, path, page, text, score}] — at most k, at most perFile per
 // file, total text within charBudget.
+// preferRecent: when the talk is about updates, schedules or forecasts, newer files rank higher
+// (a file changed this month scores up to 1.8x; one untouched for years about 1x).
 export async function search(query, {
   k = 8, charBudget = 7000, perFile = 2, maxChunkChars = 1200,
   boostPrefixes = [], excludeIds = new Set(), pathPrefix = '',
-  onlyPaths = null, excludePaths = null,
+  onlyPaths = null, excludePaths = null, preferRecent = false,
 } = {}) {
   const weights = query instanceof Map ? query : new Map([...new Set(tokenize(query))].map((t) => [t, 1]));
   if (!weights.size) return [];
@@ -212,6 +214,14 @@ export async function search(query, {
   const cs = t.objectStore('chunks');
   const recs = await Promise.all(cands.map(([id]) => reqP(cs.get(id))));
   const boosts = boostPrefixes.filter(Boolean).map((p) => p.toLowerCase());
+  const mtimes = new Map();
+  if (preferRecent) {
+    const ft = await tx(['files']);
+    const fs = ft.objectStore('files');
+    const paths = [...new Set(recs.filter(Boolean).map((c) => c.path))];
+    await Promise.all(paths.map(async (p) => mtimes.set(p, (await reqP(fs.get(p)))?.mtime || 0)));
+  }
+  const now = Date.now();
   const hits = [];
   recs.forEach((c, i) => {
     if (!c) return;
@@ -221,7 +231,11 @@ export async function search(query, {
     let score = cands[i][1];
     const lp = c.path.toLowerCase();
     if (boosts.some((b) => lp.startsWith(b + '/') || lp === b)) score *= 1.6;
-    hits.push({ id: c.id, path: c.path, page: c.page, text: c.text, score });
+    if (preferRecent) {
+      const ageDays = Math.max(0, (now - (mtimes.get(c.path) || 0)) / 86400000);
+      score *= 1 + 0.8 * Math.exp(-ageDays / 120);
+    }
+    hits.push({ id: c.id, path: c.path, page: c.page, text: c.text, score, ...(preferRecent ? { mtime: mtimes.get(c.path) || 0 } : {}) });
   });
   hits.sort((a, b) => b.score - a.score);
   const out = [];
@@ -253,6 +267,9 @@ export async function leadChunks(path, n = 1, maxChunkChars = 1200) {
     text: c.text.length > maxChunkChars ? c.text.slice(0, maxChunkChars) + '…' : c.text,
   }));
 }
+
+/** Words that mean "the newest version matters" (updates, forecasts, schedules). */
+export const RECENCY_WORDS = /\b(updat\w*|forecast\w*|latest|newest|current(ly)?|status|progress|schedule\w*|revis\w*|recent(ly)?|this (week|month)|to date|look-?ahead|projection\w*|estimate at completion|eac|cash ?flow)\b/i;
 
 export async function indexSummary() {
   const stats = (await kvGet('indexStats')) || { n: 0, totalLen: 0 };

@@ -1,5 +1,7 @@
 import { getSettings, saveSettings, getAll, get, put, kvGet } from './lib/db.js';
-import { getRootHandle, setRootHandle, permissionState, requestPermission, getFileByPath } from './lib/fsutil.js';
+import { getRootHandle, permissionState, requestPermission, getFileByPath } from './lib/fsutil.js';
+import { listMirrors } from './lib/store.js';
+import { nasClient } from './lib/nas.js';
 import { updateItem, deleteItem, summarize, emailId } from './lib/assistant.js';
 import { paramSpec, defaultParams } from './lib/automate.js';
 
@@ -13,7 +15,6 @@ let status = null;
 let items = [];
 let settings = null;
 const expanded = new Set(JSON.parse(sessionStorage.getItem('mm_expanded') || '[]'));
-let lastPlan = null;
 
 function saveExpanded() { sessionStorage.setItem('mm_expanded', JSON.stringify([...expanded].slice(-50))); }
 
@@ -79,6 +80,7 @@ function render() {
   renderFiles();
   renderMirror();
   renderAutomate();
+  renderChatState();
 }
 
 function chip(text, cls, title = '') {
@@ -91,10 +93,13 @@ function renderChips() {
   c.push(status.hasKey ? chip(`${status.provider === 'gemini' ? 'Gemini' : 'Claude'} · ${status.model}`, 'ok') : chip('No API key', 'bad'));
   const idx = status.index?.status;
   c.push(idx ? chip(`Index · ${fmtN(idx.files)} files`, idx.errors?.length ? 'warn' : 'ok', `Last run ${ago(idx.at)}`) : chip('Not indexed', 'warn'));
-  if (status.nas?.configured || status.folders.nas) {
-    const m = status.mirror;
-    c.push(m ? chip(`Mirror · ${ago(m.at)}`, m.ok ? 'ok' : 'warn', m.blocked || '') : chip('Mirror · never', ''));
+  const pf = status.projectFolders || [];
+  if (pf.length) {
+    const last = Math.max(0, ...pf.map((f) => f.lastSync?.at || 0));
+    const failed = pf.some((f) => f.lastSync?.failed);
+    c.push(last ? chip(`Mirror · ${ago(last)}`, failed ? 'warn' : 'ok', failed ? 'Some files could not be copied last time — see NAS files' : '') : chip('Mirror · never', 'warn'));
   }
+  if (!status.nas?.configured) c.push(chip('NAS not set up', 'bad', status.nas?.problem || ''));
   if (status.job) c.push(chip(`${status.job.name}…`, 'info'));
   if (status.queue) c.push(chip(`${status.queue} drafting`, 'info'));
   if (status.pendingActions) c.push(chip(`${status.pendingActions} flow${status.pendingActions > 1 ? 's' : ''} pending`, 'info'));
@@ -110,7 +115,7 @@ async function updateOutlookChip() {
   if (!el) return;
   if (!outlookState?.open) el.innerHTML = chip('Outlook not open', '', 'Open Outlook on the web in a tab');
   else if (!outlookState.active) el.innerHTML = chip('Reload Outlook tab', 'warn', outlookState.error || '');
-  else el.innerHTML = chip('Outlook connected', 'ok', 'Click to check what MailMirror can read on the Outlook page');
+  else el.innerHTML = chip('Outlook connected', 'ok', 'Click to check what the assistant can read on the Outlook page');
   el.style.cursor = 'pointer';
   el.onclick = outlookCheck;
 }
@@ -140,19 +145,21 @@ async function outlookCheck() {
 function renderSetup() {
   if (!status) return;
   const needKey = !status.hasKey;
-  const folders = status.mirrorFolders || [];
+  const folders = status.projectFolders || [];
   const needFolder = !folders.length;
   $('setup').hidden = !(needKey || needFolder);
-  const f = folders.map((x) => `<b>${esc(x.name)}</b>${x.perm === 'granted' ? '' : ' <span class="pill warn">needs access</span>'}`);
-  if (status.nas?.configured) f.unshift(`NAS: <b>${esc(status.nas.url)}</b>`);
-  $('setupFolders').innerHTML = f.join(' · ') || '<span class="muted">No folders chosen yet.</span>';
+  $('setupKeyPart').hidden = !needKey;
+  $('setupFolderPart').hidden = !needFolder;
+  $('setupSep').hidden = !(needKey && needFolder);
+  const f = folders.map((x) => `<b>${esc(x.name)}</b> → ${esc(x.nasPath)}${x.perm === 'granted' ? '' : ' <span class="pill warn">needs access</span>'}`);
+  $('setupFolders').innerHTML = f.join(' · ') || '<span class="muted">No folders mirrored yet.</span>';
 }
 
 function renderReconnect() {
   if (!status) return;
   const f = status.folders;
   const bridgePrompt = f.bridge && f.bridge.perm === 'prompt';
-  const folderPrompt = (status.mirrorFolders || []).some((x) => x.perm === 'prompt');
+  const folderPrompt = (status.projectFolders || []).some((x) => x.perm === 'prompt');
   $('reconnect').hidden = !(bridgePrompt || folderPrompt);
 }
 
@@ -329,15 +336,15 @@ function renderFiles() {
     $('indexPill').textContent = `${fmtN(st.files)} files`;
     const deep = status.deep;
     $('indexInfo').innerHTML = [
-      `Last run ${ago(st.at)} on the ${st.root === 'nas' ? 'sync-folder' : 'local'} copy · ${fmtN(status.index.chunks)} passages`,
+      `Last run ${ago(st.at)} on this computer · ${fmtN(status.index.chunks)} passages · ${fmtN(st.folders || 0)} folder(s)`,
       `${fmtN(st.indexed)} read · ${fmtN(st.unchanged)} unchanged · ${fmtN(st.nameOnly)} name-only · ${fmtN(st.removed)} removed${st.lowText ? ` · ${st.lowText} look scanned (need OCR)` : ''}`,
-      deep ? `Deep index: ${fmtN(deep.applied)} files improved ${ago(deep.at)} (${deep.from})` : 'Deep index: not applied yet',
+      deep ? `NAS OCR index: ${fmtN(deep.applied)} files improved ${ago(deep.at)}` : 'NAS OCR index: none yet (the HP builds it for scanned PDFs)',
     ].map((l) => `<div>${esc(l)}</div>`).join('');
     $('indexErrors').textContent = (st.errors || []).join('\n') || 'None';
   } else {
     $('indexPill').className = 'pill warn';
     $('indexPill').textContent = 'not indexed';
-    $('indexInfo').textContent = 'Choose a project folder in Settings, then click Index now.';
+    $('indexInfo').textContent = 'Mirror a project folder first (Mirror tab), then click Index now.';
   }
   showJob(job, ['index', 'deep'], 'jobBar', 'jobText');
 }
@@ -360,59 +367,23 @@ function progressText(name, p) {
   if (!p) return '';
   if (p.phase === 'index') return `Indexing… ${fmtN(p.scanned)} files checked, ${fmtN(p.indexed)} read${p.path ? ` — ${p.path}` : ''}`;
   if (p.phase === 'deep') return p.done ? `Deep index applied: ${fmtN(p.applied)} files improved` : `Applying deep index… ${fmtN(p.applied)} files`;
-  if (p.phase?.startsWith('scan-')) return `Scanning ${p.phase === 'scan-nas' ? 'sync' : 'local'} folder… ${fmtN(p.files)} files`;
-  if (p.phase === 'sync') return `Syncing… ${p.done}/${p.total}${p.path ? ` — ${p.path}` : ''}`;
   return `${name}…`;
 }
 
 function renderMirror() {
   if (!status) return;
+  const folders = status.projectFolders || [];
   const permPill = (p) => (p === 'granted' ? '<span class="pill ok">connected</span>' : p === 'missing' ? '<span class="pill bad">folder lost</span>' : '<span class="pill warn">needs permission</span>');
-  const mode = { 'two-way': 'Two-way (both sides kept identical)', push: 'Local → NAS (backup)', pull: 'NAS → local' }[settings?.mirrorMode] || settings?.mirrorMode;
-  const nas = status.nas || {};
-  const folders = status.mirrorFolders || [];
-  const nasLine = nas.configured
-    ? `<div>NAS: <b>${esc(nas.url)}</b> ${nas.status ? (nas.status.ok ? '<span class="pill ok">reachable</span>' : `<span class="pill bad">${esc(nas.status.error || 'unreachable')}</span>`) : '<span class="pill">not tested</span>'} <button class="link" id="testNasBtn">Test</button></div>`
-    : '<div class="banner warn small">No NAS connection yet — set the URL and token in Settings → NAS over the internet.</div>';
-  const folderLines = folders.length
-    ? folders.map((x) => `<div>• <b>${esc(x.name)}</b> → ${esc(x.remotePath || '(root)')} ${permPill(x.perm)}</div>`).join('')
-    : '<div class="muted">No folders chosen — add one in Settings.</div>';
-  $('mirrorFolders').innerHTML = `${nasLine}${folderLines}
-    <div class="muted">Mode: ${esc(mode)}${settings?.autoSyncMinutes ? ` · every ${settings.autoSyncMinutes} min` : ' · manual'} · deleted/overwritten files go to .mailmirror/trash and /conflicts on the side that lost them</div>`;
-  $('testNasBtn')?.addEventListener('click', async () => {
-    toast('Testing NAS…');
-    const r = await engine('nas.test');
-    toast(r?.ok ? `NAS reachable — ${r.files} files.` : `NAS: ${r?.error || 'unreachable'}`, 5000);
-    refreshSoon();
-  });
-  const busy = !!status.job;
-  const ready = (nas.configured && folders.some((x) => x.perm === 'granted')) || (status.folders.local && status.folders.nas);
-  $('planBtn').disabled = busy || !ready;
-  $('syncBtn').disabled = busy || !ready;
-  showJob(status.job, ['plan', 'sync'], 'mirrorBar', 'mirrorText');
-  const m = status.mirror;
-  $('mirrorLast').innerHTML = m
-    ? `Last sync ${ago(m.at)}: ${m.blocked ? `<span class="err">${esc(m.blocked)}</span>` : `${m.done ?? 0}/${m.total ?? 0} actions, ${(m.bytes / 1e6 || 0).toFixed(1)} MB${m.errors?.length ? ` · ${m.errors.length} errors` : ''}`}
-      ${m.errors?.length ? `<details><summary>Errors</summary><div class="mono">${m.errors.map(esc).join('<br>')}</div></details>` : ''}`
-    : 'Never synced.';
-}
-
-function renderPlan(plan) {
-  lastPlan = plan;
-  const box = $('planBox');
-  box.hidden = false;
-  const s = plan.summary;
-  const lines = (plan.actions || []).filter((a) => a.op !== 'adopt' && a.op !== 'forget');
-  const opText = { 'copy-ln': '→ sync', 'copy-nl': '← sync', 'conflict-ln': '→ sync (conflict, synced copy saved)', 'conflict-nl': '← sync (conflict, local copy saved)', 'trash-l': 'trash local', 'trash-n': 'trash in sync folder' };
-  box.innerHTML = `<h2>Sync preview</h2>
-    <div class="small">${fmtN(s.localFiles)} local files · ${fmtN(s.nasFiles)} in sync folder · ${s.toNas} to copy out · ${s.toLocal} to copy here · ${s.conflicts} conflicts · ${s.trashLocal + s.trashNas} to trash · ${s.adopt} already matching</div>
-    ${plan.blocked ? `<div class="banner warn small">${esc(plan.blocked)}</div>` : ''}
-    <div class="plan-list">${lines.slice(0, 300).map((a) => `<div>${esc(opText[a.op] || a.op)} — ${esc(a.path)} <span class="muted">(${esc(a.reason)})</span></div>`).join('') || '<div class="muted">Nothing to copy.</div>'}${lines.length > 300 ? `<div class="muted">…and ${lines.length - 300} more</div>` : ''}</div>
-    <div class="row">${plan.blocked && !plan.blocked.includes('looks empty') ? '<button class="danger" id="allowSync">Allow and sync</button>' : '<button class="primary" id="runPlan">Run this sync</button>'}</div>`;
-  $('runPlan')?.addEventListener('click', () => startSync(false));
-  $('allowSync')?.addEventListener('click', () => {
-    if (confirm('Move the listed files to the .mailmirror/trash folder and continue?')) startSync(true);
-  });
+  $('mirrorFolders').innerHTML = folders.length
+    ? folders.map((f) => {
+        const ls = f.lastSync;
+        const last = ls ? `Last synced ${ago(ls.at)} · ${fmtN(ls.uploaded)} uploaded · ${fmtN(ls.moved)} moved · ${fmtN(ls.deleted)} deleted${ls.failed ? ` · <span class="err">${fmtN(ls.failed)} problem(s)</span>` : ''}` : 'Not synced yet';
+        return `<div class="dreq" data-mirror="${esc(f.id)}"><div class="row"><b class="grow">📁 ${esc(f.name)}</b>${permPill(f.perm)}</div>
+          <div class="muted">→ ${esc(f.nasPath)} on the NAS · ${f.index ? (f.projectMode === 'single' ? 'indexed as one project' : 'indexed, one project per subfolder') : 'not indexed'}</div>
+          <div class="muted">${last}</div>
+          <div class="row" style="margin-top:4px"><button class="primary" data-act="sync">Sync now</button><button data-act="open">Open on NAS</button></div></div>`;
+      }).join('')
+    : '<div class="muted">No folders mirrored yet. Click <b>Mirror a folder…</b> and choose the folder (or drive folder) that holds your projects.</div>';
 }
 
 async function renderAutomate() {
@@ -449,16 +420,20 @@ function openSettings(section) {
 
 const VIEWABLE = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'html', 'htm', 'svg', 'mp4']);
 
-// Opens the local copy of a file from its designated folder (rec.folderId +
-// rec.rel). The NAS is never read for viewing — the work computer has the file.
+// Opens a file: the copy on this computer (its mirror's folder), else the copy on the NAS.
 async function openLocalFile(rec, path) {
-  const folderId = rec?.folderId || 'local';
   const rel = rec?.rel || path;
   try {
-    const h = await getRootHandle(folderId === 'local' ? 'local' : 'folder:' + folderId);
-    if (h && (await permissionState(h)) === 'granted') return await (await getFileByPath(h, rel)).getFile();
-  } catch { /* not reachable */ }
-  return null;
+    const m = (await listMirrors()).find((x) => x.id === rec?.folderId);
+    if (m?.handle && (await permissionState(m.handle, 'read')) === 'granted') return await (await getFileByPath(m.handle, rel)).getFile();
+  } catch {
+    /* not reachable on this computer */
+  }
+  try {
+    return await (await nasClient()).getBlob('/' + path);
+  } catch {
+    return null;
+  }
 }
 
 async function openSource(path, page) {
@@ -543,7 +518,7 @@ async function onListClick(e) {
       engine('badge');
       break;
     case 'delete':
-      if (!confirm('Delete this draft from MailMirror? (Nothing in Outlook is touched.)')) return;
+      if (!confirm('Delete this draft from the assistant? (Nothing in Outlook is touched.)')) return;
       await deleteItem(id);
       engine('badge');
       break;
@@ -699,7 +674,7 @@ $('exportBtn').addEventListener('click', () => {
   const csv = [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  a.download = `mailmirror-drafts-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `assistant-drafts-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 });
 
@@ -743,37 +718,34 @@ $('setupSave').addEventListener('click', async () => {
   refresh();
 });
 
-function slug(name) {
-  return String(name || '').trim().replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'folder';
-}
-
-async function addMirrorFolder() {
-  try {
-    const handle = await window.showDirectoryPicker({ id: 'mm-project', mode: 'readwrite' });
-    const id = `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-    await setRootHandle('folder:' + id, handle);
-    const s = await getSettings();
-    await saveSettings({ mirrorFolders: [...(s.mirrorFolders || []), { id, name: handle.name, remotePath: slug(handle.name) }] });
-    toast(`Added ${handle.name}. Indexing…`);
-    engine('index.run');
-    refresh();
-  } catch (err) {
-    if (err.name === 'AbortError') return;
-    toast(`Folder picker unavailable here — opening Settings. (${err.message})`, 5000);
-    openSettings('folders');
-  }
+function addMirrorFolder() {
+  bg('app.open', { hash: '#new-mirror' });
 }
 $('setupLocal').addEventListener('click', addMirrorFolder);
-$('setupNas').addEventListener('click', () => openSettings('folders'));
+$('newMirrorBtn').addEventListener('click', addMirrorFolder);
+$('mirrorFolders').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act]');
+  const row = e.target.closest('[data-mirror]');
+  if (!b || !row) return;
+  const f = (status?.projectFolders || []).find((x) => x.id === row.dataset.mirror);
+  if (!f) return;
+  if (b.dataset.act === 'sync') bg('app.open', { hash: `#sync=${encodeURIComponent(f.id)}` });
+  if (b.dataset.act === 'open') bg('app.open', { hash: `#${f.nasPath.split('/').map(encodeURIComponent).join('/')}` });
+});
+$('openNas').addEventListener('click', () => bg('app.open', { hash: '' }));
+$('openMeeting').addEventListener('click', () => bg('meeting.open'));
 
 $('reconnectBtn').addEventListener('click', async () => {
-  const keys = ['bridge', ...(status?.mirrorFolders || []).map((x) => (x.id === 'local' ? 'local' : 'folder:' + x.id))];
-  for (const k of keys) {
-    const h = await getRootHandle(k);
-    if (h && (await permissionState(h)) === 'prompt') {
-      try { await requestPermission(h); } catch (err) { toast(err.message); }
+  const bridge = await getRootHandle('bridge');
+  if (bridge && (await permissionState(bridge)) === 'prompt') {
+    try { await requestPermission(bridge); } catch (err) { toast(err.message); }
+  }
+  for (const m of await listMirrors()) {
+    if (m.handle && (await permissionState(m.handle, 'read')) === 'prompt') {
+      try { await requestPermission(m.handle, 'read'); } catch (err) { toast(err.message); }
     }
   }
+  engine('index.run');
   refresh();
 });
 
@@ -876,17 +848,159 @@ $('indexBtn').addEventListener('click', async () => afterEngine(await engine('in
 $('deepBtn').addEventListener('click', async () => afterEngine(await engine('deep.apply', { force: true })));
 $('stopBtn').addEventListener('click', () => engine('job.stop'));
 
-// ---- mirror tab ----
+// ---- chat ----
 
-$('planBtn').addEventListener('click', async () => {
-  $('planBox').hidden = true;
-  afterEngine(await engine('mirror.plan'));
-});
-async function startSync(allowLargeDelete) {
-  $('planBox').hidden = true;
-  afterEngine(await engine('mirror.run', { usePlan: !!lastPlan, allowLargeDelete }));
+let chatMessages = [];
+let chatBusy = false;
+
+// Minimal, safe formatting for replies: escape everything, then **bold**, `code`, ```blocks```, links, lists.
+function mdLite(text) {
+  const parts = String(text || '').split(/```(?:\w+)?\n?/);
+  return parts.map((part, i) => {
+    if (i % 2 === 1) return `<pre class="preview">${esc(part.replace(/\n$/, ''))}</pre>`;
+    let h = esc(part);
+    h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    h = h.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+    h = h.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    h = h.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+    h = h.replace(/^(\s*)(\d+)\. /gm, '$1<span class="num">$2.</span> ');
+    h = h.replace(/^(\s*)[-*] /gm, '$1• ');
+    return h.replace(/\n/g, '<br>');
+  }).join('');
 }
-$('syncBtn').addEventListener('click', () => startSync(false));
+
+const STEP_LABEL = {
+  get_status: 'checked status', get_settings: 'read settings', update_settings: 'changed settings', list_instructions: 'read instructions',
+  add_instruction: 'added an instruction', remove_instruction: 'removed an instruction', search_files: 'searched files', list_projects: 'listed projects',
+  get_memory: 'read project memory', remember: 'remembered a note', forget_memory: 'forgot a note', list_document_rules: 'read document rules',
+  add_document_hint: 'taught a document', forget_document_rule: 'removed a document rule', set_folder_options: 'changed a folder', reindex: 'asked to reindex',
+  automate_list: 'read flows', automate_save: 'saved a flow action', automate_remove: 'removed a flow action', automate_flow_schema: 'built the flow schema',
+  automate_test: 'tested a flow', record_change_request: 'saved a change request', undo_last_change: 'undid a change',
+};
+
+function chatNode(m) {
+  const el = document.createElement('div');
+  el.className = `msg ${m.role}`;
+  el.dataset.id = m.id;
+  if (m.role === 'user') {
+    el.innerHTML = `<div class="bubble">${esc(m.text)}</div>`;
+    return el;
+  }
+  const steps = (m.steps || []).map((st) => `<span class="pill ${st.ok ? '' : 'bad'}" title="${esc(st.note || '')}">${esc(STEP_LABEL[st.name] || st.name)}</span>`).join(' ');
+  const changes = (m.changes || []).map((c) => `<div class="change" data-change="${esc(c.id)}">✎ ${esc(c.summary)} <button class="link" data-act="undo">Undo</button></div>`).join('');
+  const pending = (m.pending || []).map((p) => `<div class="dreq" data-test="${esc(p.id)}"><b>Test ${esc(p.action)}</b> <span class="mono muted">${esc(Object.entries(p.params || {}).map(([k, v]) => `${k}=${v}`).join(', '))}</span>
+      ${p.done ? `<pre class="preview">${esc(p.result || '')}</pre>` : '<div class="small muted">This flow changes records. Check the values, then:</div><button class="primary" data-act="runTest">Run test</button>'}</div>`).join('');
+  el.innerHTML = `<div class="bubble">${m.working && !m.text ? '<span class="muted">Working…</span>' : ''}${m.error ? `<div class="err">${esc(m.error)}</div>` : mdLite(m.text)}</div>
+    ${steps ? `<div class="steps">${steps}</div>` : ''}${changes}${pending}
+    ${m.cost != null ? `<div class="usage">${esc(m.model || '')} · ${money(m.cost)}</div>` : ''}`;
+  return el;
+}
+
+function renderChatLog(scroll = true) {
+  const log = $('chatLog');
+  if (!chatMessages.length) {
+    log.innerHTML = '<div class="empty">Nothing here yet. Tell the assistant what you want changed, or ask it a question.</div>';
+    return;
+  }
+  log.replaceChildren(...chatMessages.map(chatNode));
+  if (scroll) log.scrollTop = log.scrollHeight;
+}
+
+function renderChatState() {
+  $('chatSend').disabled = chatBusy;
+  $('chatStop').hidden = !chatBusy;
+}
+
+async function loadChat() {
+  const res = await engine('chat.history').catch(() => null);
+  chatMessages = res?.messages || [];
+  chatBusy = !!res?.busy;
+  renderChatLog();
+  renderChatState();
+  loadChanges();
+}
+
+async function loadChanges() {
+  const res = await engine('changes.list').catch(() => null);
+  const list = res?.changes || [];
+  $('changesList').innerHTML = list.length
+    ? list.map((c) => `<div class="change" data-change="${esc(c.id)}"><span class="muted">${new Date(c.at).toLocaleString()}</span> ${esc(c.summary)} ${c.undone ? '<span class="pill">undone</span>' : '<button class="link" data-act="undo">Undo</button>'}</div>`).join('')
+    : '<div class="muted">No changes yet.</div>';
+}
+
+function onChatMessage(msg) {
+  if (msg.error) {
+    toast(msg.error, 6000);
+    chatBusy = false;
+    renderChatState();
+    return;
+  }
+  const m = msg.message;
+  if (!m) return;
+  const i = chatMessages.findIndex((x) => x.id === m.id);
+  if (i >= 0) chatMessages[i] = m;
+  else chatMessages.push(m);
+  if (m.role === 'assistant') chatBusy = !!m.working;
+  renderChatLog();
+  renderChatState();
+  if (!m.working && m.role === 'assistant') {
+    loadChanges();
+    refreshSoon();
+  }
+}
+
+$('chatForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = $('chatInput').value.trim();
+  if (!text || chatBusy) return;
+  chatBusy = true;
+  renderChatState();
+  const res = await engine('chat.send', { text });
+  if (res?.busy) toast('Still answering the last message…');
+  else if (res?.error) {
+    toast(res.error, 6000);
+    chatBusy = false;
+    renderChatState();
+    return;
+  }
+  $('chatInput').value = '';
+});
+$('chatInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    $('chatForm').requestSubmit();
+  }
+});
+$('chatStop').addEventListener('click', () => engine('chat.stop'));
+$('chatClear').addEventListener('click', async () => {
+  if (!confirm('Clear the chat? Changes it made stay in place (and can still be undone below).')) return;
+  await engine('chat.clear');
+  chatMessages = [];
+  renderChatLog();
+});
+
+async function onChatClick(e) {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  if (b.dataset.act === 'undo') {
+    const id = Number(b.closest('[data-change]').dataset.change);
+    const res = await engine('changes.undo', { id });
+    toast(res?.error || `Undone: ${res?.change?.summary || ''}`);
+    loadChanges();
+    refreshSoon();
+  }
+  if (b.dataset.act === 'runTest') {
+    const msgEl = b.closest('.msg');
+    const box = b.closest('[data-test]');
+    b.disabled = true;
+    toast('Running the flow…');
+    const res = await engine('chat.runTest', { messageId: Number(msgEl.dataset.id), testId: box.dataset.test });
+    if (res?.error) toast(res.error, 6000);
+    await loadChat();
+  }
+}
+$('chatLog').addEventListener('click', onChatClick);
+$('changesList').addEventListener('click', onChatClick);
 
 // ---- tabs ----
 
@@ -904,6 +1018,10 @@ document.querySelector('.tabs').addEventListener('click', (e) => {
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.to !== 'ui') return false;
+  if (msg.type === 'chat') {
+    onChatMessage(msg);
+    return false;
+  }
   if (msg.type === 'progress' && status) {
     status.job = { name: msg.job, progress: msg.progress, started: status.job?.started || Date.now() };
     renderFiles();
@@ -912,10 +1030,8 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
   if (msg.type === 'jobDone') {
     if (msg.error) toast(`${msg.job}: ${msg.error}`, 6000);
-    else if (msg.job === 'plan') renderPlan(msg.result);
-    else if (msg.job === 'sync') toast(msg.result?.blocked || `Sync finished: ${msg.result?.done ?? 0} actions.`, 5000);
     else if (msg.job === 'index') toast(`Index updated: ${msg.result?.indexed ?? 0} files read.`);
-    else if (msg.job === 'deep') toast(msg.result?.found === false ? 'No deep index file in the sync folder yet (the NAS writes it there).' : `Deep index: ${msg.result?.applied ?? 0} files improved.`);
+    else if (msg.job === 'deep') toast(msg.result?.found === false ? `No OCR index on the NAS yet${msg.result?.error ? ` (${msg.result.error})` : ' (the HP builds it)'}.` : `NAS OCR index: ${msg.result?.applied ?? 0} files improved.`);
   }
   refreshSoon();
   return false;
@@ -924,7 +1040,8 @@ chrome.runtime.onMessage.addListener((msg) => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 8000);
 
-selectTab(sessionStorage.getItem('mm_tab') || 'drafts');
+selectTab(sessionStorage.getItem('mm_tab') || 'chat');
+loadChat();
 $('filter').value = sessionStorage.getItem('mm_filter') || 'active';
 updateSetupLabels();
 refresh();

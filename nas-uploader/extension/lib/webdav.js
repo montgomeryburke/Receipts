@@ -72,7 +72,7 @@ export class WebDAVClient {
   /**
    * Low-level request. Resolves with {status, text, headers} for 2xx, throws WebDAVError otherwise.
    */
-  request(method, path, { headers = {}, body = null, dir = false, timeout = 120000, signal, onUploadProgress, okStatuses } = {}) {
+  request(method, path, { headers = {}, body = null, dir = false, timeout = 120000, signal, onUploadProgress, okStatuses, responseType = '' } = {}) {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
         reject(new WebDAVError('Cancelled', { aborted: true }));
@@ -84,6 +84,7 @@ export class WebDAVClient {
       if (this.authHeader) xhr.open(method, this.url(path, { dir }), true, this.username, this.password);
       else xhr.open(method, this.url(path, { dir }), true);
       xhr.timeout = timeout;
+      if (responseType) xhr.responseType = responseType;
       if (this.authHeader) xhr.setRequestHeader('Authorization', this.authHeader);
       for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
 
@@ -118,7 +119,8 @@ export class WebDAVClient {
         const status = xhr.status;
         const ok = okStatuses ? okStatuses.includes(status) : status >= 200 && status < 300;
         if (ok) {
-          resolve({ status, text: xhr.responseText, headers: xhr.getAllResponseHeaders() });
+          const text = responseType && responseType !== 'text' ? '' : xhr.responseText;
+          resolve({ status, text, response: xhr.response, headers: xhr.getAllResponseHeaders(), lastModified: xhr.getResponseHeader('Last-Modified') });
         } else {
           reject(new WebDAVError(describeStatus(status, method), { status, retryable: RETRYABLE_STATUS.has(status) }));
         }
@@ -295,6 +297,18 @@ export class WebDAVClient {
     try {
       const res = await this.request('GET', normalizePath(path), { headers: { 'Cache-Control': 'no-cache' }, ...opts });
       return res.text;
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /** A file's contents as a File (null if it doesn't exist). */
+  async getBlob(path, opts = {}) {
+    try {
+      const res = await this.request('GET', normalizePath(path), { headers: { 'Cache-Control': 'no-cache' }, responseType: 'blob', timeout: 600000, ...opts });
+      const lm = Date.parse(res.lastModified || '') || Date.now();
+      return new File([res.response], normalizePath(path).split('/').pop(), { lastModified: lm, type: res.response?.type || '' });
     } catch (err) {
       if (err.status === 404) return null;
       throw err;

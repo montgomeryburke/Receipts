@@ -1,7 +1,9 @@
-import { getSettings, saveSettings, clear, kvSet, get } from './lib/db.js';
+import { getSettings, saveSettings, clear, kvSet, get, DEFAULT_SETTINGS } from './lib/db.js';
 import { getRootHandle, setRootHandle, permissionState, requestPermission } from './lib/fsutil.js';
 import { getRules, deleteRule, addHint } from './lib/teach.js';
 import { splitList } from './lib/text.js';
+import { projectFolders } from './lib/folders.js';
+import { listInstructions, addInstruction, removeInstruction } from './lib/memory.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -25,7 +27,7 @@ function flashSaved() {
 
 // ---------------------------------------------------------------- simple fields
 
-const NUMERIC = new Set(['snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'autoSyncMinutes', 'deleteGuard', 'projectDepth']);
+const NUMERIC = new Set(['snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'meetingMinGapSec']);
 const NULLABLE = new Set(['priceInPerM', 'priceOutPerM']);
 
 function readField(el) {
@@ -84,15 +86,12 @@ document.querySelectorAll('[data-test]').forEach((b) => b.addEventListener('clic
 
 // ---------------------------------------------------------------- folders
 
-function slug(name) {
-  return String(name || '').trim().replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'folder';
-}
-
 async function renderFolders() {
   const h = await getRootHandle('bridge');
   const el = $('f-bridge');
-  if (!h) { el.innerHTML = '<span class="pill">not set</span>'; }
-  else {
+  if (!h) {
+    el.innerHTML = '<span class="pill">not set</span>';
+  } else {
     const p = await permissionState(h);
     el.innerHTML = `<b>${esc(h.name)}</b> ${p === 'granted' ? '<span class="pill ok">connected</span>' : '<button type="button" data-grant="bridge">Grant access</button>'}`;
   }
@@ -100,77 +99,51 @@ async function renderFolders() {
 }
 
 async function renderFolderList() {
-  const metas = settings.mirrorFolders || [];
-  if (!metas.length) { $('folderList').innerHTML = '<p class="small muted">No folders yet. Add the folder (or folders) that hold your project files.</p>'; return; }
-  const rows = [];
-  for (const m of metas) {
-    const h = await getRootHandle('folder:' + m.id);
-    const perm = h ? await permissionState(h) : 'missing';
-    const state = perm === 'granted' ? '<span class="pill ok">connected</span>'
-      : perm === 'missing' ? '<span class="pill bad">folder lost — choose again</span>'
-        : `<button type="button" data-grant-folder="${esc(m.id)}">Grant access</button>`;
-    rows.push(`<div class="action-card" data-folder="${esc(m.id)}">
-      <div class="row"><b class="grow">${esc(m.name)}</b>${state}<button type="button" data-rechoose="${esc(m.id)}">Re-choose…</button><button type="button" class="danger" data-remove-folder="${esc(m.id)}">Remove</button></div>
-      <label class="field"><span>Path on the NAS (where it lives under the base path)</span><input type="text" data-remote="${esc(m.id)}" value="${esc(m.remotePath)}"></label>
-    </div>`);
+  const folders = await projectFolders();
+  if (!folders.length) {
+    $('folderList').innerHTML = '<p class="small muted">No project folders yet. Click "Mirror a folder…", choose the folder (or the drive folder) that holds your projects, and pick where it goes on the NAS.</p>';
+    return;
   }
-  $('folderList').innerHTML = rows.join('');
+  $('folderList').innerHTML = folders.map((f) => {
+    const state = f.perm === 'granted' ? '<span class="pill ok">connected</span>' : f.perm === 'missing' ? '<span class="pill bad">folder lost — mirror it again</span>' : `<button type="button" data-grant-folder="${esc(f.id)}">Grant access</button>`;
+    return `<div class="action-card" data-folder="${esc(f.id)}">
+      <div class="row"><b class="grow">📁 ${esc(f.name)} → ${esc(f.nasPath)}</b>${state}</div>
+      <div class="row">
+        <label class="check small"><input type="checkbox" data-pref="index" ${f.index ? 'checked' : ''}> Index this folder</label>
+        <label class="field small" style="min-width:260px"><span>Projects in this folder</span>
+          <select data-pref="projectMode">
+            <option value="subfolders" ${f.projectMode !== 'single' ? 'selected' : ''}>Each subfolder is a project</option>
+            <option value="single" ${f.projectMode === 'single' ? 'selected' : ''}>The whole folder is one project</option>
+          </select>
+        </label>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-async function addFolder() {
-  let h;
-  try { h = await window.showDirectoryPicker({ id: 'mm-project', mode: 'readwrite' }); } catch (err) { if (err.name !== 'AbortError') toast(err.message, 6000); return; }
-  const id = `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
-  await setRootHandle('folder:' + id, h);
-  settings.mirrorFolders = [...(settings.mirrorFolders || []), { id, name: h.name, remotePath: slug(h.name) }];
-  settings = await saveSettings({ mirrorFolders: settings.mirrorFolders });
-  toast(`Added ${h.name}. It will be indexed and mirrored.`);
-  await renderFolderList();
+$('addFolder').addEventListener('click', () => bg('app.open', { hash: '#new-mirror' }));
+$('openNasFiles').addEventListener('click', () => bg('app.open', { hash: '' }));
+
+$('folderList').addEventListener('change', async (e) => {
+  const key = e.target.dataset.pref;
+  const card = e.target.closest('[data-folder]');
+  if (!key || !card) return;
+  const prefs = { ...(settings.folderPrefs || {}) };
+  const cur = { ...(prefs[card.dataset.folder] || {}) };
+  cur[key] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  prefs[card.dataset.folder] = cur;
+  settings = await saveSettings({ folderPrefs: prefs });
+  flashSaved();
   engine('index.run');
-}
-
-$('addFolder').addEventListener('click', addFolder);
-
-$('folderList').addEventListener('input', (e) => {
-  const id = e.target.dataset.remote;
-  if (!id) return;
-  const m = (settings.mirrorFolders || []).find((x) => x.id === id);
-  if (!m) return;
-  m.remotePath = e.target.value.replace(/^\/+|\/+$/g, '');
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => saveSettings({ mirrorFolders: settings.mirrorFolders }), 400);
 });
 
 $('folderList').addEventListener('click', async (e) => {
-  const rm = e.target.closest('[data-remove-folder]');
-  if (rm) {
-    if (!confirm('Remove this folder from MailMirror? Your files are not touched; it stops being indexed and mirrored.')) return;
-    const id = rm.dataset.removeFolder;
-    settings.mirrorFolders = (settings.mirrorFolders || []).filter((x) => x.id !== id);
-    settings = await saveSettings({ mirrorFolders: settings.mirrorFolders });
-    await setRootHandle('folder:' + id, null);
-    await renderFolderList();
-    return;
-  }
-  const re = e.target.closest('[data-rechoose]');
-  if (re) {
-    try {
-      const h = await window.showDirectoryPicker({ id: 'mm-project', mode: 'readwrite' });
-      await setRootHandle('folder:' + re.dataset.rechoose, h);
-      const m = settings.mirrorFolders.find((x) => x.id === re.dataset.rechoose);
-      if (m && !m.name) m.name = h.name;
-      await saveSettings({ mirrorFolders: settings.mirrorFolders });
-      toast('Folder reconnected.');
-      await renderFolderList();
-    } catch (err) { if (err.name !== 'AbortError') toast(err.message, 6000); }
-    return;
-  }
   const g = e.target.closest('[data-grant-folder]');
-  if (g) {
-    const h = await getRootHandle('folder:' + g.dataset.grantFolder);
-    if (h) await requestPermission(h);
-    await renderFolderList();
-  }
+  if (!g) return;
+  const f = (await projectFolders({ withPerm: false })).find((x) => x.id === g.dataset.grantFolder);
+  if (f) await requestPermission(f.handle, 'read');
+  await renderFolderList();
+  engine('index.run');
 });
 
 document.addEventListener('click', async (e) => {
@@ -194,41 +167,6 @@ document.addEventListener('click', async (e) => {
     renderFolders();
   }
 });
-
-// ---------------------------------------------------------------- NAS connection
-
-function nasOrigin() {
-  try { return new URL(settings.nasUrl).origin + '/*'; } catch { return null; }
-}
-
-async function checkNasAccess() {
-  const pattern = nasOrigin();
-  const ok = !pattern || await chrome.permissions.contains({ origins: [pattern] }).catch(() => true);
-  $('allowNas').hidden = ok;
-}
-
-$('testNas').addEventListener('click', async () => {
-  await new Promise((r) => setTimeout(r, 350)); // let a just-typed value save
-  $('nasTestOut').textContent = 'Testing…';
-  const pattern = nasOrigin();
-  if (pattern && !(await chrome.permissions.contains({ origins: [pattern] }).catch(() => false))) {
-    $('nasTestOut').innerHTML = '<span class="err">Click “Allow this address” first.</span>';
-    $('allowNas').hidden = false;
-    return;
-  }
-  const res = await engine('nas.test');
-  $('nasTestOut').innerHTML = res?.ok ? `<span class="pill ok">connected</span> ${res.files} files on the NAS` : `<span class="err">${esc(res?.error || 'failed')}</span>`;
-});
-
-$('allowNas').addEventListener('click', async () => {
-  const pattern = nasOrigin();
-  if (!pattern) { toast('Enter a valid NAS URL first.'); return; }
-  const ok = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
-  toast(ok ? 'Address allowed. Now Test the connection.' : 'Not allowed — the NAS cannot be reached.');
-  checkNasAccess();
-});
-
-document.querySelector('[data-key="nasUrl"]').addEventListener('input', () => { clearTimeout(saveTimer); saveTimer = setTimeout(checkNasAccess, 400); });
 
 // ---------------------------------------------------------------- Outlook URLs
 
@@ -325,7 +263,7 @@ $('actions').addEventListener('click', async (e) => {
   }
   const r = e.target.closest('[data-remove]');
   if (!r) return;
-  if (!confirm('Remove this flow from MailMirror? (The flow itself is not touched.)')) return;
+  if (!confirm('Remove this flow from the assistant? (The flow itself is not touched.)')) return;
   settings.actions.splice(Number(r.dataset.remove), 1);
   saveActions(true);
 });
@@ -412,9 +350,75 @@ $('clearDrafts').addEventListener('click', async () => {
   toast('Draft log cleared.');
 });
 $('clearRules').addEventListener('click', async () => {
-  if (!confirm('Forget everything MailMirror has been taught about documents?')) return;
+  if (!confirm('Forget everything the assistant has been taught about documents?')) return;
   await kvSet('rules', []);
   renderRules();
+});
+
+// ---------------------------------------------------------------- standing instructions
+
+const SCOPE_LABEL = { all: 'everything', email: 'email drafts', meeting: 'meetings', chat: 'the chat' };
+
+async function renderInstructions() {
+  const list = await listInstructions();
+  $('instList').innerHTML = list.length
+    ? list.slice().reverse().map((i) => `<div class="rule"><span class="pill">${esc(SCOPE_LABEL[i.scope] || i.scope)}</span><span class="grow">${esc(i.text)}</span><button type="button" data-del-inst="${esc(i.id)}">Remove</button></div>`).join('')
+    : '<p class="small muted">None yet.</p>';
+}
+
+$('addInst').addEventListener('click', async () => {
+  const text = $('instText').value.trim();
+  if (!text) return;
+  await addInstruction(text, $('instScope').value);
+  $('instText').value = '';
+  settings = await getSettings();
+  renderInstructions();
+  flashSaved();
+});
+$('instList').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-del-inst]');
+  if (!b) return;
+  await removeInstruction(b.dataset.delInst);
+  settings = await getSettings();
+  renderInstructions();
+});
+
+// ---------------------------------------------------------------- export / import (moving to another computer)
+
+const SECRET = new Set(['anthropicKey', 'geminiKey']);
+
+$('exportSetup').addEventListener('click', async () => {
+  const s = await getSettings();
+  const out = Object.fromEntries(Object.entries(s).filter(([k]) => !SECRET.has(k) && k !== 'folderPrefs'));
+  out.rules = await getRules();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({ projectAssistantSettings: 1, at: new Date().toISOString(), settings: out }, null, 2)], { type: 'application/json' }));
+  a.download = `project-assistant-settings-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+});
+
+$('importSetup').addEventListener('click', () => {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'application/json,.json';
+  inp.onchange = async () => {
+    try {
+      const data = JSON.parse(await inp.files[0].text());
+      const incoming = data.settings || data;
+      const patch = {};
+      for (const [k, v] of Object.entries(incoming)) if (k in DEFAULT_SETTINGS && !SECRET.has(k) && k !== 'folderPrefs') patch[k] = v;
+      settings = await saveSettings(patch);
+      if (Array.isArray(incoming.rules)) await kvSet('rules', incoming.rules);
+      fillFields();
+      renderActions();
+      renderRules();
+      renderInstructions();
+      toast(`Imported ${Object.keys(patch).length} settings.`);
+    } catch (err) {
+      toast(`Could not import: ${err.message}`, 6000);
+    }
+  };
+  inp.click();
 });
 
 // ---------------------------------------------------------------- init
@@ -423,8 +427,8 @@ $('clearRules').addEventListener('click', async () => {
   settings = await getSettings();
   fillFields();
   renderFolders();
-  checkNasAccess();
   renderActions();
   renderRules();
+  renderInstructions();
   if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
 })();

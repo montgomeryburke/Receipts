@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MailMirror</title>
+<title>Project Assistant</title>
 <link rel="stylesheet" href="ui.css">
 <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
 <header class="top">
   <div class="row">
-    <h1 class="brand">MailMirror</h1>
+    <h1 class="brand">Project Assistant</h1>
     <span class="grow"></span>
+    <button id="openMeeting" title="Open the meeting assistant (Teams)">🎙 Meeting</button>
+    <button id="openNas" title="Browse the NAS, upload folders, run mirrors">🗄 NAS files</button>
     <button id="openSettings" class="icon" title="Settings" aria-label="Settings">⚙</button>
   </div>
   <div id="chips" class="chips"></div>
@@ -20,6 +22,7 @@
 <div class="wrap stack">
   <!-- First run / missing key -->
   <section id="setup" class="panel stack" hidden>
+    <div id="setupKeyPart" class="stack">
     <h2>Connect an AI provider</h2>
     <p class="muted small">Paste an API key. It is stored only in this browser profile and sent only to the provider you pick.</p>
     <div class="row" role="radiogroup" aria-label="Provider">
@@ -34,14 +37,16 @@
       <span id="setupMsg" class="small muted"></span>
     </div>
     <p class="small muted" id="setupHelp">Get a key at console.anthropic.com → API keys.</p>
-    <hr class="sep">
+    </div>
+    <div id="setupFolderPart" class="stack">
+    <hr class="sep" id="setupSep">
     <h2>Project folders</h2>
-    <p class="muted small">Add the folder (or folders) that hold your project files — they are indexed here and mirrored to the NAS over the internet. Then connect the NAS in Settings.</p>
+    <p class="muted small">Mirror the folder (or the drive folder) that holds your projects. It is copied to the NAS once and indexed here; email drafts, meeting prompts and the chat all use that one copy.</p>
     <div class="row">
-      <button id="setupLocal" class="primary">Add a folder to mirror…</button>
-      <button id="setupNas">NAS connection (Settings)…</button>
+      <button id="setupLocal" class="primary">Mirror a folder…</button>
     </div>
     <div id="setupFolders" class="small muted"></div>
+    </div>
   </section>
 
   <section id="reconnect" class="banner warn row" hidden>
@@ -52,6 +57,7 @@
   <section id="summary" class="summary" aria-label="Draft summary"></section>
 
   <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="chat">Chat</button>
     <button role="tab" data-tab="drafts" aria-selected="true">Drafts</button>
     <button role="tab" data-tab="questions">Questions <span id="qCount" class="count"></span></button>
     <button role="tab" data-tab="files">Files</button>
@@ -59,6 +65,21 @@
     <button role="tab" data-tab="automate">Automate</button>
   </nav>
 
+  <!-- Chat -->
+  <section id="tab-chat" class="tab stack" hidden>
+    <p class="muted small">Tell the assistant what isn't working the way you want, ask about your files, or ask it to help set up a Power Automate flow. Every change it makes is listed under the chat with Undo.</p>
+    <div id="chatLog" class="chat-log" aria-live="polite"></div>
+    <form id="chatForm" class="chat-form">
+      <textarea id="chatInput" rows="3" placeholder="e.g. In meetings, keep prompts to one sentence. · Set up a flow that logs every email to my SharePoint tracker. · Why did it miss the pour date in the Alert email?"></textarea>
+      <div class="row">
+        <button id="chatSend" class="primary" type="submit">Send</button>
+        <button id="chatStop" type="button" hidden>Stop</button>
+        <span class="grow"></span>
+        <button id="chatClear" type="button" class="link">Clear chat</button>
+      </div>
+    </form>
+    <details id="changesBox" class="small"><summary>Changes made from the chat</summary><div id="changesList" class="stack"></div></details>
+  </section>
   <!-- Drafts -->
   <section id="tab-drafts" class="tab stack">
     <div class="row">
@@ -104,7 +125,7 @@
       <div id="jobText" class="small muted"></div>
       <div class="row">
         <button id="indexBtn" class="primary">Index now</button>
-        <button id="deepBtn" title="Load the OCR / deep index produced on the Pi">Apply deep index</button>
+        <button id="deepBtn" title="Load the OCR index built on the NAS (HP or Pi) for scanned PDFs">Apply NAS OCR index</button>
         <button id="stopBtn" class="danger" hidden>Stop</button>
       </div>
       <details class="small"><summary>Problem files</summary><div id="indexErrors" class="mono"></div></details>
@@ -114,18 +135,11 @@
   <!-- Mirror -->
   <section id="tab-mirror" class="tab stack" hidden>
     <div class="panel stack">
-      <div id="mirrorFolders" class="small"></div>
-      <div class="row">
-        <button id="planBtn">Preview sync</button>
-        <button id="syncBtn" class="primary">Sync now</button>
-      </div>
-      <div id="mirrorBar" class="progress" hidden><div></div></div>
-      <div id="mirrorText" class="small muted"></div>
+      <div class="row"><h2 class="grow">Project folders</h2><button id="newMirrorBtn">Mirror a folder…</button></div>
+      <p class="small muted">Each folder is mirrored from this computer to the NAS (only changes are sent) and indexed here. Mirrors run in "NAS files", which opens in a tab.</p>
+      <div id="mirrorFolders" class="stack small"></div>
     </div>
-    <div id="planBox" class="panel stack" hidden></div>
-    <div id="mirrorLast" class="small muted"></div>
   </section>
-
   <!-- Automate -->
   <section id="tab-automate" class="tab stack" hidden>
     <div id="actionsBox" class="stack"></div>
@@ -163,7 +177,7 @@
 <dialog id="attachDlg">
   <form method="dialog" class="stack">
     <h2>Attach the right document</h2>
-    <p class="small muted">Search your files and pick the one this email should use. MailMirror remembers the choice for similar emails.</p>
+    <p class="small muted">Search your files and pick the one this email should use. The assistant remembers the choice for similar emails.</p>
     <input id="attSearch" type="text" placeholder="Search files…">
     <div id="attResults" class="stack attach-results"></div>
     <div class="row"><span class="grow"></span><button value="cancel">Close</button></div>

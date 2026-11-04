@@ -1,10 +1,10 @@
 // IndexedDB storage shared by every extension context (service worker,
-// offscreen engine, side panel, options page). Everything persistent lives
-// here, including settings and folder handles, so no context needs
-// chrome.storage (which offscreen documents cannot use).
+// offscreen engine, side panel, options page, meeting window). Everything
+// persistent lives here, including settings and folder handles, so no context
+// needs chrome.storage (which offscreen documents cannot use).
 
-const DB_NAME = 'mailmirror';
-const DB_VERSION = 1;
+const DB_NAME = 'assistant';
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -25,7 +25,10 @@ export function openDb() {
         const s = db.createObjectStore('items', { keyPath: 'id' });
         s.createIndex('processedAt', 'processedAt');
       }
-      if (!db.objectStoreNames.contains('mirror')) db.createObjectStore('mirror', { keyPath: 'path' });
+      // v2: chat with the assistant, its undo log, and saved meetings.
+      if (!db.objectStoreNames.contains('chat')) db.createObjectStore('chat', { keyPath: 'id', autoIncrement: true });
+      if (!db.objectStoreNames.contains('changes')) db.createObjectStore('changes', { keyPath: 'id', autoIncrement: true });
+      if (!db.objectStoreNames.contains('meetings')) db.createObjectStore('meetings', { keyPath: 'id' });
     };
     req.onsuccess = () => {
       const db = req.result;
@@ -99,11 +102,11 @@ export const kvSet = (key, value) => put('kv', value, key);
 // ---- settings ----
 
 export const DEFAULT_SETTINGS = {
-  provider: 'anthropic',              // 'anthropic' | 'gemini'
+  provider: 'anthropic',              // 'anthropic' | 'gemini' — writes email drafts and answers in the chat
   anthropicKey: '',
   anthropicModel: 'claude-opus-5-5',
   geminiKey: '',
-  geminiModel: 'gemini-2.5-flash',
+  geminiModel: 'auto',                // 'auto' = the newest Gemini Flash model the key can use
   effort: 'low',                      // low | medium | high — thinking depth / token spend
   anthropicFallbacks: true,           // server-side retry on a fallback model if a request is declined
   anthropicBaseUrl: 'https://api.anthropic.com',
@@ -120,30 +123,21 @@ export const DEFAULT_SETTINGS = {
   signature: '',
   styleNotes: 'Concise, professional, plain language.',
 
-  fileSource: 'auto',                 // which copy to index/open: 'local' | 'nas' | 'auto'
-  projectDepth: 1,                    // folder depth that names a project
+  // Standing instructions the user gave (in the chat or in Settings). Each: {id, scope, text, at}.
+  // scope: 'all' | 'email' | 'meeting' | 'chat'. They are added to the matching prompts.
+  instructions: [],
+
+  // Project folders are the mirrors kept in "NAS files" (one fileset: mirrored once, indexed once).
+  // Per-folder choices, keyed by mirror id: {index: true|false, projectMode: 'subfolders'|'single'}.
+  folderPrefs: {},
   includeExt: 'pdf,docx,docm,dotx,xlsx,xlsm,pptx,odt,ods,odp,txt,md,csv,tsv,json,xml,html,htm,eml,rtf,log,yaml,yml,ini',
   nameOnlyExt: 'zip,dwg,dxf,rvt,nwd,ifc,jpg,jpeg,png,tif,tiff,gif,bmp,heic,msg,doc,xls,ppt,mpp,kmz,kml,shp',
   excludePatterns: '.git, node_modules, ~$*, *.tmp, Thumbs.db, .DS_Store, desktop.ini',
   maxFileMB: 150,
   maxCharsPerFile: 1000000,
   autoIndexMinutes: 60,
-  deepIndexFile: '.mailmirror/deep-index.jsonl.gz',
-
-  // NAS over the internet (HTTPS sync server in nas-sync/server.py). The token
-  // is stored here in this browser profile only; entered once, not per sync.
-  nasUrl: '',                         // e.g. https://home.example.com:8443
-  nasToken: '',
-  nasBasePath: '',                    // a subfolder on the server, if any
-
-  // Folders designated to mirror/index. Each: {id, name, remotePath}. The
-  // directory handle for each is stored separately under handle:folder:<id>.
-  mirrorFolders: [],
-  rootRemotePath: '',                 // remote path for the single-folder fallback
-
-  mirrorMode: 'two-way',              // 'two-way' | 'push' (local→NAS) | 'pull' (NAS→local)
-  autoSyncMinutes: 0,                 // 0 = manual only
-  deleteGuard: 25,                    // refuse a sync that would trash more than this many files
+  // OCR / deep index built on the NAS (the HP or a Pi) for scanned PDFs, applied to the same files here.
+  deepIndexFile: '/.assistant/deep-index.jsonl.gz',
 
   processOnOpen: true,
   autoScan: true,
@@ -156,6 +150,19 @@ export const DEFAULT_SETTINGS = {
   // url, params:'name: hint, name={{template}}', autoRun (reads), auto (writes, after each draft),
   // timeoutSec, enabled}
   actions: [],
+
+  // Meetings
+  meetingStt: 'whisper',              // 'whisper' (free, on this computer) | 'gemini' (needs a Gemini key)
+  meetingPrompts: 'auto',             // 'auto' (when a question or a new topic comes up) | 'manual' (Ask now only) | 'off'
+  meetingProvider: '',                // '' = same as provider; or 'anthropic' | 'gemini'
+  meetingMinGapSec: 20,               // at most one automatic prompt every N seconds (saves tokens)
+  meetingWebLookup: true,             // look a standard up online when the project files don't have it
+  meetingFolder: '/Meetings',         // transcripts are saved here on the NAS
+  meetingSummary: true,               // one call at the end for a summary, decisions and action items
+  myVoiceLabel: 'Me',
+  whisperModel: 'Xenova/whisper-base.en',
+  whisperHost: 'https://huggingface.co/', // or the NAS address, after the setup script copied the model there
+  whisperPathTemplate: '{model}/resolve/{revision}/',
 };
 
 export async function getSettings() {

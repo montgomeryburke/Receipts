@@ -4,6 +4,7 @@ import { captureDrop, scanEntries, scanFileList, scanDirectoryHandle, stripTopFo
 import { TransferManager } from './lib/transfer.js';
 import { MANIFEST_NAME, isProtectedName, listRemoteTree, readManifest, writeManifest, planMirror, buildManifest } from './lib/mirror.js';
 import { listMirrors, saveMirror, deleteMirror } from './lib/store.js';
+import { getSettings, saveSettings } from './lib/db.js';
 import {
   normalizePath,
   joinPath,
@@ -87,9 +88,12 @@ function showOnly(sectionId) {
   for (const id of ['setup', 'login', 'conn-error', 'app']) $(id).hidden = id !== sectionId;
 }
 
+// "#/Projects/x" opens a NAS folder; "#sync=<id>" and "#new-mirror" are commands from the side panel.
+const COMMAND_HASH = /^#(sync=|new-mirror)/;
+
 function folderFromHash() {
   const h = location.hash.replace(/^#/, '');
-  if (!h) return null;
+  if (!h || COMMAND_HASH.test(location.hash)) return null;
   return normalizePath(h.split('/').map(safeDecode).join('/'));
 }
 
@@ -166,7 +170,34 @@ async function connect(creds, { fromLogin = false } = {}) {
   state.ready = true;
   await navigate(folder, { entries });
   await loadMirrors();
+  handleCommandHash();
   return true;
+}
+
+/** Runs a command the side panel sent through the address (#sync=<id>, #new-mirror), once. */
+async function handleCommandHash() {
+  const h = location.hash;
+  if (!state.ready || !COMMAND_HASH.test(h)) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  if (h.startsWith('#sync=')) {
+    const id = safeDecode(h.slice(6));
+    const m = state.mirrors.find((x) => x.id === id);
+    if (!m) {
+      await dialog({ title: 'Mirror not found', body: 'That mirror is not saved in this browser any more.', noCancel: true });
+      return;
+    }
+    let granted = false;
+    try {
+      granted = typeof m.handle.queryPermission !== 'function' || (await m.handle.queryPermission({ mode: 'read' })) === 'granted';
+    } catch {}
+    // Asking for permission needs a click, so confirm first when Chrome hasn't remembered it.
+    if (!granted && !(await dialog({ title: `Sync “${m.name}”?`, body: 'Chrome will ask once for permission to read the folder.', okText: 'Allow and sync' }))) return;
+    await syncMirror(m);
+  } else if (h.startsWith('#new-mirror')) {
+    if (await dialog({ title: 'Mirror a project folder', body: 'Choose the folder on this computer (or the drive folder that holds your project folders). It is copied to the NAS — afterwards only changes are sent — and the assistant indexes it.', okText: 'Choose folder…' })) {
+      await newMirror();
+    }
+  }
 }
 
 function showLogin(error) {
@@ -716,6 +747,10 @@ async function recordSync(rec, summary) {
 
 /** After every run: store each mirror's manifest and the "last synced" summary. */
 async function onManagerSettled(e) {
+  if (e.detail.batches.some((b) => b.kind === 'mirror')) {
+    // Fresh files on the NAS → refresh the assistant's index of the same folders (only changed files are read).
+    chrome.runtime.sendMessage({ to: 'bg', type: 'engine', payload: { type: 'index.run' } }).catch(() => {});
+  }
   for (const b of e.detail.batches) {
     if (b.kind !== 'mirror') continue;
     const manifest = buildManifest({ previous: b.manifest, plan: b.plan, remote: b.remote, tasks: b.tasks, sourceName: b.sourceName });
@@ -843,9 +878,20 @@ async function newMirror() {
   };
   const del = mkCheck('mirror-deletions', 'When I delete files here, delete them from the NAS too (you always see the list first)', true);
   const prot = mkCheck('mirror-protect', 'Never delete artwork or metadata that only exists on the NAS (Jellyfin posters, .nfo files, trickplay)', true);
+  const idx = mkCheck('mirror-index', 'Index it for the assistant (email drafts, meeting prompts, chat) — on this computer, no AI tokens', true);
+  const modeField = el('label', 'Projects in this folder', 'field');
+  const modeSel = document.createElement('select');
+  modeSel.id = 'mirror-project-mode';
+  for (const [v, t] of [['subfolders', 'Each subfolder is a project'], ['single', 'The whole folder is one project']]) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = t;
+    modeSel.append(o);
+  }
+  modeField.append(modeSel);
   const ok = await dialog({
     title: `New mirror: “${handle.name}”`,
-    bodyNodes: [el('p', `Keep a NAS folder identical to “${handle.name}” on this computer.`), field, del.label, prot.label],
+    bodyNodes: [el('p', `Keep a NAS folder identical to “${handle.name}” on this computer.`), field, del.label, prot.label, idx.label, modeField],
     okText: 'Create and sync',
   });
   if (!ok) return;
@@ -856,6 +902,12 @@ async function newMirror() {
   }
   const options = { deletions: del.box.checked, protectMetadata: prot.box.checked };
   const rec = await rememberMirror(handle, handle.name, nasPath, options);
+  if (rec) {
+    try {
+      const s = await getSettings();
+      await saveSettings({ folderPrefs: { ...(s.folderPrefs || {}), [rec.id]: { index: idx.box.checked, projectMode: modeSel.value } } });
+    } catch {}
+  }
   if (rec) await syncMirror(rec);
 }
 
@@ -1161,6 +1213,10 @@ function wireUi() {
   });
 
   window.addEventListener('hashchange', () => {
+    if (COMMAND_HASH.test(location.hash)) {
+      handleCommandHash();
+      return;
+    }
     const f = folderFromHash();
     if (state.ready && f && f !== state.cwd) navigate(f);
   });
@@ -1170,6 +1226,15 @@ function wireUi() {
       e.preventDefault();
       e.returnValue = '';
     }
+  });
+}
+
+function wireAssistantButton() {
+  $('btn-assistant')?.addEventListener('click', async () => {
+    try {
+      const win = await chrome.windows.getCurrent();
+      await chrome.sidePanel.open({ windowId: win.id });
+    } catch {}
   });
 }
 
@@ -1194,4 +1259,5 @@ window.nasUploader = state;
 state.renderMirrors = () => renderMirrors();
 await loadPrefs();
 wireUi();
+wireAssistantButton();
 await init();

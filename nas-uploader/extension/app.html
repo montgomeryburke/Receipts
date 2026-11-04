@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NAS Uploader</title>
+    <title>NAS files — Project Assistant</title>
     <link rel="icon" href="icons/icon32.png" />
     <link rel="stylesheet" href="app.css" />
   </head>
@@ -11,13 +11,14 @@
     <header class="topbar">
       <div class="brand">
         <img src="icons/icon48.png" alt="" width="28" height="28" />
-        <span>NAS Uploader</span>
+        <span>NAS files</span>
       </div>
       <div class="conn" id="conn" data-state="connecting">
         <span class="dot"></span>
         <span id="conn-text">Connecting…</span>
       </div>
       <button class="btn small ghost" id="btn-lock" hidden title="Forget the password for this browser session">Lock</button>
+      <button class="btn small" id="btn-assistant" title="Open the assistant side panel (chat, email drafts, meetings)">Assistant</button>
     </header>
 
     <main>

@@ -56,3 +56,20 @@ textarea.draft { min-height: 160px; font-size: 13px; line-height: 1.5; }
 .plan-list { max-height: 260px; overflow: auto; font-family: var(--mono); font-size: 11px; }
 .q { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
 .empty { text-align: center; color: var(--muted); padding: 24px 8px; }
+
+/* chat */
+.chat-log { display: flex; flex-direction: column; gap: 8px; max-height: 58vh; overflow-y: auto; padding: 2px; }
+.msg { display: flex; flex-direction: column; gap: 4px; max-width: 100%; }
+.msg.user { align-items: flex-end; }
+.msg .bubble { border-radius: 12px; padding: 7px 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.msg.user .bubble { background: var(--accent); color: var(--accent-text); white-space: pre-wrap; max-width: 88%; }
+.msg.assistant .bubble { background: var(--surface); border: 1px solid var(--border); }
+.msg .bubble code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 0 3px; border-radius: 3px; }
+.msg .bubble pre.preview { margin: 6px 0; max-height: 260px; }
+.msg .bubble .num { font-weight: 600; }
+.msg .steps { display: flex; flex-wrap: wrap; gap: 3px; }
+.msg .steps .pill { font-size: 10.5px; }
+.change { font-size: 12px; color: var(--muted); }
+.chat-form { display: flex; flex-direction: column; gap: 6px; position: sticky; bottom: 0; background: var(--bg); padding-top: 4px; }
+.chat-form textarea { width: 100%; resize: vertical; }
+.top .row button { padding: 4px 8px; }
