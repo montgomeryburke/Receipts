@@ -16,7 +16,10 @@ const SHOTS = path.join(WORK, 'screenshots');
 const USER = 'nasuser';
 const PASSWORD = process.env.NAS_TEST_PASSWORD || 'pässwörd:with colon';
 const FILTER = process.argv[2] ? new RegExp(process.argv[2], 'i') : null;
-const NAS = { url: 'http://127.0.0.1:18081/', root: path.join(DATA, 'root1') };
+// Its own WebDAV server (Apache under a sub-path with a space), so these tests never touch the NAS suite's folders.
+const NAS = { url: 'http://127.0.0.1:18082/my dav/', root: path.join(DATA, 'root2') };
+/** URL of a NAS path ("/a/b c.txt") on the test server, segment by segment. */
+const davUrl = (p) => new URL(p.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/'), NAS.url.replace(/ /g, '%20'));
 fs.mkdirSync(SHOTS, { recursive: true });
 
 // ---------------------------------------------------------------------------
@@ -114,7 +117,7 @@ const { anthropicMessage, geminiReply, text, toolUse } = require('./mock-ai.cjs'
 
 function dav(method, p, body) {
   return new Promise((resolve, reject) => {
-    const u = new URL(p.split('/').map(encodeURIComponent).join('/').replace(/^%2F/, ''), NAS.url);
+    const u = davUrl(p);
     const req = http.request(u, { method, headers: { Authorization: 'Basic ' + Buffer.from(`${USER}:${PASSWORD}`).toString('base64'), ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {}) } }, (res) => {
       let data = '';
       res.on('data', (c) => (data += c));
@@ -1289,7 +1292,7 @@ test('NAS-only folders (standards copied from Google Drive): the HP extracts the
   const std = `${base}/Standards`;
   await dav('MKCOL', std + '/');
   const put = (p, buf) => new Promise((resolve, reject) => {
-    const u = new URL(p.split('/').map(encodeURIComponent).join('/').replace(/^%2F/, ''), NAS.url);
+    const u = davUrl(p);
     const req = http.request(u, { method: 'PUT', headers: { Authorization: 'Basic ' + Buffer.from(`${USER}:${PASSWORD}`).toString('base64'), 'Content-Length': buf.length } }, (res) => {
       res.resume();
       res.on('end', () => resolve(res.statusCode));
