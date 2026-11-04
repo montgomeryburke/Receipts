@@ -8,12 +8,14 @@ out="${1:-nas-uploader-review-bundle.txt}"
 {
   echo "Project Assistant: complete source for review ($(git log -1 --format='%h %cd' --date=short 2>/dev/null || date +%F))"
   echo "Files: extension/ (Chrome extension, Manifest V3; third-party libraries in extension/vendor/ are left out),"
-  echo "server/setup-webdav.sh (Proxmox container setup) and server/assistant-ocr-index.py (OCR job on the NAS)."
+  echo "server/setup-webdav.sh (Proxmox container setup), server/assistant-ocr-index.py (OCR / mail / NAS-only text job"
+  echo "on the NAS) and server/setup-drive-copy.sh (daily Google Drive copy with rclone)."
   echo "Tests live in tests/ in the repository and are not included here."
   for f in extension/manifest.json extension/config.js extension/background.js extension/engine.html extension/engine.js \
            extension/app.html extension/app.css extension/app.js extension/sidepanel.html extension/sidepanel.css extension/sidepanel.js \
            extension/options.html extension/options.js extension/meeting.html extension/meeting.css extension/meeting.js \
-           extension/content/*.js extension/lib/*.js server/setup-webdav.sh server/assistant-ocr-index.py; do
+           extension/recorder.html extension/recorder.css extension/recorder.js \
+           extension/content/*.js extension/lib/*.js server/setup-webdav.sh server/assistant-ocr-index.py server/setup-drive-copy.sh; do
     printf '\n\n===== FILE: %s (%s lines) =====\n' "$f" "$(wc -l < "$f")"
     cat "$f"
   done

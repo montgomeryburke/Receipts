@@ -122,6 +122,14 @@ async function renderFolderList() {
 }
 
 $('addFolder').addEventListener('click', () => bg('app.open', { hash: '#new-mirror' }));
+
+$('saveNasFolders').addEventListener('click', async () => {
+  const list = $('nasFolders').value.split(/[\n,]/).map((x) => x.trim()).filter(Boolean).map((x) => `/${x.replace(/^\/+|\/+$/g, '')}`).filter((x) => x !== '/');
+  settings = await saveSettings({ nasFolders: [...new Set(list)] });
+  $('nasFolders').value = settings.nasFolders.join('\n');
+  $('nasFoldersOut').textContent = list.length ? 'Saved. The HP reads them on its next run (every 2 hours), then they appear in search.' : 'Saved.';
+  engine('index.run');
+});
 $('openNasFiles').addEventListener('click', () => bg('app.open', { hash: '' }));
 
 $('folderList').addEventListener('change', async (e) => {
@@ -430,5 +438,6 @@ $('importSetup').addEventListener('click', () => {
   renderActions();
   renderRules();
   renderInstructions();
+  $('nasFolders').value = (settings.nasFolders || []).join('\n');
   if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
 })();

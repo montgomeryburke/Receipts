@@ -94,7 +94,8 @@ export async function runIndex(roots, settings, { onProgress = () => {}, signal,
   }
 
   if (!signal?.aborted) {
-    for (const path of existing.keys()) {
+    for (const [path, rec] of existing) {
+      if (rec.folderId === 'nas' || rec.folderId === 'meeting') continue; // not from a local folder: kept elsewhere
       if (!seen.has(path)) {
         await writer.removeFile(path);
         counts.removed++;
@@ -117,6 +118,8 @@ export async function runIndex(roots, settings, { onProgress = () => {}, signal,
 
 // Applies the deep OCR index built on the NAS (by the HP or a Pi). `getFile` returns the gz File fetched
 // over WebDAV, or null if there is none yet.
+const nasPrefixes = (settings) => (settings.nasFolders || []).map((p) => String(p).replace(/^\/+|\/+$/g, '')).filter(Boolean);
+
 export async function applyDeepIndex(getFile, settings, { onProgress = () => {}, force = false, signal, from = 'NAS' } = {}) {
   let file;
   try {
@@ -132,7 +135,10 @@ export async function applyDeepIndex(getFile, settings, { onProgress = () => {},
   }
   const existing = new Map((await getAll('files')).map((f) => [f.path, f]));
   const writer = new IndexWriter();
-  const counts = { records: 0, applied: 0, stale: 0, unmatched: 0, kept: 0 };
+  const counts = { records: 0, applied: 0, stale: 0, unmatched: 0, kept: 0, nasOnly: 0, removed: 0 };
+  const nasRoots = nasPrefixes(settings);
+  const nasRootOf = (p) => nasRoots.find((r) => p === r || p.startsWith(`${r}/`));
+  const seenNas = new Set();
   const stream = file.stream()
     .pipeThrough(new DecompressionStream('gzip'))
     .pipeThrough(new TextDecoderStream());
@@ -142,14 +148,28 @@ export async function applyDeepIndex(getFile, settings, { onProgress = () => {},
     let r;
     try { r = JSON.parse(line); } catch { return; }
     counts.records++;
-    const rec = existing.get(r.path);
-    if (!rec) { counts.unmatched++; return; }
-    if (rec.size !== r.size) { counts.stale++; return; }
-    if (rec.method && rec.method.startsWith('deep:') && rec.deepMtime === r.mtime) { counts.kept++; return; }
+    let rec = existing.get(r.path);
+    // A file that also exists on this computer is indexed from here; the NAS-only path is only for the rest.
+    const nasRoot = r.nasOnly && !(rec && rec.folderId !== 'nas') && nasRootOf(r.path);
+    if (nasRoot) {
+      // A file that is only on the NAS: there is no local copy, so this record is its whole index entry.
+      seenNas.add(r.path);
+      counts.nasOnly++;
+      if (!rec || rec.folderId !== 'nas' || rec.size !== r.size || rec.deepMtime !== r.mtime || force) {
+        rec = { path: r.path, rel: r.path.slice(nasRoot.length + 1), folderId: 'nas', size: r.size, mtime: r.mtime, ext: extOf(r.path), project: nasRoot, method: '', chars: 0, note: '' };
+      } else {
+        counts.kept++;
+        return;
+      }
+    } else {
+      if (!rec) { counts.unmatched++; return; }
+      if (rec.size !== r.size) { counts.stale++; return; }
+    }
+    if (!nasRoot && rec.method && rec.method.startsWith('deep:') && rec.deepMtime === r.mtime) { counts.kept++; return; }
     const pages = (r.pages || []).map((p) => [p[0], p[1]]);
     const chars = pages.reduce((acc, p) => acc + (p[1] || '').length, 0);
     if (!chars) { counts.kept++; return; }
-    if (!(chars >= rec.chars * 0.8 || rec.chars < 500)) { counts.kept++; return; }
+    if (!nasRoot && !(chars >= rec.chars * 0.8 || rec.chars < 500)) { counts.kept++; return; }
     // Mailboxes (a .pst unpacked on the HP: one email per "page") may hold much more text than a document.
     const cap = /^(pst|msg)$/.test(r.method || '') ? settings.maxCharsPerMailbox || 8000000 : settings.maxCharsPerFile;
     const capped = [];
@@ -179,7 +199,20 @@ export async function applyDeepIndex(getFile, settings, { onProgress = () => {},
     }
   }
   if (buf) await handle(buf);
+  // NAS-only files that are gone from the NAS (or whose folder was removed from the list) leave the index.
+  if (!signal?.aborted) {
+    for (const [path, rec] of existing) {
+      if (rec.folderId === 'nas' && !seenNas.has(path)) {
+        await writer.removeFile(path);
+        counts.removed++;
+      }
+    }
+  }
   await writer.finish();
+  if (counts.nasOnly || counts.removed) {
+    const files = await getAll('files');
+    await kvSet('projects', [...new Set(files.map((f) => f.project).filter(Boolean))].sort());
+  }
   await kvSet('deepApplied', { mtime: file.lastModified, size: file.size, at: Date.now(), from, ...counts });
   await log('deep', `Deep index from ${from}: ${counts.applied} files improved, ${counts.stale} stale, ${counts.unmatched} not present here`);
   onProgress({ phase: 'deep', done: true, ...counts });

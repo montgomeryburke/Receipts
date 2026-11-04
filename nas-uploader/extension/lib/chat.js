@@ -24,6 +24,7 @@ import { getRootHandle } from './fsutil.js';
 const STR = 'string';
 const INT = 'integer';
 const BOOL = 'boolean';
+const LIST = 'list'; // comma- or line-separated text in, array out
 
 /** key: [type, description, {enum|min|max}] — secrets (API keys) are deliberately not here. */
 export const EDITABLE = {
@@ -47,6 +48,7 @@ export const EDITABLE = {
   maxCharsPerFile: [INT, 'Most characters indexed per file', { min: 10000, max: 5000000 }],
   autoIndexMinutes: [INT, 'Re-index the project folders every N minutes (0 = only after a mirror sync or by hand)', { min: 0, max: 10080 }],
   deepIndexFile: [STR, 'Where the OCR index built on the NAS is (NAS path)'],
+  nasFolders: [LIST, 'Folders that are only on the NAS (e.g. /Standards copied from Google Drive); the HP extracts their text so they are searchable here. Comma-separated NAS paths'],
   processOnOpen: [BOOL, 'Draft automatically when an email is opened in Outlook'],
   autoScan: [BOOL, 'Watch the Outlook inbox and draft replies to new mail'],
   autoScanOnlyWhenIdle: [BOOL, "…only while the user isn't using the Outlook tab"],
@@ -68,6 +70,7 @@ function coerce(key, value) {
   if (!spec) throw new Error(`"${key}" can't be changed from the chat${/key$/i.test(key) ? ' (API keys go in Settings, never in the chat)' : ''}`);
   const [type, , extra = {}] = spec;
   let v = value;
+  if (type === LIST) return (Array.isArray(v) ? v : String(v ?? '').split(/[,\n]/)).map((x) => String(x).trim()).filter(Boolean).map((x) => `/${x.replace(/^\/+|\/+$/g, '')}`);
   if (type === BOOL) v = v === true || v === 'true' || v === 1 || v === 'yes';
   else if (type === INT) {
     v = Math.round(Number(v));
@@ -234,6 +237,7 @@ function makeTools(ctx) {
         if (!Object.keys(patch).length) return { error: 'nothing to change' };
         await saveSettings(patch);
         await change(`Settings: ${Object.entries(patch).map(([k, v]) => `${k} → ${JSON.stringify(v)}`).join(', ')}`, { settings: before }, 'update_settings');
+        if ('nasFolders' in patch || 'excludePatterns' in patch || 'includeExt' in patch) ctx.reindex = true;
         return { ok: true, now: patch };
       },
     },

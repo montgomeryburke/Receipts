@@ -130,6 +130,9 @@ export const DEFAULT_SETTINGS = {
   // Project folders are the mirrors kept in "NAS files" (one fileset: mirrored once, indexed once).
   // Per-folder choices, keyed by mirror id: {index: true|false, projectMode: 'subfolders'|'single'}.
   folderPrefs: {},
+  // Folders that are only on the NAS (e.g. standards copied from Google Drive): the HP extracts their text and
+  // the extension adds it to the same index. NAS paths, e.g. ['/Standards'].
+  nasFolders: [],
   includeExt: 'pdf,docx,docm,dotx,xlsx,xlsm,pptx,odt,ods,odp,txt,md,csv,tsv,json,xml,html,htm,eml,rtf,log,yaml,yml,ini',
   nameOnlyExt: 'zip,dwg,dxf,rvt,nwd,ifc,jpg,jpeg,png,tif,tiff,gif,bmp,heic,msg,doc,xls,ppt,mpp,kmz,kml,shp',
   excludePatterns: '.git, node_modules, ~$*, *.tmp, Thumbs.db, .DS_Store, desktop.ini',

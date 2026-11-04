@@ -20,7 +20,7 @@ propfind() { curl -sk -o /dev/null -w '%{http_code}' -X PROPFIND -H 'Depth: 0' -
 echo "• preparing a container that looks like the HP's (media owned by a user, Jellyfin libraries)"
 id mediauser >/dev/null 2>&1 || useradd -u 1500 -M -s /usr/sbin/nologin mediauser
 id jellyfin >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin jellyfin
-rm -rf /srv/test-media /srv/test-media-root /srv/test-media-nobody /var/lib/jellyfin
+rm -rf /srv/test-media /srv/test-media-root /srv/test-media-nobody /srv/test-fake-drive /var/lib/jellyfin
 mkdir -p "/srv/test-media/Movies/Old Film (1999)" /srv/test-media/TV /var/lib/jellyfin/root/default/{Movies,Shows}
 echo existing > "/srv/test-media/Movies/Old Film (1999)/Old Film (1999).mkv"
 chown -R mediauser:mediauser /srv/test-media && chmod -R u=rwX,go=rX /srv/test-media
@@ -64,6 +64,21 @@ chown mediauser:mediauser /srv/test-media/Projects/Alert/scan.pdf
 printf '{"folders": ["/Projects"]}' > /srv/test-media/.assistant/project-folders.json; chown mediauser:mediauser /srv/test-media/.assistant/project-folders.json
 setpriv --reuid=mediauser --regid=mediauser --init-groups -- python3 -I /usr/local/lib/nas-uploader/assistant-ocr-index.py /srv/test-media >/dev/null 2>&1
 check "assistant: OCR index built for the project folder only" bash -c "zcat /srv/test-media/.assistant/deep-index.jsonl.gz | grep -q 'Camera mounting height' && ! zcat /srv/test-media/.assistant/deep-index.jsonl.gz | grep -q Movies"
+echo "• Google Drive copy (rclone; a local folder stands in for the shared Drive folder)"
+DRIVE_SRC=/srv/test-fake-drive; rm -rf "$DRIVE_SRC"; mkdir -p "$DRIVE_SRC/1AbCdEfGhIjKlMnOp/S6"
+echo "CSA S6:19 clause 12.4.3.5 barrier height" > "$DRIVE_SRC/1AbCdEfGhIjKlMnOp/S6/S6 notes.txt"
+chmod -R a+rX "$DRIVE_SRC"
+out="$(NAS_UPLOADER_DRIVE_TEST_SOURCE="$DRIVE_SRC" bash "$HERE/../server/setup-drive-copy.sh" --folder "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp?usp=sharing" --to /srv/test-media/Standards 2>&1)"; rc=$?
+check "drive copy: script succeeded" [ $rc -eq 0 ]
+check "drive copy: files copied" [ -f "/srv/test-media/Standards/S6/S6 notes.txt" ]
+check "drive copy: owned like uploads (mediauser)" [ "$(stat -c %U "/srv/test-media/Standards/S6/S6 notes.txt")" = mediauser ]
+check "drive copy: tells the NAS path for the extension" grep -q "^  /Standards$" <<<"$out"
+check "drive copy: daily job installed" bash -c "[ -f /etc/systemd/system/nas-uploader-drive.timer ] || [ -f /etc/cron.d/nas-uploader-drive ]"
+check "drive copy: WebDAV password stays root-only" [ "$(stat -c %a /etc/nas-uploader)" = 700 ]
+check "drive copy: refuses a folder outside the share" bash -c "! NAS_UPLOADER_DRIVE_TEST_SOURCE='$DRIVE_SRC' bash '$HERE/../server/setup-drive-copy.sh' --folder 1AbCdEfGhIjKlMnOp --to /tmp/elsewhere >/dev/null 2>&1"
+check "drive copy: served over WebDAV" [ "$(curl -sk -o /dev/null -w '%{http_code}' -u "uploader:$PASS" "https://127.0.0.1:18490/Standards/S6/S6%20notes.txt")" = 200 ]
+bash "$HERE/../server/setup-drive-copy.sh" --uninstall >/dev/null 2>&1
+check "drive copy: uninstall stops the job, keeps the files" bash -c "[ ! -e /etc/cron.d/nas-uploader-drive ] && [ ! -e /etc/systemd/system/nas-uploader-drive.timer ] && [ -f '/srv/test-media/Standards/S6/S6 notes.txt' ]"
 out2="$("$SCRIPT" --yes --access local --port 18490 2>&1)"
 check "re-run keeps the existing password" grep -q "Keeping the existing password" <<<"$out2"
 check "still answers after re-run" [ "$(propfind https://127.0.0.1:18490/)" = 207 ]

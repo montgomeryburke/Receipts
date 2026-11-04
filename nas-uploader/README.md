@@ -6,12 +6,15 @@ One Chrome extension, nothing else to install on the work computer:
   are sent: new, edited, renamed, deleted). Drag & drop any depth, any size, resumable, double-checked.
 - **One fileset** — each mirrored project folder is copied to the NAS once and **indexed once, on this computer**.
   Email drafts, meeting prompts and the chat all search that same index; nothing is mirrored twice.
-- **Email drafts (Outlook on the web)** — reads the open email, finds the answer in your project files, and
-  prepares a reply with the sources. You review and send. (This is the former MailMirror extension.)
+- **Email drafts** — in Outlook on the web it reads the open email; from the Outlook desktop app you copy the
+  email and click one button. It finds the answer in your project files (and in old emails kept in `.pst`
+  archives), and prepares a reply with the sources. You review and send. (This is the former MailMirror extension.)
 - **Meeting assistant (Teams)** — listens to the meeting (the **Teams app** on Windows or **Teams in Chrome**)
   and to your microphone, with a sound meter for each, transcribes, and flashes up **what you could say** with
   quotes from your project files and standards (looking a standard up online when you don't have it). Ask it
   questions **privately** by typing. Transcripts and a summary with action items are saved to the NAS.
+- **Recorder** — two toggles: record the computer's sound (any app: Teams, the mic, anything), or the screen with
+  its sound, to a folder on this computer.
 - **Chat** — tell the extension in plain words when something isn't working the way you want ("keep meeting
   prompts to one sentence", "always use the 2024 spec for concrete questions") and it changes its own settings,
   rules and memory. Every change has **Undo**. It also walks you through **setting up Power Automate flows**.
@@ -83,9 +86,11 @@ installed**: it just uses Chrome with the extension.
 
 The script also sets up two helpers for the assistant (skip them with `--no-ocr` / `--no-whisper`):
 
-- **OCR for scanned PDFs and photos**: every 2 hours, at idle priority, it OCRs the scanned documents in the
-  folders the extension lists as project folders (never your movies) and writes `/.assistant/deep-index.jsonl.gz`.
-  The extension picks it up, so scanned submittals become searchable without slowing the work computer.
+- **OCR and email archives**: every 2 hours, at idle priority, it OCRs the scanned PDFs and photos in the folders
+  the extension lists as project folders (never your movies), unpacks Outlook `.pst` archives and saved `.msg`
+  emails into individual emails, and reads every document in NAS-only folders (below). The result,
+  `/.assistant/deep-index.jsonl.gz`, is picked up by the extension, so all of it becomes searchable without
+  slowing the work computer.
 - **The free speech-to-text model** (80 MB) is copied to `/.assistant/models/`, for work networks that block
   huggingface.co.
 
@@ -214,13 +219,42 @@ re-reads only the changed files. Settings → **Project folders** lets you switc
 
 ---
 
-## 5. Email drafts (Outlook on the web)
+### Standards and other files that are only on the NAS (e.g. from Google Drive)
 
-Open the side panel next to Outlook on the web. Open an email and click **Draft reply to open email** (or let it
+For documents you don't keep on the work computer — the S6, TAC or MoTI standards in your Google Drive — put them in
+a NAS folder such as `/Standards` and list it in **Settings → Project folders → Folders that are only on the NAS**
+(or tell the chat "add /Standards as a NAS-only folder"). The HP reads them (Word, Excel, PowerPoint, PDF, with OCR)
+and they are searched like everything else, in meetings too.
+
+To get them there:
+- **By hand** (no setup): in Google Drive, right-click the folder → Download, unzip, and drop it into NAS files.
+- **Automatically, every day**: `server/setup-drive-copy.sh` on the HP copies shared Drive folders with
+  [rclone](https://rclone.org) and a Google *service account* (made once in a browser, no sign-in on the HP; the
+  steps are at the top of the script). Google Docs/Sheets are saved as Word/Excel so they can be read.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/montgomeryburke/Receipts/claude/friendly-pasteur-uixwht/nas-uploader/server/setup-drive-copy.sh -o setup-drive-copy.sh
+bash setup-drive-copy.sh --key /root/drive-key.json --folder https://drive.google.com/drive/folders/XXXX --to /mnt/mirror/Standards
+```
+
+## 5. Email drafts (Outlook)
+
+**Outlook on the web:** open the side panel next to it. Open an email and click **Draft reply to open email** (or let it
 draft new mail by itself — Settings → Email). The draft lists what was asked, the answers and the files they came
 from; anything it couldn't find is marked `[MISSING: …]` and shown under **Questions**, where your answer
 rewrites the draft. 👍 / 👎 on a source teaches it which document to use for emails like that one.
 **Insert into Outlook reply** puts the text into the reply box. It never sends anything.
+
+**Outlook desktop app** (a Chrome extension can't reach into it, and no add-in is needed): open the email, click in
+it, press **Ctrl+A** then **Ctrl+C**, and click **📋 From copied email** in the side panel. Sender and subject are
+taken from the header if you copied it. When the draft is ready, **Copy reply** and paste it into your reply.
+
+**Old emails in `.pst` files** (archives that aren't on the Exchange server, so Outlook on the web can't see them):
+mirror the folder that holds them (for example `Documents\Outlook Files`) like any project folder. The HP unpacks
+each archive, newest emails first, and the emails show up in drafts, meetings and the chat as *email N* of that
+archive. Two things to know: Windows usually won't let Chrome read a `.pst` while Outlook has it open — the mirror
+then skips it (it never deletes it on the NAS) and copies it next time Outlook is closed; and a changed `.pst` is
+uploaded again in full.
 
 ## 6. Meetings (Teams)
 
@@ -244,6 +278,20 @@ Click **🎙 Meeting** in the side panel. A small window opens:
 Transcription is **free on this computer** (Whisper; the model is downloaded once) or, with a Gemini key, done by
 Gemini (⚙ in the meeting window). Prompts need a Claude or Gemini key. Make sure everyone in the meeting knows it
 is being transcribed, as your workplace requires.
+
+## 6b. Recorder
+
+Click **⏺ Record** in the side panel. Two toggles:
+
+- **🎙 Record audio** — the whole computer's sound (choose *Entire screen* and tick *Also share system audio*) or one
+  Chrome tab's; with **Include my microphone** your voice is mixed in.
+- **🖥 Record screen + audio** — a screen, a window or a tab, with its sound (and your mic).
+
+Recordings are written as they record (so hours are fine) to the folder you choose with **Choose folder…**, or to
+Downloads → Recordings. They are MP4 / M4A where Chrome supports it (plays everywhere on Windows), else WebM.
+Clicking the toggle again, or **Stop sharing** in Chrome's bar, saves the file. The meeting window also has a
+**⏺ Record audio** toggle that saves exactly what it is listening to. Recording people may need their consent —
+follow your workplace's rules.
 
 ## 7. The chat: tell it what to change, and Power Automate
 
@@ -304,7 +352,9 @@ projects), email drafts (right excerpts, instructions, memory, fallbacks), the c
 (tool calls, Undo, refusing API keys, Power Automate setup against a stand-in HTTPS flow), the meeting window
 (real audio through both channels, sound meters, Gemini transcription, prompts with quotes, web look-ups, private
 questions, saving to the NAS with a summary, echo removal), **real Whisper transcription** in the extension
-(including the NAS fallback), the audio resampler, and OCR of scanned PDFs on the server. It uses mock Claude and
+(including the NAS fallback), the audio resampler, the recorder (audio and screen, folder and Downloads), a
+stand-in Outlook on the web page (read, draft, insert), the copied-email button, OCR of scanned PDFs, a real `.pst`
+archive unpacked on the server, NAS-only folders, and the chat's safety guards. It uses mock Claude and
 Gemini servers, so no keys are needed: `node tests/assistant-e2e.cjs` with the WebDAV test servers running.
 
 `tests/e2e.cjs` is the NAS uploader suite. It loads the real extension into Chromium (Playwright) and uploads and mirrors

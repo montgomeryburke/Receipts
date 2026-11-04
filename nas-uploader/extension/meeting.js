@@ -14,7 +14,8 @@ import { localAI } from './lib/localai.js';
 import { nasClient, writeTextFile, safeFileName } from './lib/nas.js';
 import { after } from './lib/util.js';
 import { projectFolders } from './lib/folders.js';
-import { pageLabel } from './lib/text.js';
+import { pageLabel, chunkText } from './lib/text.js';
+import { IndexWriter } from './lib/index.js';
 import { Recording } from './lib/recorder.js';
 
 const $ = (id) => document.getElementById(id);
@@ -573,14 +574,43 @@ async function save(final = false) {
     const path = nasPathFor();
     await writeTextFile(client, path, markdown());
     if (state.savedPath && state.savedPath !== path) await client.remove(state.savedPath, { ignoreMissing: true }).catch(() => {});
+    if (state.indexedPath && state.indexedPath !== path) await unindexMeeting(state.indexedPath);
     state.savedPath = path;
     state.savedAt = Date.now();
     rec.savedPath = path;
     await put('meetings', rec).catch(() => {});
+    if (final) await indexMeeting(path);
     $('saved').textContent = `Saved ${hms(new Date())} → ${path}`;
   } catch (err) {
     $('saved').textContent = `Not saved to the NAS (${err.message}) — kept on this computer.`;
     state.errors.push(`save: ${err.message}`);
+  }
+}
+
+// Past meetings are searchable like any project file ("what did we agree on the deck width last week?").
+async function indexMeeting(nasPath) {
+  try {
+    const md = markdown();
+    const path = nasPath.replace(/^\/+/, '');
+    const w = new IndexWriter();
+    await w.addFile(
+      { path, rel: path, folderId: 'meeting', size: md.length, mtime: Date.now(), ext: 'md', project: projects()[0] || '', method: 'meeting', chars: md.length, note: '', indexedAt: Date.now() },
+      chunkText(md),
+    );
+    await w.finish();
+    state.indexedPath = nasPath;
+  } catch (err) {
+    state.errors.push(`index: ${err.message}`);
+  }
+}
+
+async function unindexMeeting(nasPath) {
+  try {
+    const w = new IndexWriter();
+    await w.removeFile(nasPath.replace(/^\/+/, ''));
+    await w.finish();
+  } catch {
+    /* not indexed */
   }
 }
 

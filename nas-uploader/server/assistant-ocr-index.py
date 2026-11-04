@@ -14,6 +14,10 @@ becomes one "page" of its file, newest first: sender, date, subject, folder, att
 Only the project folders are read: the extension lists them in <root>/.assistant/project-folders.json
 (so movies, posters and other files on the NAS are never touched). --folder adds folders by hand.
 
+Folders that exist only on the NAS (for example standards copied from Google Drive) are listed there as
+"nasOnly": for those, every document's text is extracted here (PDF, Word, Excel, PowerPoint, text; OCR where a
+page has no text), because the work computer has no copy to read.
+
 Each line: {"path": "Projects/x/y.pdf", "size": 123, "mtime": 1700000000000, "method": "ocr",
             "pages": [[1, "text of page 1"], [2, "…"]]}
 Files whose size and modification time haven't changed are taken from the previous index (no repeat OCR).
@@ -34,10 +38,13 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 
 PDF = {'.pdf'}
 IMAGES = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.gif', '.webp'}
 MAIL = {'.pst', '.msg'}
+OFFICE = {'.docx', '.docm', '.xlsx', '.xlsm', '.pptx'}
+TEXT = {'.txt', '.md', '.csv', '.tsv'}
 MAIL_CHARS_PER_EMAIL = 6000
 SKIP_DIRS = {'.assistant', '.mailmirror', '@eadir', '#recycle', '.recycle', 'lost+found', '.snapshot', '.snapshots', 'metadata', '.trickplay'}
 MIN_CHARS_PER_PAGE = 60  # below this a PDF page counts as scanned
@@ -177,6 +184,62 @@ def mail_pages(path, ext, max_chars, deadline):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def xml_text(xml):
+    xml = re.sub(r'</(w:p|a:p|row)>', '\n', xml)
+    xml = re.sub(r'<(w:tab|w:br)[^>]*/>', ' ', xml)
+    return html.unescape(re.sub(r'<[^>]+>', '', xml))
+
+
+def office_pages(path, ext):
+    """Text of a Word / Excel / PowerPoint file: [[page, text]] (slides and sheets count as pages)."""
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        read = lambda n: z.read(n).decode('utf-8', 'replace')
+        if ext in ('.docx', '.docm'):
+            return [[0, xml_text(read('word/document.xml'))]] if 'word/document.xml' in names else []
+        if ext == '.pptx':
+            slides = sorted((n for n in names if re.match(r'ppt/slides/slide\d+\.xml$', n)), key=lambda n: int(re.findall(r'\d+', n)[-1]))
+            return [[i, xml_text(read(n))] for i, n in enumerate(slides, start=1)]
+        shared = []
+        if 'xl/sharedStrings.xml' in names:
+            shared = [xml_text(si) for si in re.findall(r'<si>(.*?)</si>', read('xl/sharedStrings.xml'), re.S)]
+        pages = []
+        sheets = sorted((n for n in names if re.match(r'xl/worksheets/sheet\d+\.xml$', n)), key=lambda n: int(re.findall(r'\d+', n)[-1]))
+        for i, n in enumerate(sheets, start=1):
+            rows = []
+            for row in re.findall(r'<row[^>]*>(.*?)</row>', read(n), re.S):
+                cells = []
+                for attrs, v in re.findall(r'<c([^>]*)>(?:.*?<v>(.*?)</v>)?', row, re.S):
+                    if not v:
+                        continue
+                    cells.append(shared[int(v)] if 't="s"' in attrs and v.isdigit() and int(v) < len(shared) else html.unescape(v))
+                if cells:
+                    rows.append('\t'.join(cells))
+            if rows:
+                pages.append([i, '\n'.join(rows)])
+        return pages
+
+
+def full_text_pages(path, ext, max_pages, lang, deadline):
+    """All the text of a document on a NAS-only folder (there is no local copy for the extension to read)."""
+    if ext in PDF:
+        pages_text = pdf_pages_text(path, max_pages)
+        if not pages_text:
+            return [], 'none'
+        if all(len(t.strip()) >= MIN_CHARS_PER_PAGE for t in pages_text):
+            return [[i, t.strip()] for i, t in enumerate(pages_text, start=1) if t.strip()], 'text'
+        return ocr_pdf(path, pages_text, max_pages, lang, deadline), 'ocr'
+    if ext in OFFICE:
+        return [p for p in office_pages(path, ext) if p[1].strip()], 'text'
+    if ext in TEXT:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            return [[0, f.read(2_000_000)]], 'text'
+    if ext in IMAGES:
+        t = ocr_image(path, lang)
+        return ([[1, t]] if t else []), 'ocr'
+    return [], 'none'
+
+
 def load_previous(out_path):
     prev = {}
     try:
@@ -194,15 +257,17 @@ def load_previous(out_path):
     return prev
 
 
-def walk(root):
+def walk(root, nas_only=False, skip=frozenset()):
+    kinds = PDF | IMAGES | MAIL | (OFFICE | TEXT if nas_only else set())
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d.lower() not in SKIP_DIRS and not d.startswith('.'))
+        # skip: mirrored folders inside a NAS-only folder (their files come from the computer, read there)
+        dirnames[:] = sorted(d for d in dirnames if d.lower() not in SKIP_DIRS and not d.startswith('.') and os.path.join(dirpath, d) not in skip)
         for name in sorted(filenames):
             if name.startswith('.') or name.startswith('~$'):
                 continue
             ext = os.path.splitext(name)[1].lower()
-            if ext in PDF or ext in IMAGES or ext in MAIL:
-                yield os.path.join(dirpath, name), ext
+            if ext in kinds:
+                yield os.path.join(dirpath, name), ext, nas_only
 
 
 def main():
@@ -218,18 +283,26 @@ def main():
     root = os.path.abspath(a.root)
     out_path = os.path.join(root, OUT_REL)
     folders = list(a.folder)
+    nas_only = []
     try:
         with open(os.path.join(root, '.assistant', 'project-folders.json'), encoding='utf-8') as f:
-            folders += [x for x in json.load(f).get('folders', []) if isinstance(x, str)]
+            listed = json.load(f)
+            folders += [x for x in listed.get('folders', []) if isinstance(x, str)]
+            nas_only += [x for x in listed.get('nasOnly', []) if isinstance(x, str)]
     except FileNotFoundError:
         pass
     except Exception as e:
         log('project-folders.json unreadable:', e)
-    scan_dirs = []
-    for x in dict.fromkeys(folders):
+
+    def inside_root(x):
         d = os.path.abspath(os.path.join(root, x.strip('/')))
-        if (d == root or d.startswith(root + os.sep)) and os.path.isdir(d):
-            scan_dirs.append(d)
+        return d if (d == root or d.startswith(root + os.sep)) and os.path.isdir(d) and d != root else None
+
+    mirrored = list(dict.fromkeys(filter(None, map(inside_root, folders))))
+    within = lambda d, parents: any(d == p or d.startswith(p + os.sep) for p in parents)
+    scan_dirs = [(d, False) for d in mirrored]
+    # A NAS-only folder inside a mirrored one isn't NAS-only (a sync would delete what isn't on the computer).
+    scan_dirs += [(d, True) for d in dict.fromkeys(filter(None, map(inside_root, nas_only))) if not within(d, mirrored)]
     if not scan_dirs:
         log('no project folders listed yet (the extension writes .assistant/project-folders.json after its first index run)')
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -242,7 +315,8 @@ def main():
     prev = load_previous(out_path)
     deadline = time.time() + a.max_minutes * 60 if a.max_minutes else 0
     records, reused, ocred, skipped, failed = [], 0, 0, 0, 0
-    for path, ext in (item for d in scan_dirs for item in walk(d)):
+    mirrored_set = frozenset(mirrored)
+    for path, ext, full in (item for d, only in scan_dirs for item in walk(d, only, mirrored_set if only else frozenset())):
         rel = os.path.relpath(path, root).replace(os.sep, '/')
         try:
             st = os.stat(path)
@@ -260,7 +334,12 @@ def main():
             continue
         try:
             method = 'ocr'
-            if ext in MAIL:
+            if full and ext not in MAIL:
+                pages, method = full_text_pages(path, ext, a.max_pages, a.lang, deadline)
+                if not pages:
+                    skipped += 1
+                    continue
+            elif ext in MAIL:
                 if (ext == '.pst' and not has_readpst) or (ext == '.msg' and not has_msgconvert):
                     skipped += 1
                     continue
@@ -281,7 +360,7 @@ def main():
                     continue
                 pages = ocr_pdf(path, pages_text, a.max_pages, a.lang, deadline)
             if pages:
-                records.append({'path': rel, 'size': st.st_size, 'mtime': mtime, 'method': method, 'pages': pages})
+                records.append({'path': rel, 'size': st.st_size, 'mtime': mtime, 'method': method, 'pages': pages, **({'nasOnly': True} if full else {})})
                 ocred += 1
                 if method == 'ocr':
                     log('OCR', rel, f'{len(pages)} page(s)')

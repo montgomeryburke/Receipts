@@ -38,11 +38,18 @@ What it does:
    Gemini, decides locally when a prompt is worth an API call, prompts with quotes from local excerpts, optional
    web look-up of standards, private typed questions, Document Picture-in-Picture pop-out, autosaves the
    transcript to the NAS, end-of-meeting summary that is stored as per-project memory (lib/memory.js).
-5. Chat (lib/chat.js, sidepanel.js): the user tells the extension what to change; the AI (Claude via the
+5. Recorder (recorder.html/js, lib/recorder.js): toggles to record the computer's sound (getDisplayMedia with system
+   audio) or the screen with sound, mic mixed in via Web Audio, MediaRecorder written as it records to a chosen
+   folder (File System Access) or via OPFS to chrome.downloads.
+6. Desktop Outlook and archives: "From copied email" parses a copied Outlook message (lib/text.js
+   parseCopiedEmail); server/assistant-ocr-index.py also unpacks .pst (readpst) and .msg (msgconvert) into one
+   entry per email and extracts full text for NAS-only folders (standards copied from Google Drive by
+   server/setup-drive-copy.sh with rclone and a service account).
+7. Chat (lib/chat.js, sidepanel.js): the user tells the extension what to change; the AI (Claude via the
    official Anthropic SDK in lib/llm.js, or Gemini function calling) changes settings, standing instructions,
    document rules, project memory, folder options and Power Automate actions through validated tools, with an
    undo log; it helps set up Power Automate flows and records code change requests on the NAS.
-6. server/setup-webdav.sh (run as root in the Proxmox LXC): Apache WebDAV, permissions, DuckDNS + Let's Encrypt,
+8. server/setup-webdav.sh (run as root in the Proxmox LXC): Apache WebDAV, permissions, DuckDNS + Let's Encrypt,
    fail2ban, unattended upgrades, the OCR systemd timer and a copy of the speech model.
 
 Look especially for:
@@ -64,7 +71,9 @@ E. Robustness for a non-technical user: what happens with no API key, a wrong ke
 F. Chrome/MV3 issues: offscreen document lifecycle, service worker restarts, getDisplayMedia options, AudioWorklet,
    module workers in extensions, Document PiP, chrome.storage vs IndexedDB, background-tab throttling.
 G. The bash/Python server scripts: idempotency, running as root vs the WebDAV user, paths with spaces, failure
-   handling, anything unsafe.
+   handling, anything unsafe (including parsing untrusted .pst/.msg/.docx files from the user's mailbox).
+H. Recorder: losing data on long recordings, files left half-written, recording continuing after the user thinks
+   it stopped, permission prompts, formats that won't play on Windows.
 
 For each finding give: severity (critical/high/medium/low), file:line, what goes wrong, a concrete reproduction,
 and a suggested fix. No style preferences. Say explicitly when you are unsure.

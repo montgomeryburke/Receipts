@@ -776,6 +776,9 @@ test('meeting: hears the meeting and the mic (meters), transcribes, flashes a pr
   assert(md.body.includes('## Summary') && md.body.includes('Deck width stays 12.0 m') && md.body.includes('- [ ] Send the design criteria'), 'summary, decisions, action items');
   assert(md.body.includes(`Them:** ${THEM_SAY}`) && md.body.includes(`Me:** ${ME_SAY}`), 'transcript lines');
   assert(md.body.includes('## Private questions') && md.body.includes('## Prompts shown'), 'prompts and private questions kept');
+  // The meeting itself is now searchable (for later meetings, drafts and the chat).
+  const mh = (await engine(b.sw, { type: 'search', q: 'send the design criteria to the contractor' })).hits;
+  assert(mh.some((h) => h.path === saved.slice(1)), 'saved meeting is in the index: ' + JSON.stringify(mh.map((h) => h.path)));
   const mem = await meeting.evaluate(async (p) => (await import('./lib/memory.js')).getMemory(p), `${prefix}/2024-017 Alert Bridge`);
   assert(mem.notes.some((n) => /12\.0 m clear/.test(n.text) && n.source === 'meeting'), 'meeting fact remembered for the project');
   await meeting.screenshot({ path: path.join(SHOTS, 'meeting-saved.png'), fullPage: true });
@@ -1268,6 +1271,64 @@ test('Outlook desktop app: "From copied email" reads the clipboard, fills From/S
   assert(/Level 2 pour is on November 4/.test(clip), 'reply on the clipboard, ready to paste into Outlook');
   const req = ai.ofApi('anthropic')[0].body.messages[0].content.map((c) => c.text).join('\n');
   assert(/Pour date is November 4|Level 2 pour date is November 4/.test(req), 'site meeting minutes found locally');
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+
+/** A minimal Word document with these paragraphs (built with Python's zipfile — no Office needed). */
+function makeDocx(paras) {
+  const out = path.join(WORK, `doc-${Date.now()}.docx`);
+  const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paras.map((p) => `<w:p><w:r><w:t>${p}</w:t></w:r></w:p>`).join('')}</w:body></w:document>`;
+  const r = spawnSync('python3', ['-I', '-c', 'import sys,zipfile\nz=zipfile.ZipFile(sys.argv[1],"w")\nz.writestr("[Content_Types].xml","<Types xmlns=\\"http://schemas.openxmlformats.org/package/2006/content-types\\"/>")\nz.writestr("word/document.xml",sys.argv[2])\nz.close()', out, xml]);
+  if (r.status !== 0) throw new Error('docx: ' + r.stderr);
+  return fs.readFileSync(out);
+}
+
+test('NAS-only folders (standards copied from Google Drive): the HP extracts them, search finds them, nothing local needed', async () => {
+  const base = await nasFolder();
+  const std = `${base}/Standards`;
+  await dav('MKCOL', std + '/');
+  const put = (p, buf) => new Promise((resolve, reject) => {
+    const u = new URL(p.split('/').map(encodeURIComponent).join('/').replace(/^%2F/, ''), NAS.url);
+    const req = http.request(u, { method: 'PUT', headers: { Authorization: 'Basic ' + Buffer.from(`${USER}:${PASSWORD}`).toString('base64'), 'Content-Length': buf.length } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end(buf);
+  });
+  await put(`${std}/CSA S6-19 Section 12.pdf`, makePdf(['CSA S6:19 Canadian Highway Bridge Design Code', 'Clause 12.4.3.5: TL-4 barrier height shall be at least 1050 mm.']));
+  await put(`${std}/TAC Geometric Design Guide.docx`, makeDocx(['TAC Geometric Design Guide, Chapter 4', 'Typical lane width on a rural arterial: 3.7 m.']));
+  const b = await launch();
+  const panel = await b.open('sidepanel.html');
+  await setSettings(panel, { nasFolders: [std] });
+  const run = await engine(b.sw, { type: 'index.run' });
+  assert(run.started, 'index run starts with only NAS folders: ' + JSON.stringify(run));
+  await waitFor(async () => !(await engine(b.sw, { type: 'status' })).job, { what: 'publish' });
+  const pf = JSON.parse((await dav('GET', '/.assistant/project-folders.json')).body);
+  assert(pf.nasOnly.includes(std), 'NAS-only folder published: ' + JSON.stringify(pf));
+  let r = spawnSync('python3', ['-I', OCR_SCRIPT, NAS.root], { encoding: 'utf8' });
+  eq(r.status, 0, r.stderr);
+  await engine(b.sw, { type: 'deep.apply', force: false });
+  await waitFor(async () => !(await engine(b.sw, { type: 'status' })).job, { what: 'apply' });
+  let hits = (await engine(b.sw, { type: 'search', q: 'TL-4 barrier height clause' })).hits;
+  assert(hits.some((h) => h.path === `${std.slice(1)}/CSA S6-19 Section 12.pdf` && /1050 mm/.test(h.text)), 'S6 found: ' + JSON.stringify(hits.map((h) => h.path)));
+  hits = (await engine(b.sw, { type: 'search', q: 'rural arterial lane width' })).hits;
+  assert(hits.some((h) => h.path.endsWith('TAC Geometric Design Guide.docx') && /3\.7 m/.test(h.text)), 'TAC (Word) found');
+  const projects = await panel.evaluate(async () => (await import('./lib/db.js')).kvGet('projects'));
+  assert(projects.includes(std.slice(1)), 'standards folder listed as a project: ' + JSON.stringify(projects));
+  // A normal index run of a mirrored folder keeps the NAS-only files.
+  await mirrorProjects(b, { pdf: false });
+  await waitIndexed(b, 7);
+  hits = (await engine(b.sw, { type: 'search', q: 'TL-4 barrier height clause' })).hits;
+  assert(hits.some((h) => h.path.endsWith('CSA S6-19 Section 12.pdf')), 'still there after a local index run');
+  // Deleted on the NAS → gone from the index after the next HP run.
+  await dav('DELETE', `${std}/TAC Geometric Design Guide.docx`);
+  r = spawnSync('python3', ['-I', OCR_SCRIPT, NAS.root], { encoding: 'utf8' });
+  await engine(b.sw, { type: 'deep.apply', force: false });
+  await waitFor(async () => !(await engine(b.sw, { type: 'status' })).job, { what: 'apply 2' });
+  hits = (await engine(b.sw, { type: 'search', q: 'rural arterial lane width' })).hits;
+  eq(hits.filter((h) => h.path.endsWith('TAC Geometric Design Guide.docx')).length, 0, 'removed file left the index');
   eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
 });
 

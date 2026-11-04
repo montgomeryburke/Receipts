@@ -106,6 +106,10 @@
       <p class="small">Your project folders are the mirrors you keep in <b>NAS files</b>: each one is copied from this computer to the NAS (only changes are sent) and indexed here, on this computer. Email drafts, meeting prompts and the chat all search that one index — there is no second copy.</p>
       <div id="folderList" class="stack"></div>
       <div class="row"><button type="button" id="addFolder">Mirror a folder…</button><button type="button" id="openNasFiles">Open NAS files</button></div>
+      <h3>Folders that are only on the NAS</h3>
+      <p class="small muted">For files you don't keep on this computer — for example the standards (S6, TAC, MoTI) copied from Google Drive into <code>/Standards</code>. The HP reads them (text and OCR) and they become searchable here. One NAS path per line.</p>
+      <textarea id="nasFolders" rows="3" placeholder="/Standards"></textarea>
+      <div class="row"><button type="button" id="saveNasFolders">Save</button><span id="nasFoldersOut" class="small muted"></span></div>
       <h2>Automate bridge folder</h2>
       <div class="folder-row"><div><b>Bridge folder (optional)</b><div class="small muted">A OneDrive-synced folder your Power Automate flows watch (see Power Automate below). Separate from the NAS mirror.</div></div><span id="f-bridge" class="small"></span><button type="button" data-pick="bridge">Choose…</button></div>
     </section>

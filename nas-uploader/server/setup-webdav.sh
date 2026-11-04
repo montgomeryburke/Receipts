@@ -288,6 +288,7 @@ mkdir -p "$LOCK_DIR" /var/lock/apache2
 # The WebDAV lock database only holds short-lived locks; start it fresh if the server's user changed.
 if [[ "$(cat "$STATE_DIR/run-user" 2>/dev/null)" != "$RUN_USER" ]]; then rm -f "$LOCK_DIR"/DavLock*; fi
 echo "$RUN_USER" > "$STATE_DIR/run-user"
+echo "$FOLDER" > "$STATE_DIR/folder"
 chown -R "$RUN_USER:$RUN_GROUP" "$LOCK_DIR" /var/lock/apache2
 
 # Subfolders the web server can't write to (e.g. owned by someone else) are worth knowing about.

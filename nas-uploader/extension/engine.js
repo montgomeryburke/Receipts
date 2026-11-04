@@ -94,16 +94,23 @@ async function deepSource(settings, { force = false } = {}) {
 
 // Tells the HP which NAS folders are project folders, so its OCR job reads only those (never the media library).
 async function publishProjectFolders() {
+  const settings = await getSettings();
   const folders = (await projectFolders({ withPerm: false })).filter((f) => f.index).map((f) => f.nasPath).sort();
-  const stamp = JSON.stringify(folders);
+  const nasOnly = (settings.nasFolders || []).map((p) => `/${String(p).replace(/^\/+|\/+$/g, '')}`).filter((p) => p !== '/').sort();
+  const stamp = JSON.stringify({ folders, nasOnly });
   if ((await kvGet('projectFoldersPublished')) === stamp) return;
   const client = await nasClient();
-  await writeTextFile(client, '/.assistant/project-folders.json', JSON.stringify({ updated: new Date().toISOString(), folders }, null, 2), 'application/json; charset=utf-8');
+  await writeTextFile(client, '/.assistant/project-folders.json', JSON.stringify({ updated: new Date().toISOString(), folders, nasOnly }, null, 2), 'application/json; charset=utf-8');
   await kvSet('projectFoldersPublished', stamp);
 }
 
 async function doIndex({ signal, onProgress }) {
   const settings = await getSettings();
+  // NAS-only folders (standards copied from Drive, …) work without any local project folder.
+  if ((settings.nasFolders || []).length && !(await projectFolders().catch(() => [])).some((f) => f.index && f.perm === 'granted')) {
+    if (!configProblem()) await publishProjectFolders().catch((err) => log('error', `publishing project folders: ${err.message}`));
+    return { files: (await getAll('files')).length, nasOnly: true, deep: await doDeep({ signal, onProgress, force: false, settings }) };
+  }
   const roots = await indexRoots();
   if (!configProblem()) await publishProjectFolders().catch((err) => log('error', `publishing project folders: ${err.message}`));
   const status = await runIndex(roots, settings, { signal, onProgress, rootName: 'local' });

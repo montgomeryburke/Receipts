@@ -89,14 +89,21 @@ class DownloadsSink {
     const file = await this.file.getFile();
     const url = URL.createObjectURL(file);
     const id = await chrome.downloads.download({ url, filename: `Recordings/${this.name}`, saveAs: false, conflictAction: 'uniquify' });
-    // Tidy up the temporary copy once Chrome has saved it.
-    const done = (delta) => {
-      if (delta.id !== id || !delta.state || delta.state.current === 'in_progress') return;
-      chrome.downloads.onChanged.removeListener(done);
+    // Tidy up the temporary copy once Chrome has saved it (a short recording can finish before we start listening).
+    let tidied = false;
+    const tidy = () => {
+      if (tidied) return;
+      tidied = true;
+      chrome.downloads.onChanged.removeListener(onChanged);
       URL.revokeObjectURL(url);
       this.tmpDir.removeEntry(this.name).catch(() => {});
     };
-    chrome.downloads.onChanged.addListener(done);
+    const onChanged = (delta) => {
+      if (delta.id === id && delta.state && delta.state.current !== 'in_progress') tidy();
+    };
+    chrome.downloads.onChanged.addListener(onChanged);
+    const [item] = await chrome.downloads.search({ id });
+    if (item && item.state !== 'in_progress') tidy();
     return { where: this.where, bytes: this.bytes, downloadId: id };
   }
 }
