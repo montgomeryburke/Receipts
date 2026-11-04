@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MailMirror</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+<header class="top">
+  <div class="row">
+    <h1 class="brand">MailMirror</h1>
+    <span class="grow"></span>
+    <button id="openSettings" class="icon" title="Settings" aria-label="Settings">⚙</button>
+  </div>
+  <div id="chips" class="chips"></div>
+</header>
+
+<div class="wrap stack">
+  <!-- First run / missing key -->
+  <section id="setup" class="panel stack" hidden>
+    <h2>Connect an AI provider</h2>
+    <p class="muted small">Paste an API key. It is stored only in this browser profile and sent only to the provider you pick.</p>
+    <div class="row" role="radiogroup" aria-label="Provider">
+      <label class="check"><input type="radio" name="setupProvider" value="anthropic" checked> Anthropic (Claude)</label>
+      <label class="check"><input type="radio" name="setupProvider" value="gemini"> Google Gemini</label>
+    </div>
+    <label class="field"><span id="setupKeyLabel">Anthropic API key</span>
+      <input id="setupKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+    </label>
+    <div class="row">
+      <button id="setupSave" class="primary">Save and test key</button>
+      <span id="setupMsg" class="small muted"></span>
+    </div>
+    <p class="small muted" id="setupHelp">Get a key at console.anthropic.com → API keys.</p>
+    <hr class="sep">
+    <h2>Project folders</h2>
+    <p class="muted small">Add the folder (or folders) that hold your project files — they are indexed here and mirrored to the NAS over the internet. Then connect the NAS in Settings.</p>
+    <div class="row">
+      <button id="setupLocal" class="primary">Add a folder to mirror…</button>
+      <button id="setupNas">NAS connection (Settings)…</button>
+    </div>
+    <div id="setupFolders" class="small muted"></div>
+  </section>
+
+  <section id="reconnect" class="banner warn row" hidden>
+    <span class="grow small">Chrome needs your OK to reach the project folders again.</span>
+    <button id="reconnectBtn" class="primary">Reconnect folders</button>
+  </section>
+
+  <section id="summary" class="summary" aria-label="Draft summary"></section>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="drafts" aria-selected="true">Drafts</button>
+    <button role="tab" data-tab="questions">Questions <span id="qCount" class="count"></span></button>
+    <button role="tab" data-tab="files">Files</button>
+    <button role="tab" data-tab="mirror">Mirror</button>
+    <button role="tab" data-tab="automate">Automate</button>
+  </nav>
+
+  <!-- Drafts -->
+  <section id="tab-drafts" class="tab stack">
+    <div class="row">
+      <button id="draftOpen" class="primary" title="Read the message open in Outlook and prepare a reply">Draft reply to open email</button>
+      <button id="scanNow" title="Process unread messages in the Outlook list">Scan inbox</button>
+      <button id="pasteBtn" title="Paste an email by hand">Paste…</button>
+    </div>
+    <div class="row">
+      <select id="filter" aria-label="Filter drafts" class="grow">
+        <option value="active">Active (needs you)</option>
+        <option value="all">All</option>
+        <option value="needs-info">Needs info</option>
+        <option value="needs-approval">Needs approval</option>
+        <option value="waiting-data">Waiting for data</option>
+        <option value="ready">Ready</option>
+        <option value="inserted">Inserted</option>
+        <option value="sent">Sent</option>
+        <option value="no-reply">No reply needed</option>
+        <option value="skipped">Skipped</option>
+        <option value="error">Errors</option>
+      </select>
+      <button id="exportBtn" title="Download the draft log as CSV">Export</button>
+    </div>
+    <div id="list" class="list"></div>
+  </section>
+
+  <!-- Questions -->
+  <section id="tab-questions" class="tab stack" hidden>
+    <p class="muted small">Everything the drafts are still missing. Answer here and the draft is rewritten with your answer.</p>
+    <div id="questions" class="stack"></div>
+  </section>
+
+  <!-- Files -->
+  <section id="tab-files" class="tab stack" hidden>
+    <div class="row">
+      <input id="searchBox" type="text" class="grow" placeholder="Search project files (local, no tokens)">
+    </div>
+    <div id="searchResults" class="stack"></div>
+    <div class="panel stack">
+      <div class="row"><h2 class="grow">Index</h2><span id="indexPill" class="pill"></span></div>
+      <div id="indexInfo" class="small muted"></div>
+      <div id="jobBar" class="progress" hidden><div></div></div>
+      <div id="jobText" class="small muted"></div>
+      <div class="row">
+        <button id="indexBtn" class="primary">Index now</button>
+        <button id="deepBtn" title="Load the OCR / deep index produced on the Pi">Apply deep index</button>
+        <button id="stopBtn" class="danger" hidden>Stop</button>
+      </div>
+      <details class="small"><summary>Problem files</summary><div id="indexErrors" class="mono"></div></details>
+    </div>
+  </section>
+
+  <!-- Mirror -->
+  <section id="tab-mirror" class="tab stack" hidden>
+    <div class="panel stack">
+      <div id="mirrorFolders" class="small"></div>
+      <div class="row">
+        <button id="planBtn">Preview sync</button>
+        <button id="syncBtn" class="primary">Sync now</button>
+      </div>
+      <div id="mirrorBar" class="progress" hidden><div></div></div>
+      <div id="mirrorText" class="small muted"></div>
+    </div>
+    <div id="planBox" class="panel stack" hidden></div>
+    <div id="mirrorLast" class="small muted"></div>
+  </section>
+
+  <!-- Automate -->
+  <section id="tab-automate" class="tab stack" hidden>
+    <div id="actionsBox" class="stack"></div>
+    <div class="panel stack">
+      <h2>Recent activity</h2>
+      <div id="activity" class="small"></div>
+    </div>
+  </section>
+</div>
+
+<!-- Paste email -->
+<dialog id="pasteDlg">
+  <form method="dialog" class="stack">
+    <h2>Paste an email</h2>
+    <label class="field"><span>From</span><input id="pFrom" type="text"></label>
+    <label class="field"><span>Subject</span><input id="pSubject" type="text"></label>
+    <label class="field"><span>Body</span><textarea id="pBody" rows="10"></textarea></label>
+    <div class="row"><span class="grow"></span><button value="cancel">Cancel</button><button id="pGo" class="primary" value="ok">Draft reply</button></div>
+  </form>
+</dialog>
+
+<!-- Run an Automate action -->
+<dialog id="actionDlg">
+  <form method="dialog" class="stack">
+    <h2 id="aTitle">Run a Power Automate action</h2>
+    <label class="field"><span>Action</span><select id="aName"></select></label>
+    <p id="aDesc" class="small muted"></p>
+    <div id="aParams" class="stack"></div>
+    <p id="aWarn" class="banner warn small" hidden>This action changes records (for example a SharePoint sheet or GCdocs). Check the values before running.</p>
+    <div class="row"><span class="grow"></span><button value="cancel">Cancel</button><button id="aGo" class="primary" value="ok">Run</button></div>
+  </form>
+</dialog>
+
+<!-- Attach / teach a document -->
+<dialog id="attachDlg">
+  <form method="dialog" class="stack">
+    <h2>Attach the right document</h2>
+    <p class="small muted">Search your files and pick the one this email should use. MailMirror remembers the choice for similar emails.</p>
+    <input id="attSearch" type="text" placeholder="Search files…">
+    <div id="attResults" class="stack attach-results"></div>
+    <div class="row"><span class="grow"></span><button value="cancel">Close</button></div>
+  </form>
+</dialog>
+
+<!-- Text preview for files the browser can't display -->
+<dialog id="previewDlg">
+  <form method="dialog" class="stack">
+    <h2 id="pvTitle"></h2>
+    <pre id="pvText" class="preview"></pre>
+    <div class="row"><span class="grow"></span><button id="pvDownload" type="button">Download copy</button><button value="close" class="primary">Close</button></div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script type="module" src="sidepanel.js"></script>
+</body>
+</html>
