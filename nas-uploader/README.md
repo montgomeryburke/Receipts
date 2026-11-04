@@ -96,7 +96,9 @@ The script also sets up two helpers for the assistant (skip them with `--no-ocr`
   the extension lists as project folders (never your movies), unpacks Outlook `.pst` archives and saved `.msg`
   emails into individual emails, and reads every document in NAS-only folders (below). The result,
   `/.assistant/deep-index.jsonl.gz`, is picked up by the extension, so all of it becomes searchable without
-  slowing the work computer.
+  slowing the work computer. The script installs what it needs (`tesseract-ocr`, `poppler-utils`, `pst-utils`
+  for `readpst`, `libemail-outlook-message-perl` for `msgconvert`); to run `server/assistant-ocr-index.py` on
+  another machine, `apt-get install` those first.
 - **The free speech-to-text model** (80 MB) is copied to `/.assistant/models/`, for work networks that block
   huggingface.co.
 

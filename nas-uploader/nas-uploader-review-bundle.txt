@@ -1,4 +1,4 @@
-Project Assistant: complete source for review (4a5af07 2026-11-04)
+Project Assistant: complete source for review (c9d4c8d 2026-11-04)
 Files: extension/ (Chrome extension, Manifest V3; third-party libraries in extension/vendor/ are left out),
 server/setup-webdav.sh (Proxmox container setup), server/assistant-ocr-index.py (OCR / mail / NAS-only text job
 on the NAS) and server/setup-drive-copy.sh (daily Google Drive copy with rclone).
@@ -6571,7 +6571,7 @@ state.ready = true;
     <span id="cost" class="small muted"></span>
     <button id="btnAi" class="danger" title="Stop AI everywhere: cancels every Claude/Gemini call (this agent, drafts, chat, meetings) until you resume">⏹ Stop AI</button>
   </div>
-  <div id="status" class="small muted" role="status">Tell it what to do in a Chrome tab.</div>
+  <div id="status" class="small muted" role="status">Tell it what to do in a Chrome tab. While it works, Chrome shows a bar saying “Project Assistant started debugging this browser” — that is normal; Cancel there stops the agent.</div>
 </header>
 
 <main class="wrap stack">
