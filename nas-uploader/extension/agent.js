@@ -11,6 +11,8 @@ const pad = (n) => String(n).padStart(2, '0');
 const hms = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 const money = (c) => (c < 0.01 ? `$${c.toFixed(4)}` : `$${c.toFixed(2)}`);
 const AI_NAME = { gemini: 'Gemini', anthropic: 'Claude' };
+/** "Gemini", or with one key "A second, separate Claude review". */
+const who = (c) => (c.self ? `A second, separate ${AI_NAME[c.by]} review` : AI_NAME[c.by] || 'The second AI');
 
 const state = {
   agent: null,
@@ -60,7 +62,7 @@ function checkHtml(c) {
   if (c.localOnly) {
     return local.length ? `<div class="chk warn" data-check="issues">⚠ Check:<ul>${local.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>` : '<div class="chk ok" data-check="ok">✓ Every step went through and every typed value read back correctly.</div>';
   }
-  const by = AI_NAME[c.by] || 'The second AI';
+  const by = who(c);
   const findings = [...(c.issues || []).map((i) => `<li><b>“${esc(i.claim)}”</b> — ${esc(i.problem)}${i.evidence ? ` <span class="muted">${esc(i.evidence)}</span>` : ''}</li>`), ...(c.missed || []).map((m) => `<li>Not done: ${esc(m)}</li>`), ...local.map((l) => `<li>${esc(l)}</li>`)];
   if (c.verdict === 'ok' && !findings.length) return `<div class="chk ok" data-check="ok">✓ ${by} checked the result against the task and the final page: no problems found.</div>`;
   return `<div class="chk warn" data-check="issues">⚠ ${by} checked the result:<ul>${findings.join('')}</ul></div>`;
@@ -112,8 +114,8 @@ function confirmStep(req) {
     $('confirmDetail').hidden = !req.detail;
     const c = req.check;
     $('confirmCheck').innerHTML = !c ? '' : c.error ? `<div class="chk warn">The second check failed: ${esc(c.error)}</div>`
-      : c.verdict === 'ok' ? `<div class="chk ok" data-check="ok">✓ ${AI_NAME[c.by]} checked the page against your task: looks right.</div>`
-        : `<div class="chk warn" data-check="issues">⚠ ${AI_NAME[c.by]} checked the page against your task:<ul>${[...(c.issues || []).map((i) => `<li><b>“${esc(i.claim)}”</b> — ${esc(i.problem)}${i.fix && i.fix !== 'remove' ? ` → ${esc(i.fix)}` : ''}</li>`), ...(c.missed || []).map((m) => `<li>Missing: ${esc(m)}</li>`)].join('')}</ul></div>`;
+      : c.verdict === 'ok' ? `<div class="chk ok" data-check="ok">✓ ${who(c)} checked the page against your task: looks right.</div>`
+        : `<div class="chk warn" data-check="issues">⚠ ${who(c)} checked the page against your task:<ul>${[...(c.issues || []).map((i) => `<li><b>“${esc(i.claim)}”</b> — ${esc(i.problem)}${i.fix && i.fix !== 'remove' ? ` → ${esc(i.fix)}` : ''}</li>`), ...(c.missed || []).map((m) => `<li>Missing: ${esc(m)}</li>`)].join('')}</ul></div>`;
     $('btnAlways').hidden = !!req.launchUrl || req.kind === 'overwrite';
     $('btnNever').hidden = !req.setting;
     $('btnNever').title = req.setting ? `Allow, and don't ask before ${req.settingLabel} again (switch it back on under Ask me before)` : '';

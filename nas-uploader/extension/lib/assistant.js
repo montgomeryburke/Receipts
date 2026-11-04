@@ -198,8 +198,8 @@ function addUsage(item, res, settings, { reviewer = false } = {}) {
 // Every draft is checked in a second way before it is shown:
 //  - here, free: every number in the draft must appear in the email, the excerpts, the data results or the
 //    user's notes (a wrong 12.5 m where the drawings say 12.0 m is the typical mistake);
-//  - with both keys: the other AI reviews the draft against the same sources, and if it finds problems the
-//    first AI revises the draft once with those findings.
+//  - the other AI (both keys) or a second, separate review by the same AI (one key) checks the draft against the
+//    same sources, and if it finds problems the first AI revises the draft once with those findings.
 
 function sourcesText(item, settings) {
   return [snippetsBlock(item.snippets || []), emailBlock(item), dataBlock(item), item.notes ? `<user_notes>\n${item.notes}\n</user_notes>` : '', settings.signature ? `<signature>\n${settings.signature}\n</signature>` : '']
@@ -232,8 +232,8 @@ async function checkDraft(item, settings) {
     const hints = check.localUnsupported.length ? [`these numbers in the draft were not found in the sources: ${check.localUnsupported.join(', ')}`] : [];
     const r = await review(settings, { provider, what: 'email draft reply', sources: sourcesText(item, settings), text: draftForReview(item), hints });
     addUsage(item, { usage: r.usage, model: r.model }, settings, { reviewer: true });
-    Object.assign(check, { by: r.by, verdict: r.verdict, issues: r.issues, missed: r.missed });
-    history(item, `checked by ${providerName(r.by)}: ${r.verdict === 'ok' ? 'no problems' : `${r.issues.length + r.missed.length} finding(s)`}`);
+    Object.assign(check, { by: r.by, self: r.self, verdict: r.verdict, issues: r.issues, missed: r.missed });
+    history(item, `checked by ${providerName(r.by)}${r.self ? ' (second, separate review)' : ''}: ${r.verdict === 'ok' ? 'no problems' : `${r.issues.length + r.missed.length} finding(s)`}`);
     if (r.verdict === 'issues' && settings.crossCheckRevise !== false) {
       const before = item.draft;
       await callDraft(item, settings, [snippetsBlock(item.snippets || []), emailBlock(item), followUpParts(item), reviewBlock(r)], undefined, false, provider);

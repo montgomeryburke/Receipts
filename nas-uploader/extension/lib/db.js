@@ -156,9 +156,10 @@ export const DEFAULT_SETTINGS = {
   actions: [],
 
   // Accuracy and safety
-  crossCheck: true,                   // with both keys: the other AI checks drafts, prompts, answers and summaries
+  crossCheck: true,                   // a second check of drafts, prompts, answers, summaries, agent results: the other AI (both keys) or a separate review (one key)
   crossCheckRevise: true,             // …and a draft it finds problems in is revised once by the first AI
-  dualLookUp: true,                   // with both keys: standards are looked up online by both and compared
+  dualLookUp: true,                   // standards looked up online twice, independently (by both AIs with both keys), and compared
+  selfCheckModel: '',                 // one key: model for the second review ('' = the same model)
   aiPaused: false,                    // the kill switch: no AI calls at all until resumed
   dailyBudgetUsd: 0,                  // stop AI calls for the day once this much is spent (0 = no limit)
 

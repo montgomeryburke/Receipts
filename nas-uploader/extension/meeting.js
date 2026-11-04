@@ -438,8 +438,8 @@ function checkHtml(c) {
   if ((c.badQuotes || []).length) local.push(`${c.badQuotes.length === 1 ? 'a quote was' : `${c.badQuotes.length} quotes were`} not found word for word in the file`);
   if ((c.unsupported || []).length) local.push(`numbers not in the files or the transcript: ${c.unsupported.join(', ')}`);
   const findings = [...(c.issues || []).map((i) => `<li><b>“${esc(i.claim)}”</b> — ${esc(i.problem)}${i.evidence ? ` <span class="muted">${esc(i.evidence)}</span>` : ''}${i.fix && i.fix !== 'remove' ? ` <span class="muted">→ ${esc(i.fix)}</span>` : ''}</li>`), ...(c.missed || []).map((m) => `<li>Not covered: ${esc(m)}</li>`), ...local.map((l) => `<li>${esc(l)}</li>`)];
-  if (c.verdict === 'ok' && !findings.length) return `<div class="chk ok small" data-check="ok">✓ ${c.by ? `Checked by ${AI_NAME[c.by]} against the files` : 'Quotes and numbers found in the files'}</div>`;
-  return `<div class="chk warn small" data-check="issues">⚠ ${c.by ? `${AI_NAME[c.by]} disagrees` : 'Check before using'}:<ul class="plain">${findings.join('')}</ul></div>`;
+  if (c.verdict === 'ok' && !findings.length) return `<div class="chk ok small" data-check="ok">✓ ${c.by ? (c.self ? `Checked again by ${AI_NAME[c.by]} in a separate review, against the files` : `Checked by ${AI_NAME[c.by]} against the files`) : 'Quotes and numbers found in the files'}</div>`;
+  return `<div class="chk warn small" data-check="issues">⚠ ${c.by ? (c.self ? `A second ${AI_NAME[c.by]} review disagrees` : `${AI_NAME[c.by]} disagrees`) : 'Check before using'}:<ul class="plain">${findings.join('')}</ul></div>`;
 }
 
 function quoteMark(src) {
@@ -468,10 +468,11 @@ function webHtml(web) {
   if (web.second) {
     const a = AI_NAME[web.by];
     const b = AI_NAME[web.second.by];
-    const verdict = web.agree === true ? `<div class="chk ok small" data-agree="yes">✓ ${a} and ${b} looked it up separately and found the same values.</div>`
-      : web.agree === false ? `<div class="chk warn small" data-agree="no">⚠ ${a} and ${b} found different values — check the documents below before relying on it.</div>`
-        : `<div class="chk small muted" data-agree="unknown">${b} looked it up too (no numbers to compare).</div>`;
-    both = `${verdict}<details class="small"${web.agree === false ? ' open' : ''}><summary>What ${b} found</summary><div>${esc(web.second.text)}</div>${linksHtml(web.second.sources)}</details>`;
+    const self = web.second.self || web.second.by === web.by;
+    const verdict = web.agree === true ? `<div class="chk ok small" data-agree="yes">✓ ${self ? `${a} looked it up twice, separately, and found the same values.` : `${a} and ${b} looked it up separately and found the same values.`}</div>`
+      : web.agree === false ? `<div class="chk warn small" data-agree="no">⚠ ${self ? `Two separate ${a} look-ups found different values` : `${a} and ${b} found different values`} — check the documents below before relying on it.</div>`
+        : `<div class="chk small muted" data-agree="unknown">${self ? `${a} looked it up a second time` : `${b} looked it up too`} (no numbers to compare).</div>`;
+    both = `${verdict}<details class="small"${web.agree === false ? ' open' : ''}><summary>${self ? 'What the second look-up found' : `What ${b} found`}</summary><div>${esc(web.second.text)}</div>${linksHtml(web.second.sources)}</details>`;
   }
   return `<div class="web">🌐 ${esc(web.text)}${linksHtml(web.sources)}${both}</div>`;
 }
@@ -589,7 +590,7 @@ function markdown() {
     const ck = sm.check;
     if (ck?.by) {
       const found = [...(ck.issues || []).map((i) => `- “${i.claim}” — ${i.problem}${i.fix && i.fix !== 'remove' ? ` (→ ${i.fix})` : ''}`), ...(ck.missed || []).map((m) => `- Not covered: ${m}`)];
-      lines.push(`## Checked by ${AI_NAME[ck.by]}`, '', ...(found.length ? found : ['No problems found against the transcript.']), '');
+      lines.push(ck.self ? `## Checked again by ${AI_NAME[ck.by]} (separate review)` : `## Checked by ${AI_NAME[ck.by]}`, '', ...(found.length ? found : ['No problems found against the transcript.']), '');
     }
   }
   const shown = state.prompts.filter((p) => !p.thinking && !p.error && !p.empty);

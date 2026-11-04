@@ -207,7 +207,7 @@ export async function checkResult(result, { signal } = {}) {
   if (badQuotes.length) hints.push(`these quotes were not found word for word in the cited excerpts: ${badQuotes.map((q) => `"${q}"`).join('; ')}`);
   if (unsupported.length) hints.push(`these numbers were not found in the excerpts or the transcript: ${unsupported.join(', ')}`);
   const r = await review(settings, { provider: ctx.provider, what: ctx.what, sources: ctx.sources, text: ctx.text, hints, signal });
-  return { ...out, verdict: r.verdict === 'ok' && !badQuotes.length && !unsupported.length ? 'ok' : 'issues', by: r.by, issues: r.issues, missed: r.missed, cost: r.cost || 0 };
+  return { ...out, verdict: r.verdict === 'ok' && !badQuotes.length && !unsupported.length ? 'ok' : 'issues', by: r.by, self: r.self, issues: r.issues, missed: r.missed, cost: r.cost || 0 };
 }
 
 function providerFor(settings) {
@@ -289,9 +289,10 @@ export async function answerQuestion(question, entries, { projects = [], signal 
 const LOOKUP_SYSTEM = 'You look up engineering and construction standards and codes (for example CSA S6, the BC MoTI Supplement to S6, TAC Geometric Design Guide, provincial specifications). Give the requirement in one or two sentences, quote the exact clause text if you find it, and name the document, edition and clause number. If sources disagree or you are not sure, say so. No preamble.';
 
 /**
- * Looks a standard up online (a separate, small call; only when the files don't have it). With both keys,
- * Claude (Anthropic's web search) and Gemini (Google Search) look it up independently and their numbers are
- * compared: {text, sources, by, second: {by, text, sources}, agree: true|false|null, cost}.
+ * Looks a standard up online (a separate, small call; only when the files don't have it). With the second check
+ * on it is looked up twice, independently, and the numbers compared — by Claude (Anthropic's web search) and
+ * Gemini (Google Search) with both keys, or by two separate searches with one:
+ * {text, sources, by, second: {by, self, text, sources}, agree: true|false|null, cost}.
  */
 async function lookUp(what, settings, provider, signal) {
   if (canCrossCheck(settings) && settings.dualLookUp !== false) return dualLookUp(settings, { provider, what, system: LOOKUP_SYSTEM, signal });
@@ -316,7 +317,7 @@ export async function summarize(entries, { projects = [], signal } = {}) {
     try {
       const text = [`Summary: ${d.summary || ''}`, ...(d.decisions || []).map((x) => `Decision: ${x}`), ...(d.action_items || []).map((a) => `Action: ${a.what} — ${a.who || '?'}${a.when ? ` (${a.when})` : ''}`), ...(d.remember || []).map((x) => `To remember: ${x}`)].join('\n');
       const r = await review(settings, { provider: res.provider || provider, what: 'meeting summary, decisions, action items and facts to remember', sources: `<transcript>\n${full}\n</transcript>`, text, signal });
-      check = { by: r.by, verdict: r.verdict, issues: r.issues, missed: r.missed };
+      check = { by: r.by, self: r.self, verdict: r.verdict, issues: r.issues, missed: r.missed };
       cost += r.cost || 0;
     } catch (err) {
       check = { error: err.message };

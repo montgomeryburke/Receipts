@@ -81,11 +81,13 @@
 
     <section id="accuracy" class="panel stack">
       <h2>Accuracy &amp; safety</h2>
-      <p class="small muted">Everything the AI writes is checked a second way. Free checks run on this computer: every quote must really be in the file it cites, every number in a draft must be in the email or the sources, and (with "Gemini, checked by the free one") two transcriptions must hear the same numbers. With <b>both</b> a Claude and a Gemini key, each AI also checks the other's work.</p>
+      <p class="small muted">Everything the AI writes is checked a second way. Free checks run on this computer: every quote must really be in the file it cites, every number in a draft must be in the email or the sources, and (with "Gemini, checked by the free one") two transcriptions must hear the same numbers. An AI also checks the AI's work: with <b>both</b> a Claude and a Gemini key, each checks the other; with <b>one</b> key, the same AI does a second, separate review (a fresh call that sees only the sources and the result).</p>
       <p id="xcState" class="small"></p>
-      <label class="check small"><input type="checkbox" data-key="crossCheck"> With both keys: the other AI checks every email draft, meeting prompt, private answer and meeting summary against the same sources (about double the AI cost)</label>
+      <label class="check small"><input type="checkbox" data-key="crossCheck"> Second check: every email draft, meeting prompt, private answer, meeting summary and agent result is checked against the same sources — by the other AI with both keys, by a separate review with one (about double the AI cost)</label>
       <label class="check small"><input type="checkbox" data-key="crossCheckRevise"> When it finds a problem in an email draft, the first AI corrects the draft once (one more call)</label>
-      <label class="check small"><input type="checkbox" data-key="dualLookUp"> With both keys: standards are looked up online by both (Anthropic's web search and Google Search) and their numbers compared</label>
+      <label class="check small"><input type="checkbox" data-key="dualLookUp"> Standards are looked up online twice, independently, and their numbers compared (by both, Anthropic's web search and Google Search, with both keys)</label>
+      <label class="field"><span>One key: model for the second review (optional; empty = the same model)</span><input type="text" data-key="selfCheckModel" placeholder="e.g. claude-sonnet-5-5 or gemini-3.5-pro" list="selfCheckModels"></label>
+      <datalist id="selfCheckModels"><option value="claude-opus-5-5"></option><option value="claude-sonnet-5-5"></option></datalist>
       <div class="grid3">
         <label class="field"><span>Daily AI spending limit, USD (0 = none)</span><input type="number" min="0" step="0.5" data-key="dailyBudgetUsd"></label>
       </div>

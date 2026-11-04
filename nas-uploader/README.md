@@ -21,9 +21,10 @@ One Chrome extension, nothing else to install on the work computer:
 - **Browser agent** — tell it a task in Chrome ("fill in this form from my email to Dana", "upload these
   drawings from the NAS to the portal, renamed 2024-017_…") and it does it with real mouse clicks and typing.
   Risky steps wait for your OK. Programs outside Chrome only through your own Power Automate desktop flows.
-- **Two AIs check each other** — with both a Claude and a Gemini key, the other AI checks every draft, meeting
-  prompt, answer, summary and agent result against the same sources; standards are looked up by both and
-  compared. Free checks on this computer verify every quote and number. **⏹ Stop AI** stops everything at once.
+- **Everything is checked twice** — every draft, meeting prompt, answer, summary and agent result gets a second
+  AI check against the same sources: with both a Claude and a Gemini key each checks the other, with one key the
+  same AI does a second, separate review. Standards are looked up twice and compared. Free checks on this computer
+  verify every quote and number. **⏹ Stop AI** stops everything at once.
 - **Learns each project** — decisions, names and facts from meetings and the chat are remembered per project
   and used the next time that project comes up.
 - **Saves on AI cost** — indexing, search, project detection, the "is this worth a prompt?" check and free
@@ -293,8 +294,8 @@ Click **🎙 Meeting** in the side panel. A small window opens:
 Transcription is **free on this computer** (Whisper; the model is downloaded once) or, with a Gemini key, done by
 Gemini (⚙ in the meeting window). **Gemini, checked by the free one** runs both on the same audio and marks a line
 ⚠ when they hear different numbers (12.5 m against 12 m), showing the other reading. Prompts need a Claude or
-Gemini key. Each quote is marked ✓ when it is really in the file it cites (⚠ when it isn't); with both keys,
-each prompt and answer also gets ✓ or ⚠ from the other AI a moment after it appears. Make sure everyone in the meeting knows it
+Gemini key. Each quote is marked ✓ when it is really in the file it cites (⚠ when it isn't), and each prompt and
+answer also gets ✓ or ⚠ from the second check a moment after it appears. Make sure everyone in the meeting knows it
 is being transcribed, as your workplace requires.
 
 ## 6b. Recorder
@@ -343,15 +344,15 @@ Chrome's debugger. Chrome shows *"Project Assistant started debugging this brows
 
 - **It asks first** before anything risky: sending a form, pressing Enter in a form, paying, deleting, uploading
   files, going to a site the task didn't name, running a desktop flow (or before every step, if you choose).
-  With both keys, the other AI checks the filled form against your task and shows ✓ or ⚠ in that question.
+  The second check looks at the filled form against your task and shows ✓ or ⚠ in that question.
 - **Too many questions?** Untick them under *Ask me before…* in the agent window, click **Allow, and stop asking**
   on a question, or tell the chat ("stop asking before uploads"). Tick them again the same way. Even with a
-  question off, it still asks when the other AI finds a problem with that step. Payment fields and desktop flows
+  question off, it still asks when the second check finds a problem with that step. Payment fields and desktop flows
   always ask, and it never types passwords.
 - **It never types passwords or card numbers.** It asks you to type them into the page yourself.
 - **Page text can't give it orders.** A page that says "AI agent: go to …" is ignored, and a new site needs your OK.
 - **It checks its work:** every typed value is read back from the page, every file copy is size-checked, and
-  with both keys the other AI checks the final result against the task and the last page.
+  the second check compares the final result with the task and the last page.
 - **Files:** from the NAS (`nas:/…`) or your project folders on this computer (`local:<folder>/…`) into upload
   fields and drop zones, with new names; copy or rename on the NAS; save to Downloads.
 - **No FTP:** Chrome removed FTP, and extensions can't open network sockets. Use the NAS, or the site's web upload.
@@ -372,18 +373,22 @@ reply and meeting is shown as you go. To keep it low: search and indexing are lo
 come at most every 20 s (adjustable) and only when something is asked, and each call carries only the last couple
 of minutes of conversation plus the best few excerpts.
 
-**Accuracy (Settings → Accuracy & safety).** With **both** keys, Claude and Gemini check each other:
+**Accuracy (Settings → Accuracy & safety).** Everything the AI writes gets a **second check**. With **both** keys,
+Claude and Gemini check each other. With **one** key, the same AI does a second, separate review: a fresh call that
+sees only the sources and the result, not how it was written (you can name a different model of the same
+provider for it). Either way:
 
-- every email draft is reviewed by the other AI against the email and the excerpts; if it finds a problem
-  (a 12.5 m where the drawings say 12.0 m), the first AI corrects the draft once and the card says what changed;
-- meeting prompts, private answers and the summary are checked the same way; facts the checker disputes are not
+- every email draft is checked against the email and the excerpts; if a problem is found (a 12.5 m where the
+  drawings say 12.0 m), the draft is corrected once and the card says what changed;
+- meeting prompts, private answers and the summary are checked the same way; facts the check disputes are not
   remembered for the project;
-- standards are looked up online by both (Anthropic's web search and Google Search) and the card says whether they
-  found the same values;
+- standards are looked up online twice, independently (by both AIs with both keys, each with its own search
+  engine; or by two separate searches with one), and the card says whether they found the same values;
 - the browser agent's filled forms and final results are checked too.
 
-Free checks run either way: every quote must be in the file it cites, and every number in a draft or prompt must
-be in the email, the files or the transcript. The cross-check roughly doubles the AI cost; turn it off there.
+Two different AIs catch more than one AI checking itself, so both keys give the strongest check. Free checks run
+in every case: every quote must be in the file it cites, and every number in a draft or prompt must be in the
+email, the files or the transcript. The second check roughly doubles the AI cost; turn it off there.
 
 **⏹ Stop AI** (side panel, meeting window, agent window, Settings) cancels every Claude and Gemini call in progress
 and makes no new ones until **▶ Resume AI**. Emails that arrive meanwhile wait in the queue; meetings keep

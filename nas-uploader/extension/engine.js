@@ -10,7 +10,7 @@ import { getRootHandle, permissionState } from './lib/fsutil.js';
 import { processEmail, regenerate, decideRequest, runItemAction, applyFolderResults, teachSource, listItems, summarize } from './lib/assistant.js';
 import { pollFolderResponses } from './lib/automate.js';
 import { listModels, hasKey, activeModel, spentToday, stopAllAI, resumeAI } from './lib/llm.js';
-import { canCrossCheck } from './lib/crosscheck.js';
+import { canCrossCheck, crossCheckMode } from './lib/crosscheck.js';
 import { projectFolders } from './lib/folders.js';
 import { nasClient, configProblem, writeTextFile } from './lib/nas.js';
 import { sendChat, chatHistory, clearChat, runPendingTest } from './lib/chat.js';
@@ -235,6 +235,7 @@ async function status() {
       spentToday: await spentToday(),
       dailyBudgetUsd: Number(settings.dailyBudgetUsd) || 0,
       crossCheck: canCrossCheck(settings),
+      crossCheckMode: crossCheckMode(settings),
       crossCheckOff: settings.crossCheck === false,
     },
     chatBusy: !!chatBusy,

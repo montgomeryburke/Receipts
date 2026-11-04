@@ -51,7 +51,8 @@ What it does:
    undo log; it helps set up Power Automate flows and records code change requests on the NAS.
 8. server/setup-webdav.sh (run as root in the Proxmox LXC): Apache WebDAV, permissions, DuckDNS + Let's Encrypt,
    fail2ban, unattended upgrades, the OCR systemd timer and a copy of the speech model.
-9. Accuracy (lib/crosscheck.js): with both keys the other AI reviews drafts (lib/assistant.js checkDraft, one
+9. Accuracy (lib/crosscheck.js): with both keys the other AI, with one key a separate review by the same AI
+   (reviewerFor), reviews drafts (lib/assistant.js checkDraft, one
    revision), meeting prompts/answers/summaries (lib/meeting-ai.js checkResult, summarize) and the agent's
    results; standards looked up by both (dualLookUp); free local checks of quotes (quoteFound) and numbers
    (numbersIn, unsupportedNumbers); "both" transcription (lib/stt.js) compares numbers heard by Gemini and Whisper.

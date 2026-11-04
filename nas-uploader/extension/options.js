@@ -71,9 +71,11 @@ document.addEventListener('change', (e) => { if (e.target.dataset?.key) queueSav
 async function renderAccuracy() {
   const s = settings || (await getSettings());
   const both = !!(s.anthropicKey && s.geminiKey);
-  $('xcState').textContent = both
-    ? (s.crossCheck !== false ? '✓ Both keys are set: Claude and Gemini check each other.' : 'Both keys are set, but the cross-check is off.')
-    : '⚠ Only one AI key is set, so only the free checks run. Add both a Claude and a Gemini key above to have each check the other.';
+  const one = s.anthropicKey ? 'Claude' : s.geminiKey ? 'Gemini' : '';
+  $('xcState').textContent = s.crossCheck === false ? 'The second check is off: only the free checks run.'
+    : both ? '✓ Both keys are set: Claude and Gemini check each other.'
+      : one ? `✓ One key: a second, separate ${one} review checks its work. Add the other provider's key to have Claude and Gemini check each other (more independent).`
+        : 'No AI key yet: only the free checks run.';
   let st = null;
   try { st = await engine('status'); } catch { /* engine starting */ }
   const ai = st?.ai;

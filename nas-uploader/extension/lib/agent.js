@@ -5,8 +5,8 @@
 //
 // Safety: risky steps (submit, send, pay, delete, upload, another site, a desktop flow) wait for the user's
 // Allow; passwords and card numbers are never typed by the AI; page text is treated as data, not orders; the
-// Stop button and the global Stop AI end it at once; a step limit caps the cost. With both keys, the other AI
-// checks a form before it is submitted and checks the result at the end.
+// Stop button and the global Stop AI end it at once; a step limit caps the cost. A second AI check (the other AI
+// with both keys, a separate review with one) looks at a form before it is submitted and at the result at the end.
 
 import { runChat, hasKey, pickProvider, costOf, LLMError } from './llm.js';
 import { getSettings, saveSettings } from './db.js';
@@ -210,7 +210,7 @@ export class Agent extends EventTarget {
     return ok;
   }
 
-  /** With both keys: the other AI checks the page (a filled form) against the task before a risky step. */
+  /** The second check (other AI, or a separate review with one key) of a filled form before a risky step. */
   async secondOpinion(what) {
     if (!canCrossCheck(this.settings)) return null;
     try {
@@ -687,7 +687,7 @@ export class Agent extends EventTarget {
     }
   }
 
-  /** The end: with both keys the other AI checks the agent's claims against what it did and the final page. */
+  /** The end: the second check compares the agent's claims with what it did and the final page. */
   async finalCheck() {
     const failed = this.log.filter((e) => e.type === 'act' && (e.result?.error || e.result?.mismatch)).map((e) => `${e.text}: ${e.result.error || JSON.stringify(e.result.mismatch)}`);
     const declined = this.log.filter((e) => e.type === 'act' && e.result?.declined).length;
@@ -717,7 +717,7 @@ export class Agent extends EventTarget {
         signal: this.signal,
       });
       this.cost += r.cost || 0;
-      this.check = { by: r.by, verdict: r.verdict, issues: r.issues, missed: r.missed, ...local };
+      this.check = { by: r.by, self: r.self, verdict: r.verdict, issues: r.issues, missed: r.missed, ...local };
     } catch (err) {
       this.check = { error: err.message, ...local };
     }

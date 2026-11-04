@@ -103,7 +103,8 @@ function renderChips() {
   if (!status.nas?.configured) c.push(chip('NAS not set up', 'bad', status.nas?.problem || ''));
   const ai = status.ai || {};
   if (ai.paused) c.push(chip('AI stopped', 'bad', 'No Claude or Gemini calls are made until you click Resume AI'));
-  if (ai.crossCheck) c.push(chip('Cross-check on', 'ok', 'Claude and Gemini check each other: drafts, meeting prompts, answers and summaries'));
+  if (ai.crossCheckMode === 'both') c.push(chip('Cross-check on', 'ok', 'Claude and Gemini check each other: drafts, meeting prompts, answers, summaries and agent results'));
+  else if (ai.crossCheckMode === 'self') c.push(chip('Second check on', 'ok', 'One key: a second, separate review by the same AI checks drafts, meeting prompts, answers, summaries and agent results. Add the other key to have Claude and Gemini check each other.'));
   if (ai.dailyBudgetUsd) c.push(chip(`AI today ${money(ai.spentToday)} of ${money(ai.dailyBudgetUsd)}`, ai.spentToday >= ai.dailyBudgetUsd ? 'bad' : ai.spentToday >= 0.8 * ai.dailyBudgetUsd ? 'warn' : '', 'Estimated from the token counts; the daily limit is in Settings → Accuracy & safety'));
   else if (ai.spentToday) c.push(chip(`AI today ${money(ai.spentToday)}`, '', 'Estimated from the token counts'));
   renderAiButton();
@@ -243,12 +244,12 @@ function checkHtml(c) {
   if (!c) return '';
   const local = (c.localUnsupported || []).length ? `<div class="small">⚠ Numbers not found in the email or the sources: <b>${esc(c.localUnsupported.join(', '))}</b> — confirm them before sending.</div>` : '';
   if (c.localOnly) {
-    return `<div class="check ${local ? 'warn' : 'ok'}" data-check="${local ? 'issues' : 'ok'}">${local || '<div class="small">✓ Every number in the draft is in the email or the sources (local check). Add both a Claude and a Gemini key to have each AI check the other.</div>'}</div>`;
+    return `<div class="check ${local ? 'warn' : 'ok'}" data-check="${local ? 'issues' : 'ok'}">${local || '<div class="small">✓ Every number in the draft is in the email or the sources (local check). Turn on the second check in Settings → Accuracy &amp; safety to have an AI review it too.</div>'}</div>`;
   }
-  const by = AI_NAME[c.by] || 'The second AI';
+  const by = c.self ? `A second, separate ${AI_NAME[c.by]} review` : AI_NAME[c.by] || 'The second AI';
   if (c.error || c.skipped) return `<div class="check warn" data-check="unchecked"><div class="small">Not checked by a second AI: ${esc(c.error || c.skipped)}</div>${local}</div>`;
   const findings = [...(c.issues || []).map((i) => `<li><b>“${esc(i.claim)}”</b> — ${esc(i.problem)}${i.evidence ? ` <span class="muted">Sources: ${esc(i.evidence)}</span>` : ''}${i.fix && i.fix !== 'remove' ? ` <span class="muted">Fix: ${esc(i.fix)}</span>` : ''}</li>`), ...(c.missed || []).map((m) => `<li>Not covered: ${esc(m)}</li>`)];
-  if (c.verdict === 'ok' && !local) return `<div class="check ok" data-check="ok"><div class="small">✓ Checked by ${by} against the sources: no problems found.</div></div>`;
+  if (c.verdict === 'ok' && !local) return `<div class="check ok" data-check="ok"><div class="small">✓ ${by} checked it against the sources: no problems found.</div></div>`;
   const head = c.revised
     ? `✓ ${by} found ${findings.length} problem${findings.length === 1 ? '' : 's'}; the draft was corrected by ${AI_NAME[c.revisedBy] || 'the first AI'}. Check these points:`
     : `⚠ ${by} found ${findings.length} problem${findings.length === 1 ? '' : 's'}:`;

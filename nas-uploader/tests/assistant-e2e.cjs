@@ -1417,15 +1417,82 @@ test('accuracy, email: Gemini checks Claude’s draft, finds the wrong 12.5 m, C
   const shown = await panel.textContent('.card .check[data-check]');
   assert(/Gemini found 1 problem/.test(shown) && /corrected by Claude/.test(shown), 'card explains the check: ' + shown);
   await panel.screenshot({ path: path.join(SHOTS, 'crosscheck-draft.png') });
-  // One key only: the free check still flags a number that isn't in the sources.
+  // One key only (Claude): a second, separate Claude review does the check, and the draft is still corrected.
   ai.reset();
   await setSettings(panel, { geminiKey: '' });
-  ai.anthropic = () => draft('12.5 m');
+  ai.anthropic = (body) => {
+    if (isReview(sysText(body))) {
+      assert(!/<second_review/.test(userText(body)) && /under_review kind="email draft reply"/.test(userText(body)), 'the review sees only the sources and the draft');
+      return { content: [text(JSON.stringify({ verdict: 'issues', issues: [{ claim: 'The clear deck width is 12.5 m', problem: 'The design criteria give 12.0 m.', evidence: 'Deck width: 12.0 m clear roadway between barriers.', fix: 'The clear deck width is 12.0 m' }], missed: [] }))] };
+    }
+    return /<second_review by="Claude">/.test(userText(body)) ? draft('12.0 m') : draft('12.5 m');
+  };
   await engine(b.sw, { type: 'email.capture', email: { from: 'Engineer <engineer@client.ca>', subject: 'Deck width again', body: 'And the clear deck width please?', source: 'manual' } });
   const item2 = await waitFor(async () => (await panel.evaluate(async () => (await import('./lib/db.js')).getAll('items'))).find((i) => i.subject === 'Deck width again' && i.status !== 'processing'), { what: 'second draft' });
-  eq(item2.check.localOnly, true, 'local check only');
-  eq(JSON.stringify(item2.check.localUnsupported), JSON.stringify(['12.5']), '12.5 flagged by the free check');
+  assert(/12\.0 m/.test(item2.draft) && !/12\.5/.test(item2.draft), 'one key: draft corrected: ' + item2.draft);
+  eq(item2.check.by, 'anthropic', 'checked by Claude');
+  eq(item2.check.self, true, 'as a second, separate review');
+  eq(item2.check.revised, true, 'revised after the check');
+  eq(ai.ofApi('anthropic').length, 3, 'draft, separate review, correction');
   eq(ai.ofApi('gemini').length, 0, 'no Gemini call without a Gemini key');
+  const reviewReq = ai.ofApi('anthropic').find((r) => isReview(sysText(r.body)));
+  eq(reviewReq.body.messages.length, 1, 'the review is a fresh call, not a continuation of the draft');
+  await panel.click('.tabs [data-tab="drafts"]');
+  await panel.selectOption('#filter', 'all');
+  await panel.waitForFunction(() => [...document.querySelectorAll('.card .subj')].some((x) => x.textContent === 'Deck width again'));
+  await panel.evaluate(() => [...document.querySelectorAll('.card .subj')].find((x) => x.textContent === 'Deck width again').closest('.card-head').click());
+  await panel.waitForFunction(() => /A second, separate Claude review found 1 problem; the draft was corrected by Claude/.test(document.getElementById('list')?.textContent || document.body.textContent));
+  // The second check switched off: only the free check, which still flags a number that isn't in the sources.
+  ai.reset();
+  await setSettings(panel, { crossCheck: false });
+  ai.anthropic = () => draft('12.5 m');
+  await engine(b.sw, { type: 'email.capture', email: { from: 'Engineer <engineer@client.ca>', subject: 'Deck width third', body: 'The clear deck width once more?', source: 'manual' } });
+  const item3 = await waitFor(async () => (await panel.evaluate(async () => (await import('./lib/db.js')).getAll('items'))).find((i) => i.subject === 'Deck width third' && i.status !== 'processing'), { what: 'third draft' });
+  eq(item3.check.localOnly, true, 'local check only');
+  eq(JSON.stringify(item3.check.localUnsupported), JSON.stringify(['12.5']), '12.5 flagged by the free check');
+  eq(ai.ofApi('anthropic').length, 1, 'no review call with the check off');
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+test('accuracy, one key (Claude only): meeting prompts get a separate second review, standards are looked up twice and compared', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  await mirrorProjects(b);
+  await waitIndexed(b, 6);
+  const meeting = await b.open('meeting.html');
+  await meeting.waitForFunction(() => window.meeting?.ready);
+  await setSettings(meeting, keys({ provider: 'anthropic', geminiKey: '', crossCheck: true, dualLookUp: true, meetingWebLookup: true, meetingMinGapSec: 5 }));
+  meetingClaude(ai, { lookup: 'CSA S6 barrier height for TL-4' });
+  const claude = ai.anthropic;
+  const searches = [];
+  ai.anthropic = (body) => {
+    if (isReview(sysText(body))) return { content: [text(JSON.stringify({ verdict: 'ok', issues: [], missed: [] }))] };
+    if (body.tools?.some((t) => t.type === 'web_search_20260209')) {
+      const q = userText(body);
+      searches.push(q);
+      // The second, independently worded search finds the same values.
+      if (/Find the official source/.test(q)) return { content: [{ type: 'text', text: 'CSA S6:19 clause 12.4.3.5 requires TL-4 barriers 1050 mm high at minimum.', citations: [] }] };
+    }
+    return claude(body);
+  };
+  await meeting.evaluate(async () => {
+    const m = window.meeting;
+    m.settings = await (await import('./lib/db.js')).getSettings();
+    const t = Date.now();
+    m.onText({ who: 'Them', start: t, end: t + 4000 }, 'Quick question about the Alert Bridge. What deck width did we use, and what barrier height does S6 need for TL-4?');
+  });
+  await meeting.waitForSelector('#prompts .card .chk[data-check="ok"]', { timeout: 30000 });
+  await meeting.waitForSelector('#prompts .card [data-agree="yes"]', { timeout: 15000 });
+  const card = await meeting.textContent('#prompts .card');
+  assert(/Checked again by Claude in a separate review/.test(card) && /Claude looked it up twice, separately, and found the same values/.test(card), 'card: ' + card);
+  eq(searches.length, 2, 'two separate web searches');
+  assert(/^Look up:/.test(searches[0]) || /^Look up:/.test(searches[1]), 'one plain look-up');
+  eq(ai.ofApi('gemini').length, 0, 'no Gemini calls with only a Claude key');
+  const st = await engine(b.sw, { type: 'status' });
+  eq(st.ai.crossCheckMode, 'self', 'status: second check by the same AI');
+  const panel = await b.open('sidepanel.html');
+  await panel.waitForFunction(() => /Second check on/.test(document.getElementById('chips').textContent));
   eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
 });
 
