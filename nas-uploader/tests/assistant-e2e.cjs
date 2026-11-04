@@ -1741,6 +1741,28 @@ async function agentWindow(b, part) {
   return w;
 }
 
+test('agent: sites named in the task are recognised (end of a sentence, a question), file names and email domains are not', async () => {
+  const b = await launch();
+  const page = await b.open('agent.html');
+  await page.waitForFunction(() => window.agentWindow?.ready);
+  const cases = {
+    'Upload the drawings to portal.example.com.': ['portal.example.com'],
+    'Fill in the form on portal.example.com. Then send it.': ['portal.example.com'],
+    'Is it on files.client.ca?': ['files.client.ca'],
+    'Go to https://www.bchydro.com/forms, fill it in': ['bchydro.com'],
+    'Use the site (tenders.gov.bc.ca)': ['tenders.gov.bc.ca'],
+    'Rename D-101.pdf to 2024-017_D-101.pdf and upload': [],
+    'Attach report.zip and clip.mov': [],
+    'but https://files.example.zip/a is a site': ['files.example.zip'],
+    'email dana@client.ca the link': [],
+  };
+  const got = await page.evaluate(async (texts) => {
+    const { hostsInText } = await import('./lib/agent.js');
+    return Object.fromEntries(texts.map((t) => [t, [...hostsInText(t)]]));
+  }, Object.keys(cases));
+  for (const [t, want] of Object.entries(cases)) eq(JSON.stringify(got[t]), JSON.stringify(want), t);
+});
+
 test('agent: fills a form with real clicks and typing, reads it back, Gemini checks it, asks before sending; result checked at the end', async () => {
   const ai = global.mockAI;
   ai.reset();

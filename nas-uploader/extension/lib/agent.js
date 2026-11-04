@@ -29,10 +29,21 @@ const hostOf = (url) => {
   }
 };
 
-/** Sites named in the task ("on portal.example.com", "https://x.y/z") count as allowed. */
+// "D-101.pdf" or "report.zip" in a task is a file, not a site (.zip and .mov are real domain endings too).
+const FILE_EXT = /\.(pdf|docx?|docm|xlsx?|xlsm|pptx?|txt|csv|rtf|zip|rar|7z|gz|jpe?g|png|gif|tiff?|bmp|heic|svg|dwg|dxf|rvt|ifc|msg|pst|eml|md|json|xml|html?|mov|mp4|mp3|wav|m4a|webm|avi|exe|msi|js|css)$/i;
+
+/**
+ * Sites named in the task ("on portal.example.com", "https://x.y/z") count as allowed. A site at the end of a
+ * sentence or a question counts; file names and the domain of an email address don't.
+ */
 export function hostsInText(text) {
   const out = new Set();
-  for (const m of String(text).matchAll(/\b(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,})(?=[/:\s,;)"']|$)/gi)) out.add(m[1].toLowerCase().replace(/^www\./, ''));
+  const re = /(?<![\w.@-])(https?:\/\/)?((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})(?=[/:\s,;)\]>"'?!]|\.(?:\s|$)|$)/gi;
+  for (const m of String(text).matchAll(re)) {
+    const host = m[2].toLowerCase().replace(/^www\./, '');
+    if (!m[1] && FILE_EXT.test(host)) continue;
+    out.add(host);
+  }
   return out;
 }
 

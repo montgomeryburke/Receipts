@@ -1,4 +1,4 @@
-Project Assistant: complete source for review (c9d4c8d 2026-11-04)
+Project Assistant: complete source for review (37c9767 2026-11-04)
 Files: extension/ (Chrome extension, Manifest V3; third-party libraries in extension/vendor/ are left out),
 server/setup-webdav.sh (Proxmox container setup), server/assistant-ocr-index.py (OCR / mail / NAS-only text job
 on the NAS) and server/setup-drive-copy.sh (daily Google Drive copy with rclone).
@@ -7399,7 +7399,7 @@ state.ready = true;
 })();
 
 
-===== FILE: extension/lib/agent.js (745 lines) =====
+===== FILE: extension/lib/agent.js (756 lines) =====
 // The browser agent: does a task in Chrome for the user with the mouse and keyboard (a general version of the
 // game-testing agent). The AI reads the page as a numbered list of elements (or a screenshot when the page is
 // visual), and acts through lib/browser.js. Files come from the NAS or the project folders on this computer.
@@ -7431,10 +7431,21 @@ const hostOf = (url) => {
   }
 };
 
-/** Sites named in the task ("on portal.example.com", "https://x.y/z") count as allowed. */
+// "D-101.pdf" or "report.zip" in a task is a file, not a site (.zip and .mov are real domain endings too).
+const FILE_EXT = /\.(pdf|docx?|docm|xlsx?|xlsm|pptx?|txt|csv|rtf|zip|rar|7z|gz|jpe?g|png|gif|tiff?|bmp|heic|svg|dwg|dxf|rvt|ifc|msg|pst|eml|md|json|xml|html?|mov|mp4|mp3|wav|m4a|webm|avi|exe|msi|js|css)$/i;
+
+/**
+ * Sites named in the task ("on portal.example.com", "https://x.y/z") count as allowed. A site at the end of a
+ * sentence or a question counts; file names and the domain of an email address don't.
+ */
 export function hostsInText(text) {
   const out = new Set();
-  for (const m of String(text).matchAll(/\b(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,})(?=[/:\s,;)"']|$)/gi)) out.add(m[1].toLowerCase().replace(/^www\./, ''));
+  const re = /(?<![\w.@-])(https?:\/\/)?((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})(?=[/:\s,;)\]>"'?!]|\.(?:\s|$)|$)/gi;
+  for (const m of String(text).matchAll(re)) {
+    const host = m[2].toLowerCase().replace(/^www\./, '');
+    if (!m[1] && FILE_EXT.test(host)) continue;
+    out.add(host);
+  }
   return out;
 }
 
