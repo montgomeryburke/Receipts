@@ -1,4 +1,4 @@
-Project Assistant: complete source for review (37c9767 2026-11-04)
+Project Assistant: complete source for review (8087e87 2026-11-04)
 Files: extension/ (Chrome extension, Manifest V3; third-party libraries in extension/vendor/ are left out),
 server/setup-webdav.sh (Proxmox container setup), server/assistant-ocr-index.py (OCR / mail / NAS-only text job
 on the NAS) and server/setup-drive-copy.sh (daily Google Drive copy with rclone).
