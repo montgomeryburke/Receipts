@@ -1,0 +1,49 @@
+body { margin: 0; }
+.m-top { position: sticky; top: 0; z-index: 10; background: var(--bg); padding: 10px 12px 6px; border-bottom: 1px solid var(--border); }
+.brand { font-size: 15px; margin: 0; }
+.wrap { padding: 10px 12px 16px; }
+.nowrap { flex-wrap: nowrap; }
+#sources .row button { flex: 1 1 0; }
+
+.meters { display: grid; gap: 6px; }
+.meter { display: grid; grid-template-columns: 62px 1fr 96px; align-items: center; gap: 8px; font-size: 12px; }
+.meter .lbl { font-weight: 600; }
+.meter .bar { position: relative; height: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.meter .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: linear-gradient(90deg, var(--ok) 0 65%, var(--warn) 65% 88%, var(--bad) 88%); transition: width 80ms linear; }
+.meter .peak { position: absolute; top: 0; bottom: 0; width: 2px; left: 0; background: var(--text); opacity: .5; }
+.meter .state { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meter.live .state { color: var(--ok); }
+.meter.quiet .state { color: var(--warn); }
+.meter.off .bar { opacity: .5; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
+.card.new { border-color: var(--accent); box-shadow: 0 0 0 2px var(--info-bg); animation: flash 1.2s ease-out 1; }
+@keyframes flash { from { background: var(--info-bg); } to { background: var(--surface); } }
+.card .say { font-size: 15px; line-height: 1.4; font-weight: 600; }
+.card .why { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.card .src { font-size: 12px; margin-top: 4px; }
+.card .src a { cursor: pointer; }
+.card .quote { color: var(--muted); font-style: italic; }
+.card .web { font-size: 12.5px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.card .meta { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.card .meta button { padding: 1px 6px; font-size: 12px; }
+.card.private { border-left: 3px solid var(--accent); }
+.card.pinned { border-color: var(--warn); }
+.thinking { color: var(--muted); font-size: 12px; }
+
+.transcript { max-height: 30vh; overflow-y: auto; font-size: 12.5px; line-height: 1.45; display: flex; flex-direction: column; gap: 2px; }
+.transcript .t { display: grid; grid-template-columns: 54px 44px 1fr; gap: 4px; }
+.transcript .t .ts { color: var(--muted); font-variant-numeric: tabular-nums; }
+.transcript .t .who { font-weight: 600; }
+.transcript .t.me .who { color: var(--accent); }
+.m-foot { position: sticky; bottom: 0; background: var(--bg); padding-top: 6px; }
+
+.rec-toggle { white-space: nowrap; }
+.rec-toggle[aria-pressed="true"] { border-color: var(--bad); background: var(--bad-bg); color: var(--bad); font-weight: 600; }
+
+/* Picture-in-picture (always on top) view */
+body.pip { font-size: 13px; }
+body.pip .pip-wrap { padding: 8px; display: flex; flex-direction: column; gap: 6px; height: 100vh; box-sizing: border-box; }
+body.pip .pip-meters { display: flex; gap: 6px; align-items: center; font-size: 11px; }
+body.pip .pip-meters .bar { flex: 1; height: 8px; }
+body.pip .pip-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
