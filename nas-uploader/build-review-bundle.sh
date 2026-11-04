@@ -6,7 +6,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 out="${1:-nas-uploader-review-bundle.txt}"
 {
-  echo "Project Assistant: complete source for review ($(git log -1 --format='%h %cd' --date=short 2>/dev/null || date +%F))"
+  # The commit the code comes from, and whether the code has changes not committed yet (so the header can't mislead).
+  rev="$(git log -1 --format='%h %cd' --date=short 2>/dev/null || date +%F)"
+  if [ -n "$(git status --porcelain -- extension server 2>/dev/null)" ]; then rev="$rev + uncommitted changes"; fi
+  echo "Project Assistant: complete source for review ($rev)"
   echo "Files: extension/ (Chrome extension, Manifest V3; third-party libraries in extension/vendor/ are left out),"
   echo "server/setup-webdav.sh (Proxmox container setup), server/assistant-ocr-index.py (OCR / mail / NAS-only text job"
   echo "on the NAS) and server/setup-drive-copy.sh (daily Google Drive copy with rclone)."
