@@ -58,6 +58,8 @@ export const EDITABLE = {
   crossCheck: [BOOL, 'With both keys: the other AI checks every draft, meeting prompt, answer and summary against the sources (about twice the AI cost)'],
   crossCheckRevise: [BOOL, 'When the check finds problems in an email draft, the first AI revises it once'],
   dualLookUp: [BOOL, 'With both keys: standards are looked up online by both AIs and compared'],
+  agentConfirm: [STR, "Browser agent: when to ask the user first — 'risky' (send, pay, delete, upload, other sites) or 'every' step", { enum: ['risky', 'every'] }],
+  agentMaxSteps: [INT, 'Browser agent: most steps (AI turns) per task', { min: 5, max: 150 }],
   dailyBudgetUsd: [INT, 'Stop all AI calls for the day once this many dollars are spent (0 = no limit)', { min: 0, max: 1000 }],
   meetingPrompts: [STR, "Meeting prompts: 'auto' = when a question or new topic comes up; 'manual' = only when the user clicks Ask now; 'off'", { enum: ['auto', 'manual', 'off'] }],
   meetingProvider: [STR, "Which AI writes meeting prompts ('' = same as provider)", { enum: ['', 'anthropic', 'gemini'] }],

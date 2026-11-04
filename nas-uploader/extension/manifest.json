@@ -38,7 +38,8 @@
     "offscreen",
     "scripting",
     "clipboardWrite",
-    "clipboardRead"
+    "clipboardRead",
+    "debugger"
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
   "content_scripts": [

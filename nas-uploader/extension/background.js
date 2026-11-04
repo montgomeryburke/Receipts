@@ -15,6 +15,7 @@ const OUTLOOK_URLS = [
 const APP_URL = chrome.runtime.getURL('app.html');
 const MEETING_URL = chrome.runtime.getURL('meeting.html');
 const RECORDER_URL = chrome.runtime.getURL('recorder.html');
+const AGENT_URL = chrome.runtime.getURL('agent.html');
 
 // ---------- engine (offscreen document) ----------
 
@@ -90,6 +91,18 @@ async function openWindow(url, width, height) {
 }
 const openMeeting = () => openWindow(MEETING_URL, 460, 780);
 const openRecorder = () => openWindow(RECORDER_URL, 420, 640);
+
+/** The agent window, set to work in the tab the user was looking at. */
+async function openAgent() {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true, windowType: 'normal' }).catch(() => []);
+  const existing = await findTab(AGENT_URL);
+  if (existing) {
+    if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
+    return existing;
+  }
+  const win = await chrome.windows.create({ url: `${AGENT_URL}${tab?.id ? `#tab=${tab.id}` : ''}`, type: 'popup', width: 500, height: 840 });
+  return { windowId: win.id, tabId: win.tabs?.[0]?.id };
+}
 
 // ---------- Outlook ----------
 
@@ -196,6 +209,10 @@ const handlers = {
     await openRecorder();
     return { ok: true };
   },
+  'agent.open': async () => {
+    await openAgent();
+    return { ok: true };
+  },
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -230,4 +247,5 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 globalThis.openApp = openApp;
 globalThis.openMeeting = openMeeting;
 globalThis.openRecorder = openRecorder;
+globalThis.openAgent = openAgent;
 globalThis.toEngine = toEngine;

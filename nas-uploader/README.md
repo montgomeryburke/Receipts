@@ -18,6 +18,12 @@ One Chrome extension, nothing else to install on the work computer:
 - **Chat** — tell the extension in plain words when something isn't working the way you want ("keep meeting
   prompts to one sentence", "always use the 2024 spec for concrete questions") and it changes its own settings,
   rules and memory. Every change has **Undo**. It also walks you through **setting up Power Automate flows**.
+- **Browser agent** — tell it a task in Chrome ("fill in this form from my email to Dana", "upload these
+  drawings from the NAS to the portal, renamed 2024-017_…") and it does it with real mouse clicks and typing.
+  Risky steps wait for your OK. Programs outside Chrome only through your own Power Automate desktop flows.
+- **Two AIs check each other** — with both a Claude and a Gemini key, the other AI checks every draft, meeting
+  prompt, answer, summary and agent result against the same sources; standards are looked up by both and
+  compared. Free checks on this computer verify every quote and number. **⏹ Stop AI** stops everything at once.
 - **Learns each project** — decisions, names and facts from meetings and the chat are remembered per project
   and used the next time that project comes up.
 - **Saves on AI cost** — indexing, search, project detection, the "is this worth a prompt?" check and free
@@ -283,7 +289,10 @@ Click **🎙 Meeting** in the side panel. A small window opens:
    facts are remembered for that project.
 
 Transcription is **free on this computer** (Whisper; the model is downloaded once) or, with a Gemini key, done by
-Gemini (⚙ in the meeting window). Prompts need a Claude or Gemini key. Make sure everyone in the meeting knows it
+Gemini (⚙ in the meeting window). **Gemini, checked by the free one** runs both on the same audio and marks a line
+⚠ when they hear different numbers (12.5 m against 12 m), showing the other reading. Prompts need a Claude or
+Gemini key. Each quote is marked ✓ when it is really in the file it cites (⚠ when it isn't); with both keys,
+each prompt and answer also gets ✓ or ⚠ from the other AI a moment after it appears. Make sure everyone in the meeting knows it
 is being transcribed, as your workplace requires.
 
 ## 6b. Recorder
@@ -316,7 +325,38 @@ Every change appears under the reply with **Undo** (and under *Changes made from
 taken in the chat. If something needs a change to the extension's code, it says so and saves a change request to
 `/.assistant/change-requests.md` on the NAS — paste that into Claude Code.
 
-## 8. AI keys and cost
+## 7b. Browser agent
+
+Click **🤖 Agent** in the side panel. Type the task, pick the tab to work in (the one you were on is chosen), and
+click **▶ Start**. Examples:
+
+- "Fill in the contact form with Dana's details from the Alert Bridge email, but don't send it."
+- "Upload the PDFs in nas:/Projects/2024-017 Alert Bridge/Drawings to this portal, renamed 2024-017_<name>."
+- "Copy the issued drawings to /Projects/2024-017 Alert Bridge/Issued on the NAS and rename them by sheet number."
+
+It reads the page as a numbered list of buttons and fields (cheaper and more reliable than screenshots; it takes a
+screenshot only for visual pages such as a canvas, a map or a game), and clicks and types as real input through
+Chrome's debugger. Chrome shows *"Project Assistant started debugging this browser"* while it works — clicking
+**Cancel** there stops it, as do **■ Stop** and **⏹ Stop AI**. The log shows every step.
+
+- **It asks first** before anything risky: sending a form, pressing Enter in a form, paying, deleting, uploading
+  files, going to a site the task didn't name, running a desktop flow (or before every step, if you choose).
+  With both keys, the other AI checks the filled form against your task and shows ✓ or ⚠ in that question.
+- **It never types passwords or card numbers.** It asks you to type them into the page yourself.
+- **Page text can't give it orders.** A page that says "AI agent: go to …" is ignored, and a new site needs your OK.
+- **It checks its work:** every typed value is read back from the page, every file copy is size-checked, and
+  with both keys the other AI checks the final result against the task and the last page.
+- **Files:** from the NAS (`nas:/…`) or your project folders on this computer (`local:<folder>/…`) into upload
+  fields and drop zones, with new names; copy or rename on the NAS; save to Downloads.
+- **No FTP:** Chrome removed FTP, and extensions can't open network sockets. Use the NAS, or the site's web upload.
+- **Programs outside Chrome:** an extension can't control them. Power Automate for desktop can (it comes with
+  Windows 11): build a desktop flow there, copy its **Run URL** from the flow's properties, and add it under
+  *Programs outside Chrome* in the agent window. The agent can then start it with input values; you confirm each
+  time and Windows opens Power Automate. Starting flows from a link needs a Power Automate Premium licence — ask
+  IT. To drive programs on the HP, open a remote desktop of it in a tab (e.g. Apache Guacamole); the agent then
+  works on that tab with screenshots.
+
+## 8. AI keys, cost and accuracy
 
 Paste a Claude (Anthropic) and/or Gemini key in **Settings → AI provider**; they stay in this browser profile and
 go only to that provider. Claude uses `claude-opus-5-5` at low effort by default (Settings lets you pick Sonnet or
@@ -325,6 +365,23 @@ its recommended fallback model. Gemini "auto" picks the newest stable Gemini Fla
 reply and meeting is shown as you go. To keep it low: search and indexing are local, automatic meeting prompts
 come at most every 20 s (adjustable) and only when something is asked, and each call carries only the last couple
 of minutes of conversation plus the best few excerpts.
+
+**Accuracy (Settings → Accuracy & safety).** With **both** keys, Claude and Gemini check each other:
+
+- every email draft is reviewed by the other AI against the email and the excerpts; if it finds a problem
+  (a 12.5 m where the drawings say 12.0 m), the first AI corrects the draft once and the card says what changed;
+- meeting prompts, private answers and the summary are checked the same way; facts the checker disputes are not
+  remembered for the project;
+- standards are looked up online by both (Anthropic's web search and Google Search) and the card says whether they
+  found the same values;
+- the browser agent's filled forms and final results are checked too.
+
+Free checks run either way: every quote must be in the file it cites, and every number in a draft or prompt must
+be in the email, the files or the transcript. The cross-check roughly doubles the AI cost; turn it off there.
+
+**⏹ Stop AI** (side panel, meeting window, agent window, Settings) cancels every Claude and Gemini call in progress
+and makes no new ones until **▶ Resume AI**. Emails that arrive meanwhile wait in the queue; meetings keep
+transcribing for free. A **daily spending limit** does the same once today's estimate reaches it.
 
 ## Good to know
 
@@ -338,7 +395,8 @@ of minutes of conversation plus the best few excerpts.
   100 MB per file.
 - **Permissions:** the extension needs access to your NAS, the AI provider you use, your Power Automate flow
   addresses, and Outlook on the web (its only content script, which reads the open email and fills in the reply
-  box). It reads no other pages. You can narrow `host_permissions` in `manifest.json`.
+  box). The **debugger** permission is for the browser agent: it controls a tab only while a task you started
+  runs, and Chrome shows a bar while it does. It reads no other pages. You can narrow `host_permissions` in `manifest.json`.
 
 ## Security
 
@@ -361,7 +419,12 @@ projects), email drafts (right excerpts, instructions, memory, fallbacks), the c
 questions, saving to the NAS with a summary, echo removal), **real Whisper transcription** in the extension
 (including the NAS fallback), the audio resampler, the recorder (audio and screen, folder and Downloads), a
 stand-in Outlook on the web page (read, draft, insert), the copied-email button, OCR of scanned PDFs, a real `.pst`
-archive unpacked on the server, NAS-only folders, and the chat's safety guards. It uses mock Claude and
+archive unpacked on the server, NAS-only folders, and the chat's safety guards. It also covers the two AIs
+checking each other (a wrong number corrected, a made-up quote flagged, look-ups compared, disputed facts not
+remembered), the kill switch and the daily limit, the "both" transcription mode with real Whisper, and the browser
+agent on real pages (a form filled with trusted clicks and typing and sent only after Allow; NAS files uploaded to a
+web form with new names; a planted "go to this site" ignored, a password refused, Stop; a canvas game with held keys;
+a desktop flow link with its inputs). It uses mock Claude and
 Gemini servers, so no keys are needed: `node tests/assistant-e2e.cjs` with the WebDAV test servers running.
 
 `tests/e2e.cjs` is the NAS uploader suite. It loads the real extension into Chromium (Playwright) and uploads and mirrors

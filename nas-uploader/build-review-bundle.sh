@@ -15,6 +15,7 @@ out="${1:-nas-uploader-review-bundle.txt}"
            extension/app.html extension/app.css extension/app.js extension/sidepanel.html extension/sidepanel.css extension/sidepanel.js \
            extension/options.html extension/options.js extension/meeting.html extension/meeting.css extension/meeting.js \
            extension/recorder.html extension/recorder.css extension/recorder.js \
+           extension/agent.html extension/agent.css extension/agent.js \
            extension/content/*.js extension/lib/*.js server/setup-webdav.sh server/assistant-ocr-index.py server/setup-drive-copy.sh; do
     printf '\n\n===== FILE: %s (%s lines) =====\n' "$f" "$(wc -l < "$f")"
     cat "$f"

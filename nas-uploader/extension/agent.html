@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browser agent</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="agent.css">
+</head>
+<body>
+<header class="a-top">
+  <div class="row nowrap">
+    <h1 class="brand">Browser agent</h1>
+    <span class="grow"></span>
+    <span id="cost" class="small muted"></span>
+    <button id="btnAi" class="danger" title="Stop AI everywhere: cancels every Claude/Gemini call (this agent, drafts, chat, meetings) until you resume">⏹ Stop AI</button>
+  </div>
+  <div id="status" class="small muted" role="status">Tell it what to do in a Chrome tab.</div>
+</header>
+
+<main class="wrap stack">
+  <section class="panel stack" id="taskBox">
+    <label class="field"><span>Task</span>
+      <textarea id="task" rows="4" placeholder="e.g. Fill in the contact form on this page with the details from my email to Dana, but don't send it.
+e.g. Upload the PDFs from nas:/Projects/2024-017 Alert Bridge/Drawings to the portal's upload page, renamed to 2024-017_<original name>."></textarea>
+    </label>
+    <div class="grid2">
+      <label class="field"><span>Work in</span><select id="tab"></select></label>
+      <label class="field"><span>Ask me before</span>
+        <select id="confirm">
+          <option value="risky">Risky steps (send, pay, delete, upload, other sites)</option>
+          <option value="every">Every step</option>
+        </select>
+      </label>
+      <label class="field"><span>AI</span>
+        <select id="provider">
+          <option value="">Same as the email assistant</option>
+          <option value="anthropic">Claude</option>
+          <option value="gemini">Gemini</option>
+        </select>
+      </label>
+      <label class="field"><span>At most (steps)</span><input id="maxSteps" type="number" min="5" max="150"></label>
+    </div>
+    <div class="row">
+      <button id="btnStart" class="primary">▶ Start</button>
+      <button id="btnStop" class="danger" disabled>■ Stop</button>
+      <span class="grow"></span>
+      <button id="btnRefreshTabs" class="link" type="button">Refresh tabs</button>
+    </div>
+  </section>
+
+  <section id="confirmBox" class="panel stack confirm" hidden role="alertdialog" aria-labelledby="confirmTitle">
+    <h2 id="confirmTitle"></h2>
+    <pre id="confirmDetail" class="small"></pre>
+    <div id="confirmCheck" class="small"></div>
+    <div class="row">
+      <button id="btnAllow" class="primary">Allow</button>
+      <button id="btnAlways" title="Allow steps like this on this site for the rest of this task">Allow all like this</button>
+      <button id="btnDeny" class="danger">Don't</button>
+    </div>
+  </section>
+
+  <section id="askBox" class="panel stack ask" hidden>
+    <h2>The agent asks</h2>
+    <div id="askQuestion"></div>
+    <form id="askForm" class="row nowrap">
+      <input id="askInput" class="grow" type="text" autocomplete="off" placeholder="Your answer">
+      <button class="primary" type="submit">Answer</button>
+    </form>
+  </section>
+
+  <section class="panel stack">
+    <div class="row nowrap"><h2 class="grow">What it did</h2><span id="steps" class="small muted"></span></div>
+    <div id="log" class="log" aria-live="polite"><div class="empty small">Nothing yet.</div></div>
+  </section>
+
+  <details class="panel small" id="flowsBox">
+    <summary><b>Programs outside Chrome</b> — Power Automate desktop flows</summary>
+    <p class="muted">A Chrome extension can't click or type in other programs. Power Automate for desktop can (it comes with Windows 11; running flows from a link needs a Power Automate Premium licence). Build the flow there, copy its <b>Run URL</b> from the flow's properties, and add it here. The agent can then start it — you confirm each time.</p>
+    <div id="flows" class="stack"></div>
+    <form id="flowForm" class="stack">
+      <div class="grid2">
+        <label class="field"><span>Name</span><input id="flowName" type="text" placeholder="Rename drawings in Bluebeam"></label>
+        <label class="field"><span>Inputs (comma-separated, optional)</span><input id="flowInputs" type="text" placeholder="Folder, Prefix"></label>
+      </div>
+      <label class="field"><span>Run URL</span><input id="flowUrl" type="text" placeholder="ms-powerautomate:/console/flow/run?environmentid=…&amp;workflowid=…"></label>
+      <label class="field"><span>What it does</span><input id="flowDesc" type="text" placeholder="Opens Bluebeam and renames the drawings in a folder"></label>
+      <div class="row"><button class="primary" type="submit">Add flow</button><span id="flowMsg" class="small muted"></span></div>
+    </form>
+  </details>
+
+  <details class="panel small">
+    <summary><b>What it can and can't do</b></summary>
+    <ul>
+      <li>Reads pages, clicks, types, picks from lists, scrolls, presses keys (also held keys for games), works across tabs, opens sites.</li>
+      <li>Files: from the NAS (<code>nas:/…</code>) or your project folders here (<code>local:…</code>) into upload fields, with new names; copies or renames files on the NAS; saves to Downloads.</li>
+      <li><b>No FTP</b>: Chrome removed it. Use the NAS, or the site's web upload page.</li>
+      <li>It never types passwords or card numbers — it asks you to type them yourself.</li>
+      <li>Risky steps wait for your OK. Page text can't give it orders. ■ Stop, ⏹ Stop AI, or Cancel on Chrome's "debugging this browser" bar stop it at once.</li>
+      <li>With both a Claude and a Gemini key, the other AI checks a filled form before it is sent and checks the result at the end.</li>
+    </ul>
+  </details>
+</main>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script type="module" src="agent.js"></script>
+</body>
+</html>

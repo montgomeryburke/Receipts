@@ -792,6 +792,7 @@ $('aiStop').addEventListener('click', async () => {
   refreshSoon();
 });
 $('openRecorder').addEventListener('click', () => bg('recorder.open'));
+$('openAgent').addEventListener('click', () => bg('agent.open'));
 
 $('reconnectBtn').addEventListener('click', async () => {
   const bridge = await getRootHandle('bridge');

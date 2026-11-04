@@ -162,6 +162,13 @@ export const DEFAULT_SETTINGS = {
   aiPaused: false,                    // the kill switch: no AI calls at all until resumed
   dailyBudgetUsd: 0,                  // stop AI calls for the day once this much is spent (0 = no limit)
 
+  // Browser agent
+  agentProvider: '',                  // '' = same as the email assistant
+  agentConfirm: 'risky',              // 'risky' = ask before send / pay / delete / upload / other sites; 'every' = every step
+  agentMaxSteps: 40,                  // model turns per task (cost cap)
+  agentEffort: 'medium',
+  desktopFlows: [],                   // [{name, runUrl, inputs, description}] Power Automate desktop flows the agent may start
+
   // Meetings
   meetingStt: 'whisper',              // 'whisper' (free, on this computer) | 'gemini' (needs a Gemini key) | 'both' (Gemini, checked by Whisper)
   meetingPrompts: 'auto',             // 'auto' (when a question or a new topic comes up) | 'manual' (Ask now only) | 'off'

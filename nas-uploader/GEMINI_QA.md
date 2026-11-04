@@ -51,6 +51,16 @@ What it does:
    undo log; it helps set up Power Automate flows and records code change requests on the NAS.
 8. server/setup-webdav.sh (run as root in the Proxmox LXC): Apache WebDAV, permissions, DuckDNS + Let's Encrypt,
    fail2ban, unattended upgrades, the OCR systemd timer and a copy of the speech model.
+9. Accuracy (lib/crosscheck.js): with both keys the other AI reviews drafts (lib/assistant.js checkDraft, one
+   revision), meeting prompts/answers/summaries (lib/meeting-ai.js checkResult, summarize) and the agent's
+   results; standards looked up by both (dualLookUp); free local checks of quotes (quoteFound) and numbers
+   (numbersIn, unsupportedNumbers); "both" transcription (lib/stt.js) compares numbers heard by Gemini and Whisper.
+10. Kill switch and spending limit (lib/llm.js aiGate, track, stopAllAI/resumeAI, recordSpend): Stop AI must cancel
+   every Claude/Gemini call in every page (side panel, offscreen engine, meeting, agent) and refuse new ones.
+11. Browser agent (agent.html/js, lib/agent.js, lib/browser.js): drives a tab through chrome.debugger (CDP):
+   numbered DOM snapshot, trusted mouse/keyboard input, screenshots, file inputs filled from the NAS or local
+   folders with new names, NAS copy/rename, Power Automate desktop flow run links. Risky steps (submit, Enter in a
+   form, pay, delete, upload, another site, desktop flow) wait for the user's Allow; passwords are never typed.
 
 Look especially for:
 A. Security and privacy. Prompt injection from emails, meeting speech or file contents that could make the chat
@@ -74,6 +84,12 @@ G. The bash/Python server scripts: idempotency, running as root vs the WebDAV us
    handling, anything unsafe (including parsing untrusted .pst/.msg/.docx files from the user's mailbox).
 H. Recorder: losing data on long recordings, files left half-written, recording continuing after the user thinks
    it stopped, permission prompts, formats that won't play on Windows.
+I. Browser agent: any way a web page (its text, its DOM, a dialog, a redirect) can make the agent act without the
+   user's Allow: submit or send something, upload a file, type into a password field, go to another site, start a
+   desktop flow, or read NAS/local files into a page. Element numbers going stale between snapshot and click.
+   Detaching the debugger on every exit path. Large file uploads through Runtime.evaluate.
+J. Cross-check and kill switch: a call that escapes the gate or keeps running after Stop AI; a review result that
+   is trusted when it shouldn't be (or blocks a correct draft); cost doubling where it isn't worth it.
 
 For each finding give: severity (critical/high/medium/low), file:line, what goes wrong, a concrete reproduction,
 and a suggested fix. No style preferences. Say explicitly when you are unsure.
