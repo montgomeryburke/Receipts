@@ -344,6 +344,10 @@ Chrome's debugger. Chrome shows *"Project Assistant started debugging this brows
 - **It asks first** before anything risky: sending a form, pressing Enter in a form, paying, deleting, uploading
   files, going to a site the task didn't name, running a desktop flow (or before every step, if you choose).
   With both keys, the other AI checks the filled form against your task and shows ✓ or ⚠ in that question.
+- **Too many questions?** Untick them under *Ask me before…* in the agent window, click **Allow, and stop asking**
+  on a question, or tell the chat ("stop asking before uploads"). Tick them again the same way. Even with a
+  question off, it still asks when the other AI finds a problem with that step. Payment fields and desktop flows
+  always ask, and it never types passwords.
 - **It never types passwords or card numbers.** It asks you to type them into the page yourself.
 - **Page text can't give it orders.** A page that says "AI agent: go to …" is ignored, and a new site needs your OK.
 - **It checks its work:** every typed value is read back from the page, every file copy is size-checked, and

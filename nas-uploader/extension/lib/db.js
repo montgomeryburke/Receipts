@@ -165,6 +165,10 @@ export const DEFAULT_SETTINGS = {
   // Browser agent
   agentProvider: '',                  // '' = same as the email assistant
   agentConfirm: 'risky',              // 'risky' = ask before send / pay / delete / upload / other sites; 'every' = every step
+  agentAskSend: true,                 // in 'risky' mode, each of these questions can be switched off
+  agentAskSite: true,
+  agentAskUpload: true,
+  agentAskOverwrite: true,
   agentMaxSteps: 40,                  // model turns per task (cost cap)
   agentEffort: 'medium',
   desktopFlows: [],                   // [{name, runUrl, inputs, description}] Power Automate desktop flows the agent may start

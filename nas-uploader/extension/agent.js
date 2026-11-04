@@ -115,6 +115,8 @@ function confirmStep(req) {
       : c.verdict === 'ok' ? `<div class="chk ok" data-check="ok">✓ ${AI_NAME[c.by]} checked the page against your task: looks right.</div>`
         : `<div class="chk warn" data-check="issues">⚠ ${AI_NAME[c.by]} checked the page against your task:<ul>${[...(c.issues || []).map((i) => `<li><b>“${esc(i.claim)}”</b> — ${esc(i.problem)}${i.fix && i.fix !== 'remove' ? ` → ${esc(i.fix)}` : ''}</li>`), ...(c.missed || []).map((m) => `<li>Missing: ${esc(m)}</li>`)].join('')}</ul></div>`;
     $('btnAlways').hidden = !!req.launchUrl || req.kind === 'overwrite';
+    $('btnNever').hidden = !req.setting;
+    $('btnNever').title = req.setting ? `Allow, and don't ask before ${req.settingLabel} again (switch it back on under Ask me before)` : '';
     $('confirmBox').hidden = false;
     $('confirmBox').scrollIntoView({ block: 'nearest' });
     $('btnAllow').focus();
@@ -137,6 +139,12 @@ $('btnAllow').addEventListener('click', () => {
   state.confirmResolve?.('allow');
 });
 $('btnAlways').addEventListener('click', () => state.confirmResolve?.('always'));
+$('btnNever').addEventListener('click', () => {
+  const setting = state.pendingConfirm?.setting;
+  state.confirmResolve?.('never');
+  const box = setting && document.querySelector(`[data-ask="${setting}"]`);
+  if (box) box.checked = false;
+});
 $('btnDeny').addEventListener('click', () => state.confirmResolve?.('deny'));
 
 function askUser(question) {
@@ -174,7 +182,7 @@ async function start() {
     toast('AI is stopped. Click ▶ Resume AI first.');
     return;
   }
-  await saveSettings({ agentConfirm: $('confirm').value, agentProvider: $('provider').value, agentMaxSteps: Number($('maxSteps').value) || 40 });
+  await saveSettings({ agentConfirm: $('confirm').value, agentProvider: $('provider').value, agentMaxSteps: Number($('maxSteps').value) || 40, ...askValues() });
   state.settings = await getSettings();
   state.entries = [];
   const tabId = Number($('tab').value) || null;
@@ -221,6 +229,30 @@ function stop() {
 $('btnStart').addEventListener('click', start);
 $('btnStop').addEventListener('click', stop);
 $('btnRefreshTabs').addEventListener('click', () => loadTabs());
+
+// ---------------------------------------------------------------- which questions it asks
+
+function askValues() {
+  return Object.fromEntries([...document.querySelectorAll('[data-ask]')].map((b) => [b.dataset.ask, b.checked]));
+}
+
+function renderAsks() {
+  for (const b of document.querySelectorAll('[data-ask]')) b.checked = state.settings[b.dataset.ask] !== false;
+  $('askBoxes').hidden = $('confirm').value === 'every';
+}
+
+$('confirm').addEventListener('change', () => {
+  $('askBoxes').hidden = $('confirm').value === 'every';
+  saveSettings({ agentConfirm: $('confirm').value });
+});
+$('askBoxes').addEventListener('change', async (e) => {
+  const b = e.target.closest('[data-ask]');
+  if (!b) return;
+  state.settings = await saveSettings({ [b.dataset.ask]: b.checked });
+  // A task already running picks it up for its next step.
+  if (state.agent) state.agent.settings = { ...state.agent.settings, [b.dataset.ask]: b.checked };
+  toast(b.checked ? 'It will ask again.' : 'It won’t ask that any more.');
+});
 
 // ---------------------------------------------------------------- the kill switch
 
@@ -306,4 +338,5 @@ const fromHash = Number(new URLSearchParams(location.hash.slice(1)).get('tab')) 
 await loadTabs(fromHash);
 renderAi();
 renderFlows();
+renderAsks();
 state.ready = true;

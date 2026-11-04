@@ -9,7 +9,7 @@
 // checks a form before it is submitted and checks the result at the end.
 
 import { runChat, hasKey, pickProvider, costOf, LLMError } from './llm.js';
-import { getSettings } from './db.js';
+import { getSettings, saveSettings } from './db.js';
 import { TabControl } from './browser.js';
 import { nasClient, ensureDir } from './nas.js';
 import { projectFolders } from './folders.js';
@@ -20,6 +20,16 @@ import { CONFIG } from './config-store.js';
 const RISKY_WORDS = /\b(submit|send|pay|payment|purchase|buy|order|checkout|check out|confirm|delete|remove|erase|discard|sign|signature|publish|post|transfer|approve|accept|book|apply|unsubscribe|close account|cancel (my |the )?(account|subscription|order)|upload|share|invite|transmit|file it)\b/i;
 const READ_ONLY = new Set(['read_page', 'screenshot', 'list_tabs', 'nas_list', 'local_folders', 'local_list', 'desktop_flows', 'wait', 'ask_user']);
 const MAX_PUT_BYTES = 25 * 1024 * 1024;
+
+// The questions the user can switch off (Settings in the agent window, "Allow, and stop asking" on a question,
+// or the chat). Payment fields and desktop flows always ask: the second needs the click to open Power Automate.
+export const ASK_SETTINGS = {
+  agentAskSend: { kinds: ['submit', 'click', 'dialog'], label: 'sending a form, or clicking Send / Submit / Delete / Pay-type buttons' },
+  agentAskSite: { kinds: ['site'], label: 'going to a site your task didn’t name' },
+  agentAskUpload: { kinds: ['upload'], label: 'putting files into an upload on a web page' },
+  agentAskOverwrite: { kinds: ['overwrite'], label: 'replacing a file on the NAS' },
+};
+const settingFor = (kind) => Object.keys(ASK_SETTINGS).find((k) => ASK_SETTINGS[k].kinds.includes(kind)) || null;
 
 const hostOf = (url) => {
   try {
@@ -161,13 +171,26 @@ export class Agent extends EventTarget {
     const mode = this.settings.agentConfirm || 'risky';
     const key = `${kind}:${host}`;
     if (this.always.has(key) && !extra.launchUrl) return true;
+    const setting = mode === 'every' ? null : settingFor(kind);
+    // A question the user switched off is skipped — unless the second AI just found a problem with this step.
+    if (setting && this.settings[setting] === false) {
+      if (extra.check?.verdict !== 'issues') {
+        this.note({ type: 'info', text: `${title} — done without asking (you switched this question off).` });
+        return true;
+      }
+      this.note({ type: 'info', text: 'You switched this question off, but the second check found a problem, so asking anyway.' });
+    }
     this.note({ type: 'info', text: `Waiting for you: ${title}` });
     const answer = await Promise.race([
-      this.ui.confirm({ kind, title, detail, mode, ...extra }),
+      this.ui.confirm({ kind, title, detail, mode, setting, settingLabel: setting ? ASK_SETTINGS[setting].label : '', ...extra }),
       new Promise((_, reject) => this.signal.addEventListener('abort', () => reject(new LLMError('stopped', 'Stopped.')), { once: true })),
     ]);
     if (answer === 'always') this.always.add(key);
-    const ok = answer === 'allow' || answer === 'always';
+    if (answer === 'never' && setting) {
+      this.settings = await saveSettings({ [setting]: false });
+      this.note({ type: 'info', text: `OK — no more questions before ${ASK_SETTINGS[setting].label}. Switch it back on under “Ask me before”.` });
+    }
+    const ok = answer === 'allow' || answer === 'always' || answer === 'never';
     this.note({ type: 'info', text: ok ? 'You allowed it.' : 'You said no.' });
     return ok;
   }

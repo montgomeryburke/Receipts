@@ -28,7 +28,7 @@ e.g. Upload the PDFs from nas:/Projects/2024-017 Alert Bridge/Drawings to the po
       <label class="field"><span>Work in</span><select id="tab"></select></label>
       <label class="field"><span>Ask me before</span>
         <select id="confirm">
-          <option value="risky">Risky steps (send, pay, delete, upload, other sites)</option>
+          <option value="risky">Risky steps (choose which below)</option>
           <option value="every">Every step</option>
         </select>
       </label>
@@ -41,6 +41,14 @@ e.g. Upload the PDFs from nas:/Projects/2024-017 Alert Bridge/Drawings to the po
       </label>
       <label class="field"><span>At most (steps)</span><input id="maxSteps" type="number" min="5" max="150"></label>
     </div>
+    <fieldset id="askBoxes" class="asks small">
+      <legend>Ask me before…</legend>
+      <label class="check"><input type="checkbox" data-ask="agentAskSend"> sending a form, or Send / Submit / Delete / Pay-type buttons</label>
+      <label class="check"><input type="checkbox" data-ask="agentAskSite"> going to a site my task didn’t name <span class="muted">(off: a page could steer it elsewhere)</span></label>
+      <label class="check"><input type="checkbox" data-ask="agentAskUpload"> putting files into an upload</label>
+      <label class="check"><input type="checkbox" data-ask="agentAskOverwrite"> replacing a file on the NAS</label>
+      <p class="muted">Always asked: payment fields and desktop flows. With a question off, it still asks when the second AI finds a problem with that step. It never types passwords.</p>
+    </fieldset>
     <div class="row">
       <button id="btnStart" class="primary">▶ Start</button>
       <button id="btnStop" class="danger" disabled>■ Stop</button>
@@ -56,6 +64,7 @@ e.g. Upload the PDFs from nas:/Projects/2024-017 Alert Bridge/Drawings to the po
     <div class="row">
       <button id="btnAllow" class="primary">Allow</button>
       <button id="btnAlways" title="Allow steps like this on this site for the rest of this task">Allow all like this</button>
+      <button id="btnNever" title="Allow, and don't ask this kind of question again (switch it back on under Ask me before)">Allow, and stop asking</button>
       <button id="btnDeny" class="danger">Don't</button>
     </div>
   </section>

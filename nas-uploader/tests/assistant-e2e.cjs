@@ -1894,6 +1894,79 @@ test('agent: puts NAS files into a web upload with new names (no FTP), copies an
   eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
 });
 
+test('agent: its questions can be switched off ("Allow, and stop asking", the boxes, the chat); a problem found by the second AI still asks', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const site = await startAgentSite();
+  const b = await launch();
+  const formPage = await b.ctx.newPage();
+  await formPage.goto(site.url('/form.html'));
+  const w = await agentWindow(b, '/form.html');
+  await setSettings(w, keys({ provider: 'anthropic', crossCheck: true }));
+  // "Ask before sending" switched off in the agent window.
+  await w.uncheck('[data-ask="agentAskSend"]');
+  await waitFor(async () => (await w.evaluate(async () => (await (await import('./lib/db.js')).getSettings()).agentAskSend)) === false, { what: 'the box to be saved' });
+  const other = `http://localhost:${site.port}/form.html`;
+  ai.anthropic = (body) => {
+    const t = turnOf(body);
+    if (t === 0) return { stop_reason: 'tool_use', content: [use('read_page', {})] };
+    const snap = lastPage(body);
+    // A typo the second AI catches: the send question comes back although it was switched off.
+    if (t === 1) return { stop_reason: 'tool_use', content: [use('type_text', { element: el(snap, /^Full name/), text: 'Dana Leee' }), use('click', { element: el(snap, /^Submit$/) })] };
+    if (t === 2) {
+      assert(toolResults(body).at(-1).data.declined, 'the user said no to the flagged send');
+      return { stop_reason: 'tool_use', content: [use('navigate', { url: other })] };
+    }
+    if (t === 3) return { stop_reason: 'tool_use', content: [use('read_page', {})] };
+    if (t === 4) return { stop_reason: 'tool_use', content: [use('type_text', { element: el(snap, /^Full name/), text: 'Dana Lee' }), use('click', { element: el(snap, /^Submit$/) })] };
+    if (t === 5) return { stop_reason: 'tool_use', content: [use('read_page', {})] };
+    return { content: [text('Sent the form on the other server with the name Dana Lee.')] };
+  };
+  ai.gemini = (body) => {
+    const u = geminiUser(body);
+    if (/kind="a browser step about to happen/.test(u)) {
+      return geminiReply({ text: JSON.stringify(/Dana Leee/.test(u)
+        ? { verdict: 'issues', issues: [{ claim: 'Full name: Dana Leee', problem: 'The task says Dana Lee.', evidence: 'name Dana Lee', fix: 'Dana Lee' }], missed: [] }
+        : { verdict: 'ok', issues: [], missed: [] }) });
+    }
+    return geminiReply({ text: JSON.stringify({ verdict: 'ok', issues: [], missed: [] }) });
+  };
+  await w.fill('#task', 'Fill in the contact form with the name Dana Lee and send it. If this copy of the form gives trouble, use the copy on the other server.');
+  await w.click('#btnStart');
+  // 1. Sending was switched off, but Gemini found the typo: it asks anyway, showing why.
+  await w.waitForSelector('#confirmBox:not([hidden])', { timeout: 30000 });
+  assert(/Submit/.test(await w.textContent('#confirmTitle')) && (await w.$('#confirmCheck [data-check="issues"]')), 'asked because of the problem found');
+  await w.click('#btnDeny');
+  // 2. A new site: asked; "Allow, and stop asking" switches that question off.
+  await w.waitForFunction(() => !document.getElementById('confirmBox').hidden && /Go to localhost/.test(document.getElementById('confirmTitle').textContent), null, { timeout: 30000 });
+  assert(await w.isVisible('#btnNever'), '"Allow, and stop asking" offered');
+  await w.click('#btnNever');
+  // 3. The corrected send goes through without a question (switched off, and Gemini found nothing).
+  await w.waitForFunction(() => window.agentWindow.result, null, { timeout: 30000 });
+  const result = await w.evaluate(() => window.agentWindow.result);
+  assert(!result.error, 'finished: ' + result.error);
+  const sent = site.posts.filter((p) => p.path === '/submit');
+  eq(sent.length, 1, 'sent once');
+  eq(new URLSearchParams(sent[0].body).get('name'), 'Dana Lee', 'the corrected name');
+  assert(site.hits.some((h) => h.path === '/submit' && /^localhost:/.test(h.host)), 'sent from the other server');
+  const s = await w.evaluate(async () => (await import('./lib/db.js')).getSettings());
+  eq(s.agentAskSite, false, '"stop asking" saved for new sites');
+  eq(s.agentAskSend, false, 'sending still off');
+  eq(s.agentAskUpload, true, 'the others untouched');
+  eq(await w.isChecked('[data-ask="agentAskSite"]'), false, 'its box unticked too');
+  assert(/done without asking/.test(await w.textContent('#log')), 'the log says what it did without asking');
+  // Switched back on from the agent window, and from the chat's settings tool.
+  await w.check('[data-ask="agentAskSite"]');
+  await waitFor(async () => (await w.evaluate(async () => (await (await import('./lib/db.js')).getSettings()).agentAskSite)) === true, { what: 'the box to switch it back on' });
+  const chatEdit = await w.evaluate(async () => {
+    const { EDITABLE } = await import('./lib/chat.js');
+    return ['agentAskSend', 'agentAskSite', 'agentAskUpload', 'agentAskOverwrite'].every((k) => k in EDITABLE);
+  });
+  assert(chatEdit, 'the chat can switch the questions on and off');
+  await site.close();
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
 test('agent safety: page text can’t send it to another site, passwords are never typed, Stop ends it at once', async () => {
   const ai = global.mockAI;
   ai.reset();
