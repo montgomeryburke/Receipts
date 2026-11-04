@@ -1,0 +1,22 @@
+.layout { display: grid; grid-template-columns: 200px 1fr; gap: 20px; max-width: 1080px; margin: 0 auto; padding: 20px 16px 80px; }
+.side { position: sticky; top: 16px; align-self: start; display: flex; flex-direction: column; gap: 4px; }
+.side h1 { font-size: 17px; margin-bottom: 8px; }
+.side a { color: var(--text); text-decoration: none; padding: 4px 8px; border-radius: 6px; }
+.side a:hover { background: var(--surface-2); }
+.content { min-width: 0; }
+.content > section { scroll-margin-top: 16px; }
+.content h2 { font-size: 16px; }
+.content h3 { font-size: 13px; color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.folder-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.action-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; background: var(--surface-2); }
+.rule { display: flex; gap: 8px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--border); padding: 4px 0; }
+.rule .grow { overflow: hidden; text-overflow: ellipsis; }
+code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 0 4px; border-radius: 4px; }
+@media (max-width: 760px) {
+  .layout { grid-template-columns: 1fr; }
+  .side { position: static; flex-direction: row; flex-wrap: wrap; }
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  .folder-row { grid-template-columns: 1fr; }
+}

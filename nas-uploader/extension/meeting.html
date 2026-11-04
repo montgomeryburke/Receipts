@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting assistant</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="meeting.css">
+</head>
+<body>
+<header class="m-top">
+  <div class="row nowrap">
+    <h1 class="brand">Meeting assistant</h1>
+    <span class="grow"></span>
+    <span id="clock" class="pill" hidden></span>
+    <button id="btnAi" class="danger" aria-pressed="false" title="Stop AI: cancel every Claude/Gemini call now and make no new ones until you resume. Listening, the free transcription and saving carry on.">⏹ Stop AI</button>
+    <button id="btnSettings" class="icon" title="Meeting settings" aria-label="Meeting settings">⚙</button>
+  </div>
+  <div id="status" class="small muted" role="status">Not listening. Pick where Teams is running.</div>
+</header>
+
+<main class="wrap stack">
+  <section class="panel stack" id="sources">
+    <div class="row">
+      <button id="btnApp" class="primary" title="Teams desktop app on Windows: share your screen's sound with this window">🖥 Teams app</button>
+      <button id="btnTab" class="primary" title="Teams in a Chrome tab: share that tab's sound with this window">🌐 Teams in Chrome</button>
+    </div>
+    <div class="row nowrap">
+      <label class="check small grow"><input type="checkbox" id="chkMic" checked> Also listen to my microphone</label>
+      <button id="btnRec" class="rec-toggle" aria-pressed="false" title="Save the meeting's sound (and your mic) as an audio file on this computer">⏺ Record audio</button>
+    </div>
+    <div class="meters" aria-label="Sound levels">
+      <div class="meter" id="mThem"><span class="lbl">Meeting</span><div class="bar"><div class="fill"></div><div class="peak"></div></div><span class="state">off</span></div>
+      <div class="meter" id="mMe"><span class="lbl">Me</span><div class="bar"><div class="fill"></div><div class="peak"></div></div><span class="state">off</span></div>
+    </div>
+    <div id="warn" class="banner warn small" hidden></div>
+    <details class="small" id="howto">
+      <summary>How it hears Teams</summary>
+      <p><b>Teams app (Windows):</b> click <i>Teams app</i>, choose <b>Entire screen</b>, tick <b>Also share system audio</b>, then <b>Share</b>. Only the sound is used — the picture is thrown away straight away.</p>
+      <p><b>Teams in Chrome:</b> click <i>Teams in Chrome</i>, pick the tab with the meeting and keep <b>Also share tab audio</b> on. You still hear the meeting as normal.</p>
+      <p>Your microphone is heard separately (Chrome asks once). With speakers instead of a headset, the meeting can echo into your mic; the assistant drops those duplicates, but a headset works best.</p>
+      <p>Chrome shows a "sharing" bar while it listens. Click <b>Stop and save</b> here (or Stop sharing in that bar) to stop.</p>
+    </details>
+    <label class="field"><span>Project</span>
+      <select id="project"><option value="">Work it out from the conversation</option></select>
+    </label>
+  </section>
+
+  <section class="panel stack" id="promptsBox">
+    <div class="row nowrap">
+      <h2 class="grow">Prompts</h2>
+      <button id="btnAsk" title="Suggest something to say now">Ask now</button>
+      <button id="btnPip" title="Keep the prompts in a small window on top of Teams">⧉ Pop out</button>
+    </div>
+    <div id="prompts" class="stack"><div class="empty small">Prompts appear here when a question or a new topic comes up.</div></div>
+  </section>
+
+  <section class="panel stack" id="privateBox">
+    <h2>Ask privately</h2>
+    <form id="askForm" class="row nowrap">
+      <input id="askInput" class="grow" type="text" autocomplete="off" placeholder="Only you see this — e.g. what width does our design use?">
+      <button class="primary" type="submit">Ask</button>
+    </form>
+    <div id="answers" class="stack"></div>
+  </section>
+
+  <section class="panel stack">
+    <div class="row nowrap"><h2 class="grow">Transcript</h2><span id="behind" class="small muted"></span></div>
+    <div id="transcript" class="transcript" aria-live="off"><div class="empty small">Nothing yet.</div></div>
+  </section>
+
+  <footer class="row nowrap m-foot">
+    <button id="btnStop" class="danger" disabled>Stop and save</button>
+    <span id="saved" class="small muted grow"></span>
+    <span id="cost" class="small muted"></span>
+  </footer>
+</main>
+
+<dialog id="setDlg">
+  <form method="dialog" class="stack">
+    <h2>Meeting settings</h2>
+    <label class="field"><span>Transcription</span>
+      <select data-key="meetingStt">
+        <option value="whisper">Free — on this computer (no key)</option>
+        <option value="gemini">Gemini (needs a Gemini key)</option>
+        <option value="both">Gemini, checked by the free one — numbers both must agree on (needs a Gemini key)</option>
+      </select>
+    </label>
+    <label class="field"><span>Prompts</span>
+      <select data-key="meetingPrompts">
+        <option value="auto">Automatic — when a question or new topic comes up</option>
+        <option value="manual">Only when I click Ask now</option>
+        <option value="off">Off — transcript only</option>
+      </select>
+    </label>
+    <label class="field"><span>AI for prompts</span>
+      <select data-key="meetingProvider">
+        <option value="">Same as the email assistant</option>
+        <option value="anthropic">Claude</option>
+        <option value="gemini">Gemini</option>
+      </select>
+    </label>
+    <label class="field"><span>At most one automatic prompt every (seconds)</span><input type="number" min="5" max="900" data-key="meetingMinGapSec"></label>
+    <label class="check small"><input type="checkbox" data-key="meetingWebLookup"> Look standards up online when my files don't have them</label>
+    <label class="check small"><input type="checkbox" data-key="meetingSummary"> Summary, decisions and action items at the end</label>
+    <p class="small muted" id="localAiNote"></p>
+    <div class="row"><span class="grow"></span><button value="close" class="primary">Done</button></div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script type="module" src="meeting.js"></script>
+</body>
+</html>

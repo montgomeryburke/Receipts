@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recorder</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="recorder.css">
+</head>
+<body>
+<header class="r-top">
+  <h1 class="brand">Recorder</h1>
+  <div class="small muted">Saves to this computer. Nothing is uploaded.</div>
+</header>
+<main class="wrap stack">
+  <section class="panel stack">
+    <button id="tglAudio" class="toggle" aria-pressed="false">
+      <span class="dot"></span><span class="t-label">🎙 Record audio</span><span class="t-time"></span>
+    </button>
+    <label class="field small"><span>Sound from</span>
+      <select id="audioSource">
+        <option value="system">The whole computer (Teams app, music, anything)</option>
+        <option value="tab">A Chrome tab (e.g. Teams in Chrome)</option>
+      </select>
+    </label>
+
+    <button id="tglScreen" class="toggle" aria-pressed="false">
+      <span class="dot"></span><span class="t-label">🖥 Record screen + audio</span><span class="t-time"></span>
+    </button>
+
+    <label class="check small"><input type="checkbox" id="chkMic" checked> Include my microphone</label>
+    <div class="meters">
+      <div class="meter" id="mSys"><span class="lbl">Computer</span><div class="bar"><div class="fill"></div></div></div>
+      <div class="meter" id="mMic"><span class="lbl">Mic</span><div class="bar"><div class="fill"></div></div></div>
+    </div>
+    <div id="msg" class="banner warn small" hidden></div>
+    <details class="small">
+      <summary>How Chrome asks</summary>
+      <p>Chrome shows its sharing picker each time. For the computer's sound choose <b>Entire screen</b> and tick
+      <b>Also share system audio</b>; for one tab pick the tab and keep <b>Also share tab audio</b> on. For the screen,
+      pick a screen, a window or a tab. Chrome shows a "sharing" bar while it records — <b>Stop sharing</b> there also
+      ends and saves the recording.</p>
+      <p>Audio-only recordings keep only the sound; the picture is thrown away straight away.</p>
+      <p>Recording other people may need their consent — follow your workplace's rules.</p>
+    </details>
+  </section>
+
+  <section class="panel stack">
+    <div class="row nowrap"><h2 class="grow">Save to</h2><button id="btnFolder">Choose folder…</button><button id="btnDownloads" class="link" hidden>Use Downloads</button></div>
+    <div id="where" class="small"></div>
+  </section>
+
+  <section class="panel stack">
+    <h2>Recordings</h2>
+    <div id="list" class="stack small"><div class="muted">None yet.</div></div>
+  </section>
+</main>
+<div id="toast" class="toast" role="status" hidden></div>
+<script type="module" src="recorder.js"></script>
+</body>
+</html>
