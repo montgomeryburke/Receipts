@@ -237,9 +237,11 @@ function refresh() {
   return navigate(state.cwd);
 }
 
-function renderListing(entries) {
+const LISTING_PAGE = 1000;
+
+function renderListing(entries, shown = LISTING_PAGE) {
   const sorted = entries.filter((e) => !(e.name === MANIFEST_NAME && !e.isDir)).sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })));
-  const rows = sorted.map((e) => {
+  const rows = sorted.slice(0, shown).map((e) => {
     const tr = document.createElement('tr');
     tr.dataset.name = e.name;
     const tdName = document.createElement('td');
@@ -285,6 +287,20 @@ function renderListing(entries) {
     tr.append(tdName, tdSize, tdDate, tdAct);
     return tr;
   });
+  if (sorted.length > shown) {
+    // Very large folders: rendering every row at once would freeze the page.
+    const tr = document.createElement('tr');
+    tr.className = 'more-row';
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    const more = el('button', `Show ${nf.format(Math.min(LISTING_PAGE, sorted.length - shown))} more (${nf.format(sorted.length - shown)} not shown)`, 'btn small');
+    more.type = 'button';
+    more.id = 'btn-listing-more';
+    more.addEventListener('click', () => renderListing(entries, shown + LISTING_PAGE));
+    td.append(more);
+    tr.append(td);
+    rows.push(tr);
+  }
   $('listing-body').replaceChildren(...rows);
   $('listing-empty').hidden = rows.length > 0;
 }

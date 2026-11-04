@@ -74,15 +74,49 @@ export function formatDate(d) {
   return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// Chrome slows timers in background tabs down to about one per minute. A dedicated worker's timers aren't
+// throttled that way, so waits (retry back-off, auto-resume) run on one when possible.
+let timerWorker;
+let timerSeq = 0;
+const timerCallbacks = new Map();
+function getTimerWorker() {
+  if (timerWorker === undefined) {
+    try {
+      timerWorker = new Worker(new URL('./timer-worker.js', import.meta.url));
+      timerWorker.onmessage = (e) => {
+        const fn = timerCallbacks.get(e.data);
+        timerCallbacks.delete(e.data);
+        fn?.();
+      };
+    } catch {
+      timerWorker = null;
+    }
+  }
+  return timerWorker;
+}
+
+/** Run fn after ms milliseconds; returns a function that cancels it. */
+export function after(ms, fn) {
+  const w = getTimerWorker();
+  if (!w) {
+    const t = setTimeout(fn, ms);
+    return () => clearTimeout(t);
+  }
+  const id = ++timerSeq;
+  timerCallbacks.set(id, fn);
+  w.postMessage({ id, ms });
+  return () => timerCallbacks.delete(id);
+}
+
 export function sleep(ms, signal) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(signal.reason);
-    const t = setTimeout(() => {
+    const cancel = after(ms, () => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
-    }, ms);
+    });
     const onAbort = () => {
-      clearTimeout(t);
+      cancel();
       reject(signal.reason);
     };
     signal?.addEventListener('abort', onAbort, { once: true });

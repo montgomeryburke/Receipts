@@ -509,6 +509,38 @@ test('delete a file and a folder from the NAS', async () => {
   eq(errors.length, 0, 'page errors: ' + errors.join('; '));
 });
 
+test('very large NAS folder: shows the first 1,000 items and a "Show more" button instead of freezing', async () => {
+  const big = path.join(SERVERS.apache.root, 'big-folder');
+  fs.mkdirSync(big, { recursive: true });
+  for (let i = 0; i < 2500; i++) fs.writeFileSync(path.join(big, `item-${String(i).padStart(5, '0')}.txt`), 'x');
+  const { page, errors } = main;
+  const t0 = Date.now();
+  await goTo(page, '/big-folder');
+  log(`listing 2,500 items took ${Date.now() - t0} ms`);
+  eq(await page.$$eval('#listing-body tr[data-name]', (r) => r.length), 1000, 'first page of rows');
+  assert((await page.textContent('#btn-listing-more')).includes('1,500 not shown'), 'more button text');
+  await page.click('#btn-listing-more');
+  eq(await page.$$eval('#listing-body tr[data-name]', (r) => r.length), 2000, 'second page of rows');
+  await page.click('#btn-listing-more');
+  eq(await page.$$eval('#listing-body tr[data-name]', (r) => r.length), 2500, 'all rows');
+  eq((await page.$$('#btn-listing-more')).length, 0, 'no more button at the end');
+  const timers = await page.evaluate(async () => {
+    const u = await import('./lib/util.js');
+    const start = performance.now();
+    await u.sleep(120);
+    const waited = performance.now() - start;
+    let fired = false;
+    const cancel = u.after(50, () => (fired = true));
+    cancel();
+    await u.sleep(120);
+    return { waited, cancelledFired: fired };
+  });
+  assert(timers.waited >= 110 && timers.waited < 1000, 'worker-backed sleep waits about the right time: ' + timers.waited);
+  eq(timers.cancelledFired, false, 'cancelled timer does not fire');
+  await goTo(page, '/');
+  eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+});
+
 test('flaky connection: retries 503s, dropped connections and 502s; reports a permanent 403 clearly', async () => {
   await dav('apache', 'MKCOL', 'flaky-test/');
   const { page, errors } = await launch(cfg('flaky'));

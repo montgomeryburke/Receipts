@@ -2,7 +2,7 @@
 // pause/resume/cancel, skip-existing (resume) and verification.
 
 import { WebDAVError } from './webdav.js';
-import { joinPath, parentPath, baseName, normalizePath, sleep, waitForOnline } from './util.js';
+import { joinPath, parentPath, baseName, normalizePath, sleep, after, waitForOnline } from './util.js';
 
 let nextId = 1;
 
@@ -535,14 +535,14 @@ export class TransferManager extends EventTarget {
     const delay = this.options.autoResumeMs;
     this.connectionIssue = { message: err?.message || String(err), resumeAt: Date.now() + delay };
     this.setState('paused');
-    clearTimeout(this.autoResumeTimer);
-    this.autoResumeTimer = setTimeout(() => {
+    this.autoResumeTimer?.();
+    this.autoResumeTimer = after(delay, () => {
       if (this.state === 'paused' && this.connectionIssue) this.resume();
-    }, delay);
+    });
   }
 
   clearConnectionIssue() {
-    clearTimeout(this.autoResumeTimer);
+    this.autoResumeTimer?.();
     this.autoResumeTimer = null;
     if (this.connectionIssue) {
       this.connectionIssue = null;
