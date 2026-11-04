@@ -3,9 +3,9 @@
 This build was tested automatically in Chromium against real WebDAV servers (see `tests/`). To get a
 second opinion from Gemini:
 
-1. Download `nas-uploader-extension.zip` (or the `extension/` folder) from this repository.
-2. Open https://gemini.google.com, attach the zip (or the individual `.js`, `.html`, `.css` and `manifest.json`
-   files), and paste the prompt below.
+1. Get `nas-uploader-review-bundle.txt`: one text file with all the extension code and the server setup script
+   (regenerate it any time with `./build-review-bundle.sh`).
+2. Open https://gemini.google.com, attach that file, and paste the prompt below.
 3. If Gemini reports a problem, paste its finding back to Claude and ask for it to be checked and fixed.
    Treat findings as claims to verify, not facts.
 
