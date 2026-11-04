@@ -1,9 +1,13 @@
 // Speech-to-text for the meeting window, one segment at a time, in order:
 //  - 'whisper': free, on this computer (lib/whisper-worker.js)
 //  - 'gemini':  Gemini with the user's key (audio sent as a short WAV; ~32 tokens per second of audio)
+//  - 'both':    Gemini, and Whisper on the same audio as a free second opinion: when the two hear different
+//               numbers (12.5 m vs 12 m), the line is marked "unsure" and shows the other reading. If Gemini is
+//               stopped, over the daily limit or unreachable, Whisper's text is used.
 
 import { encodeWav, toBase64, SAMPLE_RATE } from './audio.js';
-import { resolveGeminiModel, LLMError } from './llm.js';
+import { resolveGeminiModel, geminiRequest } from './llm.js';
+import { sameNumbers, numbersIn } from './crosscheck.js';
 import { basicAuthHeader } from './util.js';
 import { CONFIG } from './config-store.js';
 import { nasCreds } from './nas.js';
@@ -12,7 +16,8 @@ export class Transcriber extends EventTarget {
   constructor(settings) {
     super();
     this.settings = settings;
-    this.engine = settings.meetingStt === 'gemini' && settings.geminiKey ? 'gemini' : 'whisper';
+    const gem = Boolean(settings.geminiKey);
+    this.engine = gem && settings.meetingStt === 'both' ? 'both' : gem && settings.meetingStt === 'gemini' ? 'gemini' : 'whisper';
     this.queue = [];
     this.busy = false;
     this.worker = null;
@@ -70,11 +75,32 @@ export class Transcriber extends EventTarget {
   }
 
   async _start() {
+    if (this.engine === 'both') {
+      // Gemini unreachable at the start: carry on with the free model alone rather than not at all.
+      try {
+        this.model = await resolveGeminiModel(this.settings);
+      } catch (err) {
+        this.engine = 'whisper';
+        this.lastGeminiError = err;
+      }
+    } else if (this.engine === 'gemini') this.model = await resolveGeminiModel(this.settings);
     if (this.engine === 'gemini') {
-      this.model = await resolveGeminiModel(this.settings);
       this.ready = true;
       return;
     }
+    await this.startWhisper();
+  }
+
+  /** Loads the free model (also later, as a stand-in, when Gemini is stopped or over the daily limit). */
+  startWhisper() {
+    if (!this.whisperPromise) this.whisperPromise = this._startWhisper().catch((err) => {
+      this.whisperPromise = null;
+      throw err;
+    });
+    return this.whisperPromise;
+  }
+
+  async _startWhisper() {
     this.worker?.terminate();
     this.worker = new Worker(new URL('./whisper-worker.js', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e) => {
@@ -141,9 +167,9 @@ export class Transcriber extends EventTarget {
         const seg = this.queue.shift();
         const sec = seg.samples.length / SAMPLE_RATE;
         try {
-          const text = this.engine === 'gemini' ? await this.gemini(seg.samples) : await this.whisper(seg.samples);
+          const r = await this.transcribe(seg.samples);
           this.audioSec += sec;
-          this.dispatchEvent(Object.assign(new Event('text'), { segment: seg, text }));
+          this.dispatchEvent(Object.assign(new Event('text'), { segment: seg, ...r }));
         } catch (err) {
           this.dispatchEvent(Object.assign(new Event('error'), { segment: seg, error: err }));
         } finally {
@@ -155,63 +181,71 @@ export class Transcriber extends EventTarget {
     }
   }
 
+  /** {text, alt?, unsure?, by} for one segment, by the chosen engine(s). */
+  async transcribe(samples) {
+    if (this.engine === 'gemini') {
+      try {
+        return { text: await this.gemini(samples), by: 'gemini' };
+      } catch (err) {
+        // Stop AI, the daily limit, or a cancelled call: carry on with the free model instead of losing speech.
+        if (!['paused', 'budget', 'stopped'].includes(err.kind)) throw err;
+        this.lastGeminiError = err;
+        await this.startWhisper();
+        return { text: await this.whisper(samples), by: 'whisper', note: err.message };
+      }
+    }
+    if (this.engine === 'whisper') return { text: await this.whisper(samples), by: 'whisper' };
+    const [g, w] = await Promise.allSettled([this.gemini(samples), this.whisper(samples)]);
+    if (g.status !== 'fulfilled') {
+      if (w.status !== 'fulfilled') throw g.reason;
+      this.lastGeminiError = g.reason;
+      return { text: w.value, by: 'whisper', note: `Gemini: ${g.reason?.message || g.reason}` };
+    }
+    const text = g.value;
+    const other = w.status === 'fulfilled' ? w.value : '';
+    if (!other || !text) return { text: text || other, by: text ? 'gemini' : 'whisper' };
+    // Numbers matter most (dimensions, prices, dates): two independent engines must agree on them.
+    const unsure = (numbersIn(text).length || numbersIn(other).length) && !sameNumbers(text, other);
+    return unsure ? { text, alt: other, unsure: true, by: 'gemini' } : { text, by: 'gemini' };
+  }
+
   async whisper(samples) {
     const copy = new Float32Array(samples); // the original stays with the caller
     const r = await this.call({ type: 'transcribe', samples: copy, load: this.loadOpts }, [copy.buffer]);
     return r.text;
   }
 
-  async gemini(samples) {
-    const s = this.settings;
-    const base = (s.geminiBaseUrl || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
+  async gemini(samples, noThinking = false) {
+    const thinking = noThinking ? {} : /gemini-2\.5/.test(this.model) ? { thinkingConfig: { thinkingBudget: 0 } } : /gemini-[3-9]/.test(this.model) ? { thinkingConfig: { thinkingLevel: 'low' } } : {};
     const body = {
       contents: [
         {
           role: 'user',
           parts: [
-            { text: 'Transcribe this meeting audio word for word, in the language spoken. Return only the words, with normal punctuation. If there is no speech, return nothing.' },
+            { text: 'Transcribe this meeting audio word for word, in the language spoken. Return only the words, with normal punctuation. Write numbers as digits. If there is no speech, return nothing.' },
             { inline_data: { mime_type: 'audio/wav', data: toBase64(encodeWav(samples)) } },
           ],
         },
       ],
-      generationConfig: { temperature: 0, maxOutputTokens: 1024, ...(/gemini-2\.5/.test(this.model) ? { thinkingConfig: { thinkingBudget: 0 } } : /gemini-[3-9]/.test(this.model) ? { thinkingConfig: { thinkingLevel: 'low' } } : {}) },
+      generationConfig: { temperature: 0, maxOutputTokens: 1024, ...thinking },
     };
-    let res;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        res = await fetch(`${base}/v1beta/models/${encodeURIComponent(this.model)}:generateContent`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-goog-api-key': s.geminiKey },
-          body: JSON.stringify(body),
-        });
-      } catch (err) {
-        if (attempt === 2) throw new LLMError('network', `Gemini unreachable: ${err.message}`);
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-        continue;
-      }
-      if (res.status === 429 || res.status >= 500) {
-        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-        continue;
-      }
-      break;
+    let data;
+    try {
+      data = await geminiRequest(this.settings, this.model, body);
+    } catch (err) {
+      if (!noThinking && thinking.thinkingConfig && err.kind === 'bad-request' && /thinking/i.test(err.message)) return this.gemini(samples, true);
+      err.message = `Gemini transcription: ${err.message}`;
+      throw err;
     }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const msg = data?.error?.message || res.statusText;
-      if (res.status === 400 && /thinking/i.test(msg) && body.generationConfig.thinkingConfig) {
-        delete body.generationConfig.thinkingConfig;
-        return this.gemini(samples);
-      }
-      throw new LLMError(res.status === 401 || res.status === 403 || /api key/i.test(msg) ? 'auth' : 'bad-request', `Gemini transcription failed (${res.status}): ${msg}`, res.status);
-    }
-    this.costTokens += data.usageMetadata?.totalTokenCount || 0;
-    const parts = data.candidates?.[0]?.content?.parts || [];
+    this.costTokens += data?.usageMetadata?.totalTokenCount || 0;
+    const parts = data?.candidates?.[0]?.content?.parts || [];
     return parts.filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join('').trim();
   }
 
   /** After a failed model load (no internet, wrong address): try again; waiting segments are kept. */
   retry() {
     this.startPromise = null;
+    this.whisperPromise = null;
     this.pump();
   }
 

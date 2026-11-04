@@ -10,6 +10,7 @@
 import { get, put, getAll, del, kvGet, getSettings, log } from './db.js';
 import { search, selectQueryTerms, leadChunks, RECENCY_WORDS } from './index.js';
 import { callLLM, costOf, activeModel } from './llm.js';
+import { canCrossCheck, review, reviewBlock, unsupportedNumbers, providerName } from './crosscheck.js';
 import { cleanEmailBody, tokenize, splitList, hashString, pageLabel } from './text.js';
 import { matchRules, learnFromItem } from './teach.js';
 import { instructionsBlock, memoryBlock } from './memory.js';
@@ -181,15 +182,72 @@ export async function retrieve(item, settings) {
   return out.map((h, i) => ({ sid: `S${i + 1}`, id: h.id, path: h.path, page: h.page, text: h.text, ...(h.taught ? { taught: true } : {}) }));
 }
 
-function addUsage(item, res, settings) {
+function addUsage(item, res, settings, { reviewer = false } = {}) {
   const u = item.usage || { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
   u.calls += 1;
-  for (const k of ['input', 'output', 'cacheRead', 'cacheWrite']) u[k] += res.usage[k] || 0;
+  for (const k of ['input', 'output', 'cacheRead', 'cacheWrite']) u[k] += res.usage?.[k] || 0;
   const c = costOf(res.usage, res.model || activeModel(settings), settings);
   u.cost = c == null || u.cost == null ? null : Math.round((u.cost + c) * 1e5) / 1e5;
   item.usage = u;
+  if (reviewer) return; // the draft's author stays the one shown
   item.provider = res.provider;
   item.model = res.model;
+}
+
+// ---------------- the second check ----------------
+// Every draft is checked in a second way before it is shown:
+//  - here, free: every number in the draft must appear in the email, the excerpts, the data results or the
+//    user's notes (a wrong 12.5 m where the drawings say 12.0 m is the typical mistake);
+//  - with both keys: the other AI reviews the draft against the same sources, and if it finds problems the
+//    first AI revises the draft once with those findings.
+
+function sourcesText(item, settings) {
+  return [snippetsBlock(item.snippets || []), emailBlock(item), dataBlock(item), item.notes ? `<user_notes>\n${item.notes}\n</user_notes>` : '', settings.signature ? `<signature>\n${settings.signature}\n</signature>` : '']
+    .filter(Boolean).join('\n\n');
+}
+
+function draftForReview(item) {
+  const reqs = (item.requests || []).map((r) => `- ${r.ask} → ${r.status}${r.answer ? `: ${r.answer}` : ''}${(r.sources || []).length ? ` [${r.sources.join(', ')}]` : ''}`).join('\n');
+  return `${item.draft}${reqs ? `\n\n(How the draft answers the email's requests:)\n${reqs}` : ''}`;
+}
+
+const localNumbers = (item, settings) => unsupportedNumbers(String(item.draft || '').replace(/\[MISSING:[^\]]*\]/gi, ''), sourcesText(item, settings));
+
+async function checkDraft(item, settings) {
+  if (!item.needsReply || !String(item.draft || '').trim()) {
+    delete item.check;
+    return;
+  }
+  const hash = hashString(item.draft);
+  if (item.check?.hash === hash && !item.check.error && !item.check.skipped) return; // this exact draft was checked
+  const check = { at: Date.now(), hash, localUnsupported: localNumbers(item, settings) };
+  item.check = check;
+  if (!canCrossCheck(settings)) {
+    check.verdict = check.localUnsupported.length ? 'issues' : 'ok';
+    check.localOnly = true;
+    return;
+  }
+  const provider = item.provider || settings.provider;
+  try {
+    const hints = check.localUnsupported.length ? [`these numbers in the draft were not found in the sources: ${check.localUnsupported.join(', ')}`] : [];
+    const r = await review(settings, { provider, what: 'email draft reply', sources: sourcesText(item, settings), text: draftForReview(item), hints });
+    addUsage(item, { usage: r.usage, model: r.model }, settings, { reviewer: true });
+    Object.assign(check, { by: r.by, verdict: r.verdict, issues: r.issues, missed: r.missed });
+    history(item, `checked by ${providerName(r.by)}: ${r.verdict === 'ok' ? 'no problems' : `${r.issues.length + r.missed.length} finding(s)`}`);
+    if (r.verdict === 'issues' && settings.crossCheckRevise !== false) {
+      const before = item.draft;
+      await callDraft(item, settings, [snippetsBlock(item.snippets || []), emailBlock(item), followUpParts(item), reviewBlock(r)], undefined, false, provider);
+      check.revised = item.draft !== before;
+      check.revisedBy = provider;
+      check.localUnsupported = localNumbers(item, settings);
+      check.hash = hashString(item.draft || '');
+      history(item, `revised after the check (${item.status})`);
+    }
+  } catch (err) {
+    if (err.kind === 'paused' || err.kind === 'budget' || err.kind === 'stopped') check.skipped = err.message;
+    else check.error = err.message || String(err);
+    check.verdict = check.localUnsupported.length ? 'issues' : 'unchecked';
+  }
 }
 
 function computeStatus(item) {
@@ -238,9 +296,9 @@ export function emailId(email) {
 // cache=true marks the email block as a cache point. Only worth it for
 // user-driven redrafts, where several calls with the same prefix are likely;
 // on a single call the cache write would cost 25% extra for nothing.
-async function callDraft(item, settings, parts, effort, cache = false) {
+async function callDraft(item, settings, parts, effort, cache = false, provider) {
   const res = await callLLM(settings, {
-    system: systemPrompt(settings), parts, schema: DRAFT_SCHEMA, effort, cacheParts: cache ? [1] : [],
+    system: systemPrompt(settings), parts, schema: DRAFT_SCHEMA, effort, cacheParts: cache ? [1] : [], ...(provider ? { provider } : {}),
   });
   addUsage(item, res, settings);
   applyResult(item, res.data, settings);
@@ -375,6 +433,7 @@ export async function processEmail(email, { force = false, onChange = () => {} }
     }
 
     if (await runReadyRequests(item, settings)) await redraftWithData(item, settings);
+    await checkDraft(item, settings);
     await runAutoHooks(item, settings);
   } catch (err) {
     item.status = 'error';
@@ -418,6 +477,7 @@ export async function regenerate(id, { notes, effort, onChange = () => {} } = {}
     await callDraft(item, settings, [snippetsBlock(item.snippets || []), emailBlock(item), followUpParts(item)], effort, true);
     history(item, `regenerated (${item.status})`);
     if (await runReadyRequests(item, settings)) await redraftWithData(item, settings);
+    await checkDraft(item, settings);
     await runAutoHooks(item, settings);
   });
 }
@@ -436,7 +496,10 @@ export async function decideRequest(id, key, approve, { params, onChange = () =>
     }
     if (params) r.params = params;
     r.state = 'approved';
-    if (await runReadyRequests(item, settings)) await redraftWithData(item, settings);
+    if (await runReadyRequests(item, settings)) {
+      await redraftWithData(item, settings);
+      await checkDraft(item, settings);
+    }
     item.status = computeStatus(item);
   });
 }
@@ -457,7 +520,10 @@ export async function runItemAction(id, actionName, params, { onChange = () => {
       item.summary = `${action.name}: ${r.state}`;
       return;
     }
-    if (got) await redraftWithData(item, settings);
+    if (got) {
+      await redraftWithData(item, settings);
+      await checkDraft(item, settings);
+    }
     item.status = computeStatus(item);
   });
 }
@@ -481,6 +547,7 @@ export async function applyFolderResults(results, { onChange = () => {} } = {}) 
         history(item, `${r.action}: ${r.state} (bridge)`);
       }
       await redraftWithData(item, settings);
+      await checkDraft(item, settings);
       item.status = computeStatus(item);
     });
   }

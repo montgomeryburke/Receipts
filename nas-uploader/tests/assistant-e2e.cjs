@@ -219,9 +219,10 @@ async function waitIndexed(b, n) {
   }, { timeout: 60000, what: `index of ${n} files` });
 }
 
+// Both keys are set in most tests; the two AIs checking each other is tested on its own (crossCheck: true).
 function keys(extra = {}) {
   const ai = global.mockAI;
-  return { anthropicKey: 'sk-ant-test', anthropicBaseUrl: ai.url, geminiKey: 'AIza-test', geminiBaseUrl: ai.url, ...extra };
+  return { anthropicKey: 'sk-ant-test', anthropicBaseUrl: ai.url, geminiKey: 'AIza-test', geminiBaseUrl: ai.url, crossCheck: false, ...extra };
 }
 
 /** A WAV of synthetic speech (espeak-ng), followed by padSec of silence (so a looping fake mic pauses). */
@@ -1332,6 +1333,295 @@ test('NAS-only folders (standards copied from Google Drive): the HP extracts the
   await waitFor(async () => !(await engine(b.sw, { type: 'status' })).job, { what: 'apply 2' });
   hits = (await engine(b.sw, { type: 'search', q: 'rural arterial lane width' })).hits;
   eq(hits.filter((h) => h.path.endsWith('TAC Geometric Design Guide.docx')).length, 0, 'removed file left the index');
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+// ---------------------------------------------------------------------------
+// accuracy: the two AIs check each other; the kill switch; the daily limit
+// ---------------------------------------------------------------------------
+
+const sysText = (body) => (Array.isArray(body.system) ? body.system.map((x) => x.text).join('') : String(body.system || ''));
+const userText = (body) => (Array.isArray(body.messages[0].content) ? body.messages[0].content.map((c) => c.text || '').join('\n') : String(body.messages[0].content));
+const geminiSys = (body) => (body.systemInstruction?.parts || []).map((p) => p.text).join('');
+const geminiUser = (body) => (body.contents || []).flatMap((c) => c.parts || []).map((p) => p.text || '').join('\n');
+const isReview = (sys) => /meticulous second reviewer/.test(sys);
+
+test('accuracy, free checks: numbers (spoken or written), clause numbers and quotes are compared on this computer', async () => {
+  const b = await launch();
+  const page = await b.open('sidepanel.html');
+  const r = await page.evaluate(async () => {
+    const x = await import('./lib/crosscheck.js');
+    return {
+      spoken: x.numbersIn('the barrier is ten fifty and the deck twelve metres, about two hundred and five tonnes'),
+      clause: x.numbersIn('CSA S6:19 clause 12.4.3.5, 1,050 mm'),
+      same: x.sameNumbers('The deck is 12.0 m wide.', 'the deck is twelve metres wide'),
+      differ: x.sameNumbers('The deck is 12.5 m wide.', 'the deck is twelve metres wide'),
+      unsupported: x.unsupportedNumbers('Deck width 12.5 m, TL-4, see item 2.', 'Deck width: 12.0 m clear roadway between barriers. TL-4.'),
+      quoteOk: x.quoteFound('Deck width: 12.0 m clear roadway between barriers', 'Alert Bridge design criteria.\n\nDeck width: 12.0 m clear roadway between  barriers.\n'),
+      quoteWrong: x.quoteFound('Deck width: 13.5 m clear roadway between barriers', 'Deck width: 12.0 m clear roadway between barriers.'),
+    };
+  });
+  eq(JSON.stringify(r.spoken), JSON.stringify(['1050', '12', '205']), 'spoken numbers');
+  eq(JSON.stringify(r.clause), JSON.stringify(['19', '12.4.3.5', '1050']), 'clause number kept whole');
+  eq(r.same, true, '12.0 m = twelve metres');
+  eq(r.differ, false, '12.5 m ≠ twelve metres');
+  eq(JSON.stringify(r.unsupported), JSON.stringify(['12.5']), 'number not in the sources (list numbers ignored)');
+  eq(r.quoteOk, true, 'real quote found despite spacing');
+  eq(r.quoteWrong, false, 'altered quote not found');
+});
+
+test('accuracy, email: Gemini checks Claude’s draft, finds the wrong 12.5 m, Claude corrects it; the card says so', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  await mirrorProjects(b, { pdf: false });
+  await waitIndexed(b, 5);
+  const panel = await b.open('sidepanel.html');
+  await setSettings(panel, keys({ provider: 'anthropic', crossCheck: true, crossCheckRevise: true, myName: 'Monty Burke' }));
+  const draft = (width) => ({
+    content: [text(JSON.stringify({
+      needs_reply: true, category: 'information_request', summary: 'Asks for the deck width.',
+      requests: [{ ask: 'Clear deck width', status: 'answered', answer: width, sources: ['S1'] }],
+      missing_info: [], search_terms: [], data_requests: [], draft_reply: `Hi,\n\nThe clear deck width is ${width} between barriers.\n\nMonty`, confidence: 'high',
+    }))],
+  });
+  // Claude gets it wrong the first time; with Gemini's findings it corrects it.
+  ai.anthropic = (body) => (/<second_review by="Gemini">/.test(userText(body)) ? draft('12.0 m') : draft('12.5 m'));
+  ai.gemini = (body) => {
+    assert(isReview(geminiSys(body)), 'Gemini only reviews here');
+    return geminiReply({ text: JSON.stringify({ verdict: 'issues', issues: [{ claim: 'The clear deck width is 12.5 m', problem: 'The design criteria give 12.0 m.', evidence: 'Deck width: 12.0 m clear roadway between barriers.', fix: 'The clear deck width is 12.0 m' }], missed: [] }) });
+  };
+  await engine(b.sw, { type: 'email.capture', email: { from: 'Engineer <engineer@client.ca>', subject: 'Alert Bridge deck width', body: 'Hello, can you confirm the clear deck width for the Alert Bridge? Thanks', source: 'manual' } });
+  const item = await waitFor(async () => {
+    const items = await panel.evaluate(async () => (await import('./lib/db.js')).getAll('items'));
+    return items.find((i) => i.status === 'ready') || (items.find((i) => i.status === 'error') ? Promise.reject(new Error('draft failed: ' + items[0].error)) : null);
+  }, { what: 'draft ready' });
+  assert(/12\.0 m/.test(item.draft) && !/12\.5/.test(item.draft), 'draft corrected: ' + item.draft);
+  eq(item.check.by, 'gemini', 'checked by Gemini');
+  eq(item.check.revised, true, 'revised after the check');
+  eq(item.check.localUnsupported.length, 0, 'no unsupported numbers left');
+  eq(ai.ofApi('anthropic').length, 2, 'two Claude calls (draft, correction)');
+  eq(ai.ofApi('gemini').length, 1, 'one Gemini call (the review)');
+  const reviewUser = geminiUser(ai.ofApi('gemini')[0].body);
+  assert(/Deck width: 12\.0 m clear roadway/.test(reviewUser) && /12\.5 m/.test(reviewUser), 'the reviewer saw the sources and the draft');
+  assert(/numbers in the draft were not found in the sources: 12\.5/.test(reviewUser), 'the local number check was passed on to the reviewer');
+  assert(/12\.0 m/.test(userText(ai.ofApi('anthropic')[1].body)), 'the correction call carries the evidence');
+  eq(item.usage.calls, 3, 'all three calls counted');
+  eq(item.provider, 'anthropic', 'the draft is still Claude’s');
+  await panel.click('.tabs [data-tab="drafts"]');
+  await panel.selectOption('#filter', 'all');
+  await panel.click('.card .card-head');
+  await panel.waitForSelector('.card .check[data-check="revised"]');
+  const shown = await panel.textContent('.card .check[data-check]');
+  assert(/Gemini found 1 problem/.test(shown) && /corrected by Claude/.test(shown), 'card explains the check: ' + shown);
+  await panel.screenshot({ path: path.join(SHOTS, 'crosscheck-draft.png') });
+  // One key only: the free check still flags a number that isn't in the sources.
+  ai.reset();
+  await setSettings(panel, { geminiKey: '' });
+  ai.anthropic = () => draft('12.5 m');
+  await engine(b.sw, { type: 'email.capture', email: { from: 'Engineer <engineer@client.ca>', subject: 'Deck width again', body: 'And the clear deck width please?', source: 'manual' } });
+  const item2 = await waitFor(async () => (await panel.evaluate(async () => (await import('./lib/db.js')).getAll('items'))).find((i) => i.subject === 'Deck width again' && i.status !== 'processing'), { what: 'second draft' });
+  eq(item2.check.localOnly, true, 'local check only');
+  eq(JSON.stringify(item2.check.localUnsupported), JSON.stringify(['12.5']), '12.5 flagged by the free check');
+  eq(ai.ofApi('gemini').length, 0, 'no Gemini call without a Gemini key');
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+test('accuracy, meeting: quotes checked against the files, Gemini checks Claude’s prompt and answer, standards looked up by both and compared, disputed facts not remembered', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  const { prefix } = await mirrorProjects(b);
+  await waitIndexed(b, 6);
+  const meeting = await b.open('meeting.html');
+  await meeting.waitForFunction(() => window.meeting?.ready);
+  await setSettings(meeting, keys({ provider: 'anthropic', crossCheck: true, dualLookUp: true, meetingWebLookup: true, meetingMinGapSec: 5 }));
+  meetingClaude(ai, { lookup: 'CSA S6 barrier height for TL-4' });
+  const claude = ai.anthropic;
+  // Claude's private answer quotes a figure that isn't in the file.
+  ai.anthropic = (body) => (/<private_question>/.test(userText(body))
+    ? { content: [text(JSON.stringify({ answer: 'The design uses a 13.5 m clear deck.', say: '', sources: [{ ref: 'S1', quote: 'Deck width: 13.5 m clear roadway between barriers.' }], lookup: '' }))] }
+    : claude(body));
+  ai.gemini = (body) => {
+    if (body.tools?.some((t) => t.google_search)) {
+      return geminiReply({ text: 'CSA S6:19 clause 12.4.3.5: a TL-4 barrier is 1050 mm high at minimum.', grounding: { groundingChunks: [{ web: { uri: 'https://www2.gov.bc.ca/assets/s6-supplement.pdf', title: 'BC MoTI Supplement to CSA S6:19' } }] } });
+    }
+    const u = geminiUser(body);
+    assert(isReview(geminiSys(body)), 'review prompt');
+    if (/kind="meeting prompt/.test(u)) return geminiReply({ text: JSON.stringify({ verdict: 'ok', issues: [], missed: [] }) });
+    if (/kind="private answer/.test(u)) return geminiReply({ text: JSON.stringify({ verdict: 'issues', issues: [{ claim: '13.5 m', problem: 'The design criteria say 12.0 m.', evidence: 'Deck width: 12.0 m clear roadway between barriers.', fix: '12.0 m' }], missed: [] }) });
+    if (/kind="meeting summary/.test(u)) return geminiReply({ text: JSON.stringify({ verdict: 'issues', issues: [{ claim: 'Deck width confirmed at 12.0 m clear between barriers in the meeting', problem: 'Nobody confirmed it in the meeting; it was only asked.', evidence: 'not in the sources', fix: 'remove' }], missed: [] }) });
+    throw new Error('unexpected Gemini call: ' + u.slice(0, 200));
+  };
+  await meeting.evaluate(async () => {
+    const m = window.meeting;
+    m.settings = await (await import('./lib/db.js')).getSettings();
+    const t = Date.now();
+    m.onText({ who: 'Them', start: t, end: t + 4000 }, 'Quick question about the Alert Bridge. What deck width did we use, and what barrier height does S6 need for TL-4?');
+  });
+  // The prompt: quote found in the file (✓), Gemini agrees (✓), and both look-ups give the same values (✓).
+  await meeting.waitForSelector('#prompts .card .chk[data-check="ok"]', { timeout: 30000 });
+  assert(await meeting.$('#prompts .card .qok'), 'quote marked as found in the file');
+  await meeting.waitForSelector('#prompts .card [data-agree="yes"]', { timeout: 15000 });
+  const card = await meeting.textContent('#prompts .card');
+  assert(/Checked by Gemini/.test(card) && /Claude and Gemini looked it up separately and found the same values/.test(card), 'card: ' + card);
+  assert(ai.ofApi('anthropic').some((r) => r.body.tools?.some((t) => t.type === 'web_search_20260209')), 'Claude searched the web');
+  assert(ai.ofApi('gemini').some((r) => r.body.tools?.some((t) => t.google_search)), 'Gemini searched Google too');
+  await meeting.screenshot({ path: path.join(SHOTS, 'crosscheck-meeting.png'), fullPage: true });
+  // The private answer with a made-up figure: flagged locally (quote not in the file) and by Gemini.
+  await meeting.fill('#askInput', 'What width does our design use?');
+  await meeting.click('#askForm button[type="submit"]');
+  await meeting.waitForSelector('#answers .chk[data-check="issues"]', { timeout: 20000 });
+  assert(await meeting.$('#answers .qbad'), 'quote marked NOT found in the file');
+  const ans = await meeting.textContent('#answers');
+  assert(/Gemini disagrees/.test(ans) && /12\.0 m/.test(ans) && /not found word for word/.test(ans), 'answer flagged: ' + ans);
+  const reviewOfAnswer = ai.ofApi('gemini').find((r) => /kind="private answer/.test(geminiUser(r.body)));
+  assert(/quotes were not found word for word/.test(geminiUser(reviewOfAnswer.body)) && /13\.5/.test(geminiUser(reviewOfAnswer.body)), 'local findings passed to Gemini');
+  // When the two look-ups give different values, the card says so and shows the second one.
+  await meeting.evaluate(() => {
+    window.meeting.prompts.unshift({ id: 'x', at: Date.now(), topic: 'TL-4 barrier', suggestions: [], web: { text: 'TL-4 is 1050 mm.', by: 'anthropic', sources: [], second: { by: 'gemini', text: 'TL-4 is 1070 mm.', sources: [] }, agree: false } });
+    window.meeting.renderPrompts();
+  });
+  await meeting.waitForSelector('#prompts [data-agree="no"]');
+  assert(/found different values/.test(await meeting.textContent('#prompts')) && /1070 mm/.test(await meeting.textContent('#prompts details')), 'disagreement shown with the other value');
+  // The summary is checked against the transcript; the disputed fact is not remembered.
+  const sm = await meeting.evaluate(async (project) => {
+    const { summarize } = await import('./lib/meeting-ai.js');
+    const words = 'We talked about the Alert Bridge deck width and the barrier height for a long while, and agreed to send the design criteria on Friday.';
+    return summarize([{ who: 'Them', text: words, start: 1, end: 2 }, { who: 'Me', text: 'I will send them on Friday.', start: 3, end: 4 }], { projects: [project] });
+  }, `${prefix}/2024-017 Alert Bridge`);
+  eq(sm.check.by, 'gemini', 'summary checked by Gemini');
+  eq(sm.remembered.length, 0, 'the disputed fact is not remembered');
+  const mem = await meeting.evaluate(async (p) => (await import('./lib/memory.js')).getMemory(p), `${prefix}/2024-017 Alert Bridge`);
+  assert(!mem.notes.some((n) => /12\.0 m clear/.test(n.text)), 'not in project memory');
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+test('kill switch: Stop AI cancels the call in progress, everywhere; new calls refused, emails wait; Resume carries on; daily limit', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  const panel = await b.open('sidepanel.html');
+  await setSettings(panel, keys({ provider: 'anthropic', crossCheck: false }));
+  const meeting = await b.open('meeting.html');
+  await meeting.waitForFunction(() => window.meeting?.ready);
+  const quick = () => ({ content: [text(JSON.stringify({ needs_reply: true, category: 'other', summary: 's', requests: [], missing_info: [], search_terms: [], data_requests: [], draft_reply: 'Hi,\n\nThanks.\n\nMonty', confidence: 'high' }))] });
+  let release;
+  ai.anthropic = () => new Promise((r) => {
+    release = () => r(quick());
+    setTimeout(release, 60000);
+  });
+  await engine(b.sw, { type: 'email.capture', email: { from: 'a@b.ca', subject: 'First email', body: 'Please confirm.', source: 'manual' } });
+  await waitFor(() => ai.ofApi('anthropic').length === 1, { what: 'the slow call to start' });
+  const t0 = Date.now();
+  await panel.click('#aiStop');
+  const stopped = await waitFor(async () => (await panel.evaluate(async () => (await import('./lib/db.js')).getAll('items'))).find((i) => i.subject === 'First email' && i.status === 'error'), { timeout: 10000, what: 'the draft to be cancelled' });
+  eq(stopped.errorKind, 'stopped', 'cancelled by the kill switch');
+  assert(Date.now() - t0 < 8000, 'cancelled at once, not after the call finished');
+  await panel.waitForFunction(() => document.getElementById('aiStop').textContent.includes('Resume AI') && /AI stopped/.test(document.getElementById('chips').textContent));
+  // The meeting window heard it too.
+  await meeting.waitForFunction(() => window.meeting.aiPaused === true && document.getElementById('btnAi').textContent.includes('Resume AI'));
+  // New calls are refused at once, from any page; a new email waits in the queue.
+  const refused = await panel.evaluate(async () => {
+    const { callLLM } = await import('./lib/llm.js');
+    const s = await (await import('./lib/db.js')).getSettings();
+    try {
+      await callLLM(s, { system: 'x', parts: ['y'], provider: 'gemini' });
+      return 'called';
+    } catch (err) {
+      return err.kind;
+    }
+  });
+  eq(refused, 'paused', 'refused while stopped');
+  ai.anthropic = quick;
+  await engine(b.sw, { type: 'email.capture', email: { from: 'a@b.ca', subject: 'Second email', body: 'Please confirm too.', source: 'manual' } });
+  await new Promise((r) => setTimeout(r, 1500));
+  eq(ai.ofApi('anthropic').length, 1, 'no call while stopped');
+  eq(ai.ofApi('gemini').length, 0, 'no Gemini call while stopped');
+  const st = await engine(b.sw, { type: 'status' });
+  eq(st.queue, 1, 'the email waits in the queue');
+  eq(st.ai.paused, true, 'status says stopped');
+  await panel.screenshot({ path: path.join(SHOTS, 'kill-switch.png') });
+  // Resume: the waiting email is drafted.
+  await meeting.click('#btnAi');
+  await waitFor(async () => (await panel.evaluate(async () => (await import('./lib/db.js')).getAll('items'))).find((i) => i.subject === 'Second email' && i.status === 'ready'), { what: 'the queued draft after Resume' });
+  await panel.waitForFunction(() => document.getElementById('aiStop').textContent.includes('Stop AI'), null, { timeout: 10000 });
+  // The daily limit: once today's estimate reaches it, calls are refused.
+  const spent = (await engine(b.sw, { type: 'status' })).ai.spentToday;
+  assert(spent > 0, `spend recorded (${spent})`);
+  await setSettings(panel, { dailyBudgetUsd: spent / 2 });
+  const over = await panel.evaluate(async () => {
+    const { callLLM } = await import('./lib/llm.js');
+    const s = await (await import('./lib/db.js')).getSettings();
+    try {
+      await callLLM(s, { system: 'x', parts: ['y'] });
+      return 'called';
+    } catch (err) {
+      return `${err.kind}: ${err.message}`;
+    }
+  });
+  assert(/^budget: Today's AI spending limit/.test(over), 'refused over the limit: ' + over);
+  await panel.reload();
+  await panel.waitForFunction(() => /AI today \$[\d.]+ of \$/.test(document.getElementById('chips').textContent));
+  release?.();
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+test('transcription "both": Gemini and the free model must hear the same numbers (else the line is flagged); with AI stopped the free model carries on', async () => {
+  if (!WHISPER_DIR) {
+    log('skipped: set WHISPER_TEST_MODEL_DIR to a folder with the Xenova/whisper-base files');
+    return;
+  }
+  const ai = global.mockAI;
+  ai.reset();
+  const models = await startModelServer(WHISPER_DIR);
+  const b = await launch();
+  const dir = path.join(b.ext, 'test-media');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(speechWav('deck12', 'The deck width is twelve metres.', { speed: 140 }), path.join(dir, 'deck12.wav'));
+  const page = await b.open('meeting.html');
+  await page.waitForFunction(() => window.meeting?.ready);
+  await setSettings(page, keys({ meetingStt: 'both', whisperModel: 'Xenova/whisper-base', whisperHost: models.url }));
+  ai.gemini = (body) => {
+    assert(body.contents[0].parts.some((p) => p.inline_data), 'audio sent');
+    return geminiReply({ text: 'The deck width is 13.5 metres.' });
+  };
+  const run = () => page.evaluate(async () => {
+    const { Transcriber } = await import('./lib/stt.js');
+    const s = await (await import('./lib/db.js')).getSettings();
+    const buf = await (await fetch('test-media/deck12.wav')).arrayBuffer();
+    // decodeAudioData resamples to the context's rate: 16 kHz mono, as the meeting window feeds it.
+    const samples = (await new OfflineAudioContext(1, 1, 16000).decodeAudioData(buf)).getChannelData(0);
+    window.__stt = window.__stt || new Transcriber(s);
+    return new Promise((resolve, reject) => {
+      const t = window.__stt;
+      const onText = (e) => {
+        t.removeEventListener('text', onText);
+        resolve({ text: e.text, alt: e.alt || '', unsure: !!e.unsure, by: e.by, note: e.note || '', engine: t.engine });
+      };
+      t.addEventListener('text', onText);
+      t.addEventListener('error', (e) => reject(new Error(e.error?.message || String(e.error))), { once: true });
+      t.push({ samples, start: Date.now(), end: Date.now() + 2000, who: 'Them' });
+    });
+  });
+  const r1 = await run();
+  log(`Gemini (mock): "${r1.text}" / Whisper: "${r1.alt}"`);
+  eq(r1.engine, 'both', 'both engines');
+  eq(r1.text, 'The deck width is 13.5 metres.', 'Gemini text shown');
+  eq(r1.unsure, true, 'different numbers → unsure');
+  assert(/12|twelve/i.test(r1.alt), 'the free model heard twelve: ' + r1.alt);
+  // The meeting window shows the doubt on that line.
+  await page.evaluate((r) => window.meeting.onText({ who: 'Them', start: Date.now(), end: Date.now() + 2000 }, r.text, r), r1);
+  await page.waitForSelector('#transcript .t.unsure .alt');
+  // Stop AI: Gemini isn't called; the free model's text is used.
+  const before = ai.ofApi('gemini').length;
+  await page.click('#btnAi');
+  const r2 = await run();
+  eq(ai.ofApi('gemini').length, before, 'no Gemini call while stopped');
+  eq(r2.by, 'whisper', 'the free model carried on');
+  assert(/12|twelve/i.test(r2.text) && /deck/i.test(r2.text), 'free transcript: ' + r2.text);
+  await page.click('#btnAi');
+  await models.close();
   eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
 });
 

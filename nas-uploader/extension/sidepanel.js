@@ -101,6 +101,12 @@ function renderChips() {
     c.push(last ? chip(`Mirror · ${ago(last)}`, failed ? 'warn' : 'ok', failed ? 'Some files could not be copied last time — see NAS files' : '') : chip('Mirror · never', 'warn'));
   }
   if (!status.nas?.configured) c.push(chip('NAS not set up', 'bad', status.nas?.problem || ''));
+  const ai = status.ai || {};
+  if (ai.paused) c.push(chip('AI stopped', 'bad', 'No Claude or Gemini calls are made until you click Resume AI'));
+  if (ai.crossCheck) c.push(chip('Cross-check on', 'ok', 'Claude and Gemini check each other: drafts, meeting prompts, answers and summaries'));
+  if (ai.dailyBudgetUsd) c.push(chip(`AI today ${money(ai.spentToday)} of ${money(ai.dailyBudgetUsd)}`, ai.spentToday >= ai.dailyBudgetUsd ? 'bad' : ai.spentToday >= 0.8 * ai.dailyBudgetUsd ? 'warn' : '', 'Estimated from the token counts; the daily limit is in Settings → Accuracy & safety'));
+  else if (ai.spentToday) c.push(chip(`AI today ${money(ai.spentToday)}`, '', 'Estimated from the token counts'));
+  renderAiButton();
   if (status.job) c.push(chip(`${status.job.name}…`, 'info'));
   if (status.queue) c.push(chip(`${status.queue} drafting`, 'info'));
   if (status.pendingActions) c.push(chip(`${status.pendingActions} flow${status.pendingActions > 1 ? 's' : ''} pending`, 'info'));
@@ -230,6 +236,25 @@ function cardNode(it, ver) {
   return el;
 }
 
+const AI_NAME = { gemini: 'Gemini', anthropic: 'Claude' };
+
+/** What the second check found: numbers not in the sources (free, local) and the other AI's review. */
+function checkHtml(c) {
+  if (!c) return '';
+  const local = (c.localUnsupported || []).length ? `<div class="small">⚠ Numbers not found in the email or the sources: <b>${esc(c.localUnsupported.join(', '))}</b> — confirm them before sending.</div>` : '';
+  if (c.localOnly) {
+    return `<div class="check ${local ? 'warn' : 'ok'}" data-check="${local ? 'issues' : 'ok'}">${local || '<div class="small">✓ Every number in the draft is in the email or the sources (local check). Add both a Claude and a Gemini key to have each AI check the other.</div>'}</div>`;
+  }
+  const by = AI_NAME[c.by] || 'The second AI';
+  if (c.error || c.skipped) return `<div class="check warn" data-check="unchecked"><div class="small">Not checked by a second AI: ${esc(c.error || c.skipped)}</div>${local}</div>`;
+  const findings = [...(c.issues || []).map((i) => `<li><b>“${esc(i.claim)}”</b> — ${esc(i.problem)}${i.evidence ? ` <span class="muted">Sources: ${esc(i.evidence)}</span>` : ''}${i.fix && i.fix !== 'remove' ? ` <span class="muted">Fix: ${esc(i.fix)}</span>` : ''}</li>`), ...(c.missed || []).map((m) => `<li>Not covered: ${esc(m)}</li>`)];
+  if (c.verdict === 'ok' && !local) return `<div class="check ok" data-check="ok"><div class="small">✓ Checked by ${by} against the sources: no problems found.</div></div>`;
+  const head = c.revised
+    ? `✓ ${by} found ${findings.length} problem${findings.length === 1 ? '' : 's'}; the draft was corrected by ${AI_NAME[c.revisedBy] || 'the first AI'}. Check these points:`
+    : `⚠ ${by} found ${findings.length} problem${findings.length === 1 ? '' : 's'}:`;
+  return `<div class="check ${c.revised && !local ? 'fixed' : 'warn'}" data-check="${c.revised ? 'revised' : 'issues'}">${findings.length ? `<div class="small">${head}</div><ul class="plain small">${findings.join('')}</ul>` : ''}${local}</div>`;
+}
+
 function cardBody(it) {
   const parts = [];
   if (it.requests?.length) {
@@ -258,7 +283,7 @@ function cardBody(it) {
     }
   }
   if (it.status !== 'skipped' && it.status !== 'no-reply') {
-    parts.push(`<h3>Draft</h3><textarea class="draft" data-act="draft" aria-label="Draft reply">${esc(it.draft || '')}</textarea>`);
+    parts.push(`<h3>Draft</h3>${checkHtml(it.check)}<textarea class="draft" data-act="draft" aria-label="Draft reply">${esc(it.draft || '')}</textarea>`);
   }
   if (it.snippets?.length) {
     parts.push('<h3>Sources</h3>');
@@ -747,6 +772,25 @@ $('mirrorFolders').addEventListener('click', (e) => {
 });
 $('openNas').addEventListener('click', () => bg('app.open', { hash: '' }));
 $('openMeeting').addEventListener('click', () => bg('meeting.open'));
+
+function renderAiButton() {
+  const b = $('aiStop');
+  const paused = !!status?.ai?.paused;
+  b.textContent = paused ? '▶ Resume AI' : '⏹ Stop AI';
+  b.className = paused ? 'primary' : 'danger';
+  b.setAttribute('aria-pressed', String(paused));
+  b.title = paused ? 'AI is stopped. Resume: drafts waiting in the queue go ahead; meeting prompts start again.' : $('aiStop').dataset.stopTitle || b.title;
+}
+$('aiStop').dataset.stopTitle = $('aiStop').title;
+$('aiStop').addEventListener('click', async () => {
+  const paused = !!status?.ai?.paused;
+  const res = await engine(paused ? 'ai.resume' : 'ai.stop');
+  if (res?.error) { toast(res.error, 6000); return; }
+  if (status) status.ai = { ...(status.ai || {}), paused: res.paused };
+  toast(res.paused ? 'AI stopped. Nothing is sent to Claude or Gemini until you resume.' : 'AI resumed.');
+  renderChips();
+  refreshSoon();
+});
 $('openRecorder').addEventListener('click', () => bg('recorder.open'));
 
 $('reconnectBtn').addEventListener('click', async () => {
@@ -1053,9 +1097,20 @@ document.querySelector('.tabs').addEventListener('click', (e) => {
 // ---- live updates ----
 
 chrome.runtime.onMessage.addListener((msg) => {
+  // Stop AI / Resume AI clicked in another window (the meeting window, Settings).
+  if (msg?.type === 'ai.stopAll' || msg?.type === 'ai.resumed') {
+    if (status) status.ai = { ...(status.ai || {}), paused: msg.type === 'ai.stopAll' };
+    renderChips();
+    return false;
+  }
   if (!msg || msg.to !== 'ui') return false;
   if (msg.type === 'chat') {
     onChatMessage(msg);
+    return false;
+  }
+  if (msg.type === 'aiState') {
+    if (status) status.ai = { ...(status.ai || {}), paused: msg.paused };
+    renderChips();
     return false;
   }
   if (msg.type === 'progress' && status) {

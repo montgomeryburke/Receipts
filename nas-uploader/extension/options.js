@@ -28,7 +28,7 @@ function flashSaved() {
 
 // ---------------------------------------------------------------- simple fields
 
-const NUMERIC = new Set(['snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'meetingMinGapSec']);
+const NUMERIC = new Set(['snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'meetingMinGapSec', 'dailyBudgetUsd']);
 const NULLABLE = new Set(['priceInPerM', 'priceOutPerM']);
 
 function readField(el) {
@@ -65,6 +65,35 @@ function queueSave(el) {
 
 document.addEventListener('input', (e) => { if (e.target.dataset?.key) queueSave(e.target); });
 document.addEventListener('change', (e) => { if (e.target.dataset?.key) queueSave(e.target); });
+
+// ---------------------------------------------------------------- accuracy & safety
+
+async function renderAccuracy() {
+  const s = settings || (await getSettings());
+  const both = !!(s.anthropicKey && s.geminiKey);
+  $('xcState').textContent = both
+    ? (s.crossCheck !== false ? '✓ Both keys are set: Claude and Gemini check each other.' : 'Both keys are set, but the cross-check is off.')
+    : '⚠ Only one AI key is set, so only the free checks run. Add both a Claude and a Gemini key above to have each check the other.';
+  let st = null;
+  try { st = await engine('status'); } catch { /* engine starting */ }
+  const ai = st?.ai;
+  const paused = ai ? ai.paused : !!s.aiPaused;
+  $('aiToggle').textContent = paused ? '▶ Resume AI' : '⏹ Stop AI';
+  $('aiToggle').className = paused ? 'primary' : 'danger';
+  $('spendState').textContent = ai ? `Spent today (estimated from token counts): $${(ai.spentToday || 0).toFixed(2)}${ai.dailyBudgetUsd ? ` of $${ai.dailyBudgetUsd.toFixed(2)}` : ''}.${paused ? ' AI is stopped.' : ''}` : '';
+}
+
+$('aiToggle').addEventListener('click', async () => {
+  const s = await getSettings();
+  const res = await engine(s.aiPaused ? 'ai.resume' : 'ai.stop');
+  if (res?.error) { toast(res.error, 6000); return; }
+  settings = await getSettings();
+  toast(settings.aiPaused ? 'AI stopped everywhere.' : 'AI resumed.');
+  renderAccuracy();
+});
+document.addEventListener('change', (e) => {
+  if (['crossCheck', 'anthropicKey', 'geminiKey', 'dailyBudgetUsd'].includes(e.target.dataset?.key)) setTimeout(renderAccuracy, 500);
+});
 
 document.querySelectorAll('[data-reveal]').forEach((b) => b.addEventListener('click', () => {
   const inp = document.querySelector(`[data-key="${b.dataset.reveal}"]`);
@@ -459,6 +488,7 @@ $('importSetup').addEventListener('click', () => {
   renderActions();
   renderRules();
   renderInstructions();
+  renderAccuracy();
   $('nasFolders').value = (settings.nasFolders || []).join('\n');
   if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
 })();

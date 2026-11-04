@@ -5,13 +5,108 @@
 //  - generateText: a plain call with an optional web lookup — meeting standards look-ups.
 
 import { Anthropic } from '../vendor/anthropic-sdk.mjs';
+import { getSettings, saveSettings, kvGet, kvSet } from './db.js';
 
 export class LLMError extends Error {
   constructor(kind, message, status) {
     super(message);
-    this.kind = kind; // auth | rate | declined | truncated | network | bad-request | server | parse | config
+    // auth | rate | declined | truncated | network | bad-request | server | parse | config | stopped | paused | budget
+    this.kind = kind;
     this.status = status;
   }
+}
+
+// ---------------- kill switch and spending limit ----------------
+// Every paid call (Claude or Gemini) goes through aiGate() and track(): "Stop AI" aborts the calls in flight in
+// every open part of the extension and refuses new ones until "Resume AI"; a daily limit does the same once
+// today's estimated spend reaches it.
+
+const inFlight = new Set();
+
+/** An abort signal for one call, cancelled by its own signal or by Stop AI. */
+function track(signal) {
+  const c = new AbortController();
+  inFlight.add(c);
+  const onAbort = () => c.abort();
+  if (signal) {
+    if (signal.aborted) c.abort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+  return {
+    signal: c.signal,
+    done: () => {
+      inFlight.delete(c);
+      signal?.removeEventListener('abort', onAbort);
+    },
+  };
+}
+
+/** Cancels every AI call in progress in this page. */
+export function abortAllAI() {
+  for (const c of inFlight) c.abort();
+  inFlight.clear();
+}
+
+try {
+  chrome.runtime.onMessage.addListener((m) => {
+    if (m?.type === 'ai.stopAll') abortAllAI();
+    return false;
+  });
+} catch {
+  /* not in an extension page */
+}
+
+/** Stop AI everywhere: saves the switch, cancels the calls here and tells the other pages to cancel theirs. */
+export async function stopAllAI() {
+  await saveSettings({ aiPaused: true });
+  abortAllAI();
+  try {
+    await chrome.runtime.sendMessage({ to: 'all', type: 'ai.stopAll' });
+  } catch {
+    /* no other page open */
+  }
+}
+
+export async function resumeAI() {
+  await saveSettings({ aiPaused: false });
+  try {
+    await chrome.runtime.sendMessage({ to: 'all', type: 'ai.resumed' });
+  } catch {
+    /* no other page open */
+  }
+}
+
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export async function spentToday() {
+  return (await kvGet(`spend:${today()}`)) || 0;
+}
+
+async function recordSpend(usage, model, settings) {
+  const c = costOf(usage, model, settings);
+  if (!c) return;
+  try {
+    await kvSet(`spend:${today()}`, Math.round(((await spentToday()) + c) * 1e5) / 1e5);
+  } catch {
+    /* the estimate is best effort */
+  }
+}
+
+/** Throws if AI is stopped or today's limit is reached. Reads the switch fresh, so it applies at once. */
+export async function aiGate() {
+  const s = await getSettings();
+  if (s.aiPaused) throw new LLMError('paused', 'AI is stopped (kill switch). Click "Resume AI" to use it again.');
+  const limit = Number(s.dailyBudgetUsd) || 0;
+  if (limit > 0) {
+    const spent = await spentToday();
+    if (spent >= limit) {
+      throw new LLMError('budget', `Today's AI spending limit ($${limit.toFixed(2)}) is reached (about $${spent.toFixed(2)} spent). Raise it in Settings → Accuracy & safety, or wait until tomorrow.`);
+    }
+  }
+  return s;
 }
 
 // USD per 1M tokens: [input, output, cacheRead]. Longest matching prefix wins.
@@ -94,7 +189,7 @@ async function httpJson(url, init, { retries = 2 } = {}) {
     try {
       res = await fetch(url, init);
     } catch (err) {
-      if (init?.signal?.aborted) throw new LLMError('network', 'Cancelled');
+      if (init?.signal?.aborted) throw new LLMError('stopped', 'Stopped.');
       if (attempt < retries) {
         await sleep(1500 * (attempt + 1));
         continue;
@@ -140,6 +235,7 @@ function anthropicClient(settings) {
 
 function anthropicError(err) {
   if (err instanceof LLMError) return err;
+  if (err instanceof Anthropic.APIUserAbortError || err?.name === 'AbortError') return new LLMError('stopped', 'Stopped.');
   const status = err?.status;
   const msg = err?.error?.error?.message || err?.message || String(err);
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
@@ -149,7 +245,6 @@ function anthropicError(err) {
   if (err instanceof Anthropic.InternalServerError) return new LLMError('server', `Provider error ${status}: ${msg}`, status);
   if (err instanceof Anthropic.APIConnectionError) return new LLMError('network', `Network error: ${msg}`);
   if (err instanceof Anthropic.APIError) return new LLMError('bad-request', `Request rejected (${status}): ${msg}`, status);
-  if (err?.name === 'AbortError') return new LLMError('network', 'Cancelled');
   return new LLMError('network', msg);
 }
 
@@ -178,7 +273,19 @@ function declined(data, usage) {
  * feature (server-side fallback, effort, structured output), retry without it.
  * opts: {fallbacks, effort, schema} — mutated as features are dropped.
  */
-async function anthropicCreate(client, settings, params, opts, signal) {
+async function anthropicCreate(client, settings, params, opts, outerSignal) {
+  await aiGate();
+  const call = track(outerSignal);
+  try {
+    const data = await anthropicCreateOnce(client, settings, params, opts, call.signal);
+    recordSpend(anthropicUsage(data.usage), data.model || params.model, settings);
+    return data;
+  } finally {
+    call.done();
+  }
+}
+
+async function anthropicCreateOnce(client, settings, params, opts, signal) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const body = { ...params };
     const outputConfig = { ...(params.output_config || {}) };
@@ -336,13 +443,26 @@ function geminiUsage(um = {}) {
   };
 }
 
-async function geminiGenerate(settings, model, body, signal) {
-  return httpJson(`${geminiBase(settings)}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': settings.geminiKey },
-    body: JSON.stringify(body),
-    signal,
-  });
+async function geminiGenerate(settings, model, body, outerSignal) {
+  await aiGate();
+  const call = track(outerSignal);
+  try {
+    const data = await httpJson(`${geminiBase(settings)}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': settings.geminiKey },
+      body: JSON.stringify(body),
+      signal: call.signal,
+    });
+    recordSpend(geminiUsage(data.usageMetadata), data.modelVersion || model, settings);
+    return data;
+  } finally {
+    call.done();
+  }
+}
+
+/** Gemini audio transcription (lib/stt.js) uses the same kill switch, limit and spend record. */
+export function geminiRequest(settings, model, body, signal) {
+  return geminiGenerate(settings, model, body, signal);
 }
 
 function geminiCandidate(data, usage) {
@@ -482,24 +602,44 @@ export async function generateText(settings, { provider: p, system, prompt, web 
  * onStep({type:'tool', name, input, result}) is called after each tool runs.
  * Returns {text, usage, model, provider, steps}.
  */
-export async function runChat(settings, { provider: p, system, history, tools, effort, maxTokens = 4000, maxTurns = 12, onStep = () => {}, signal }) {
+export async function runChat(settings, { provider: p, system, history, tools, effort, maxTokens = 4000, maxTurns = 12, onStep = () => {}, onText = () => {}, trim = null, signal }) {
   const provider = p || settings.provider;
   if (!hasKey(settings, provider)) throw new LLMError('config', `No ${provider === 'gemini' ? 'Gemini' : 'Anthropic'} API key set`);
   const byName = new Map(tools.map((t) => [t.name, t]));
   const steps = [];
   const usage = {};
+  const checkStop = () => {
+    if (signal?.aborted) throw new LLMError('stopped', 'Stopped.');
+  };
+  // A tool may return {image: {mime, data}} (a screenshot): sent to the model as a picture, not as text.
+  const split = (result) => {
+    if (!result || typeof result !== 'object' || !result.image) return { data: result, image: null };
+    const { image, ...rest } = result;
+    return { data: rest, image };
+  };
   const runTool = async (name, input) => {
+    checkStop();
     const t = byName.get(name);
     let result;
     try {
       result = t ? await t.run(input || {}) : { error: `unknown tool ${name}` };
     } catch (err) {
+      if (err instanceof LLMError && (err.kind === 'stopped' || err.kind === 'paused')) throw err;
       result = { error: err.message || String(err) };
     }
-    const step = { type: 'tool', name, input, result };
+    const { data, image } = split(result);
+    const step = { type: 'tool', name, input, result: data, image: !!image };
     steps.push(step);
     onStep(step);
     return result;
+  };
+  // trim = {tools: ['read_page', 'screenshot'], keep: 2}: older results of those tools are replaced by a short
+  // note before each call, so a long task doesn't resend every old page (the newest ones are kept).
+  const trimmed = [];
+  const noteTrim = (name, ref) => {
+    if (!trim || !trim.tools.includes(name)) return;
+    trimmed.push(ref);
+    while (trimmed.length > (trim.keep ?? 2)) trimmed.shift().stub();
   };
 
   if (provider === 'gemini') {
@@ -507,6 +647,7 @@ export async function runChat(settings, { provider: p, system, history, tools, e
     const contents = history.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.text }] }));
     const thinking = geminiThinking(model, effort || 'medium');
     for (let turn = 0; turn < maxTurns; turn++) {
+      checkStop();
       const data = await geminiGenerate(
         settings,
         model,
@@ -531,13 +672,24 @@ export async function runChat(settings, { provider: p, system, history, tools, e
       const cand = geminiCandidate(data, usage);
       const calls = (cand.content?.parts || []).filter((x) => x.functionCall);
       if (!calls.length) return { text: geminiText(cand), usage, model: data.modelVersion || model, provider, steps };
+      const said = geminiText(cand);
+      if (said.trim()) onText(said);
       contents.push(cand.content); // echoed back unchanged (it carries Gemini's thought signatures)
       const responses = [];
+      const pictures = [];
       for (const c of calls) {
-        const result = await runTool(c.functionCall.name, c.functionCall.args);
-        responses.push({ functionResponse: { name: c.functionCall.name, response: { result } } });
+        const { data: result, image } = split(await runTool(c.functionCall.name, c.functionCall.args));
+        const part = { functionResponse: { name: c.functionCall.name, response: { result } } };
+        responses.push(part);
+        if (image) {
+          const pic = { inline_data: { mime_type: image.mime, data: image.data } };
+          pictures.push(pic);
+          noteTrim(c.functionCall.name, { stub: () => { delete pic.inline_data; pic.text = '[an earlier screenshot, removed to save tokens]'; } });
+        } else {
+          noteTrim(c.functionCall.name, { stub: () => { part.functionResponse.response = { result: '[an earlier result, removed to save tokens — call the tool again for the current state]' }; } });
+        }
       }
-      contents.push({ role: 'user', parts: responses });
+      contents.push({ role: 'user', parts: [...responses, ...pictures] });
     }
     return { text: 'I stopped after too many steps. Tell me what to do next.', usage, model, provider, steps };
   }
@@ -548,6 +700,7 @@ export async function runChat(settings, { provider: p, system, history, tools, e
   const messages = history.map((m) => ({ role: m.role, content: m.text }));
   const toolDefs = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
   for (let turn = 0; turn < maxTurns; turn++) {
+    checkStop();
     const data = await anthropicCreate(
       client,
       settings,
@@ -559,12 +712,21 @@ export async function runChat(settings, { provider: p, system, history, tools, e
     if (data.stop_reason === 'refusal') throw declined(data, usage);
     const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
     if (data.stop_reason !== 'tool_use') return { text, usage, model: data.model || model, provider, steps };
+    if (text.trim()) onText(text);
     messages.push({ role: 'assistant', content: data.content });
     const results = [];
     for (const b of data.content) {
       if (b.type !== 'tool_use') continue;
-      const result = await runTool(b.name, b.input);
-      results.push({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(result).slice(0, 20000), ...(result?.error ? { is_error: true } : {}) });
+      const { data: result, image } = split(await runTool(b.name, b.input));
+      const json = JSON.stringify(result ?? null).slice(0, 20000);
+      const block = {
+        type: 'tool_result',
+        tool_use_id: b.id,
+        content: image ? [{ type: 'text', text: json }, { type: 'image', source: { type: 'base64', media_type: image.mime, data: image.data } }] : json,
+        ...(result?.error ? { is_error: true } : {}),
+      };
+      results.push(block);
+      noteTrim(b.name, { stub: () => { block.content = image ? '[an earlier screenshot, removed to save tokens]' : '[an earlier result, removed to save tokens — call the tool again for the current state]'; } });
     }
     messages.push({ role: 'user', content: results });
   }

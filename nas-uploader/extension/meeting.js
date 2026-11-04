@@ -6,10 +6,10 @@
 import { getSettings, saveSettings, put, kvGet } from './lib/db.js';
 import { createAudioContext, captureTeamsApp, captureTeamsTab, captureMicrophone, AudioChannel } from './lib/audio.js';
 import { Transcriber } from './lib/stt.js';
-import { makePrompt, answerQuestion, summarize, shouldPrompt } from './lib/meeting-ai.js';
+import { makePrompt, answerQuestion, summarize, shouldPrompt, checkResult } from './lib/meeting-ai.js';
 import { detectProjects } from './lib/assistant.js';
 import { addHint } from './lib/teach.js';
-import { hasKey, pickProvider } from './lib/llm.js';
+import { hasKey, pickProvider, stopAllAI, resumeAI } from './lib/llm.js';
 import { localAI } from './lib/localai.js';
 import { nasClient, writeTextFile, safeFileName } from './lib/nas.js';
 import { after } from './lib/util.js';
@@ -50,6 +50,7 @@ const state = {
   pip: null,
   mirrorPaths: [], // NAS paths of the mirrored project folders
   recording: null, // a local audio recording of the meeting (Record audio toggle)
+  aiPaused: false, // Stop AI (here or in the side panel): no prompts, answers or Gemini calls until resumed
   // Tests can provide audio instead of the real screen-share / microphone pickers.
   captureOverride: null, // async (kind: 'app'|'tab') => MediaStream
   micOverride: null, // async () => MediaStream
@@ -171,7 +172,7 @@ async function startSession() {
   state.stt.addEventListener('progress', (e) => {
     if (e.total) setStatus(`Getting the free speech model ready (first time only): ${Math.round((100 * e.loaded) / e.total)}% of ${e.file.split('/').pop()}`);
   });
-  state.stt.addEventListener('text', (e) => onText(e.segment, e.text));
+  state.stt.addEventListener('text', (e) => onText(e.segment, e.text, e));
   state.stt.addEventListener('error', (e) => {
     const msg = e.error?.message || String(e.error);
     state.errors.push(msg);
@@ -185,7 +186,8 @@ async function startSession() {
   });
   state.stt.start().then(
     () => {
-      if (state.listening) setStatus(`Listening${state.stt.engine === 'gemini' ? ' · transcribing with Gemini' : ' · transcribing on this computer (free)'}.`);
+      state.sttEngine = state.stt?.engine;
+      if (state.listening) setStatus(`Listening${{ gemini: ' · transcribing with Gemini', both: ' · transcribing with Gemini, checked by the free model' }[state.stt.engine] || ' · transcribing on this computer (free)'}.`);
     },
     () => {},
   );
@@ -289,11 +291,13 @@ function isEcho(entry) {
   return others.some((x) => similar(x.text, entry.text) >= 0.6);
 }
 
-function onText(seg, text) {
+function onText(seg, text, extra = {}) {
   updateBehind();
   const t = String(text || '').trim();
   if (!t) return;
   const entry = { who: seg.who, text: t, start: seg.start, end: seg.end };
+  // "both": the two transcriptions heard different numbers — shown so the user knows which line to doubt.
+  if (extra.unsure && extra.alt) Object.assign(entry, { unsure: true, alt: String(extra.alt).trim() });
   if (isEcho(entry)) {
     if (entry.who === 'Them') {
       // The meeting copy is the real one: remove the microphone duplicate.
@@ -320,7 +324,7 @@ function renderTranscript() {
     return;
   }
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  box.innerHTML = state.entries.slice(-400).map((e) => `<div class="t ${e.who === 'Them' ? 'them' : 'me'}"><span class="ts">${hms(new Date(e.start))}</span><span class="who">${esc(e.who === 'Them' ? 'Them' : e.who)}</span><span>${esc(e.text)}</span></div>`).join('');
+  box.innerHTML = state.entries.slice(-400).map((e) => `<div class="t ${e.who === 'Them' ? 'them' : 'me'}${e.unsure ? ' unsure' : ''}"><span class="ts">${hms(new Date(e.start))}</span><span class="who">${esc(e.who === 'Them' ? 'Them' : e.who)}</span><span>${esc(e.text)}${e.unsure ? `<span class="alt" title="The two transcriptions heard different numbers">⚠ or: “${esc(e.alt)}”</span>` : ''}</span></div>`).join('');
   if (atBottom) box.scrollTop = box.scrollHeight;
 }
 
@@ -350,7 +354,7 @@ async function detectProject({ now = false } = {}) {
 
 async function maybePrompt() {
   const s = state.settings;
-  if (s.meetingPrompts !== 'auto' || state.prompting || !hasKey(s, pickProvider(s, s.meetingProvider || s.provider))) return;
+  if (state.aiPaused || s.meetingPrompts !== 'auto' || state.prompting || !hasKey(s, pickProvider(s, s.meetingProvider || s.provider))) return;
   const fresh = state.entries.slice(state.lastPromptIdx);
   const d = await shouldPrompt(fresh, {
     sinceLastMs: Date.now() - state.lastPromptAt,
@@ -372,6 +376,10 @@ async function runPrompt(reason, { manual = false } = {}) {
     toast('Nothing has been said yet.');
     return;
   }
+  if (state.aiPaused) {
+    toast('AI is stopped. Click ▶ Resume AI to get prompts again.');
+    return;
+  }
   state.prompting = new AbortController();
   state.lastPromptAt = Date.now();
   state.lastPromptIdx = state.entries.length;
@@ -385,7 +393,7 @@ async function runPrompt(reason, { manual = false } = {}) {
     if (!res.needed && !res.web?.text) {
       if (manual) Object.assign(card, { empty: true });
       else state.prompts.splice(state.prompts.indexOf(card), 1);
-    }
+    } else runCheck(card, renderPrompts);
   } catch (err) {
     Object.assign(card, { thinking: false, error: err.message || String(err) });
     state.errors.push(`prompt: ${card.error}`);
@@ -396,19 +404,76 @@ async function runPrompt(reason, { manual = false } = {}) {
   renderCost();
 }
 
+// ---- the second check: shown on each card once it is done (it runs after the card appears) ----
+
+const AI_NAME = { gemini: 'Gemini', anthropic: 'Claude' };
+
+function runCheck(obj, render) {
+  if (!obj.review || state.aiPaused) {
+    delete obj.review;
+    return;
+  }
+  obj.check = { pending: true };
+  render();
+  checkResult(obj)
+    .then((r) => {
+      obj.check = r;
+      state.cost += r?.cost || 0;
+    })
+    .catch((err) => {
+      obj.check = { error: err.message || String(err) };
+    })
+    .finally(() => {
+      delete obj.review; // the excerpts aren't kept with the meeting
+      render();
+      renderCost();
+    });
+}
+
+function checkHtml(c) {
+  if (!c) return '';
+  if (c.pending) return '<div class="chk pending small">Checking…</div>';
+  if (c.error) return `<div class="chk warn small" data-check="unchecked">Not double-checked: ${esc(c.error)}</div>`;
+  const local = [];
+  if ((c.badQuotes || []).length) local.push(`${c.badQuotes.length === 1 ? 'a quote was' : `${c.badQuotes.length} quotes were`} not found word for word in the file`);
+  if ((c.unsupported || []).length) local.push(`numbers not in the files or the transcript: ${c.unsupported.join(', ')}`);
+  const findings = [...(c.issues || []).map((i) => `<li><b>“${esc(i.claim)}”</b> — ${esc(i.problem)}${i.evidence ? ` <span class="muted">${esc(i.evidence)}</span>` : ''}${i.fix && i.fix !== 'remove' ? ` <span class="muted">→ ${esc(i.fix)}</span>` : ''}</li>`), ...(c.missed || []).map((m) => `<li>Not covered: ${esc(m)}</li>`), ...local.map((l) => `<li>${esc(l)}</li>`)];
+  if (c.verdict === 'ok' && !findings.length) return `<div class="chk ok small" data-check="ok">✓ ${c.by ? `Checked by ${AI_NAME[c.by]} against the files` : 'Quotes and numbers found in the files'}</div>`;
+  return `<div class="chk warn small" data-check="issues">⚠ ${c.by ? `${AI_NAME[c.by]} disagrees` : 'Check before using'}:<ul class="plain">${findings.join('')}</ul></div>`;
+}
+
+function quoteMark(src) {
+  if (src.verified === true) return '<span class="qok" title="Quote found word for word in the file">✓</span>';
+  if (src.verified === false) return '<span class="qbad" title="This quote was NOT found word for word in the file — check it">⚠ not in the file</span>';
+  return '';
+}
+
 function sourceHtml(src) {
   const name = (src.path || '').split('/').pop() || src.ref;
   const where = src.page ? ` · ${pageLabel(src.path, src.page)}` : '';
   // An email inside a .pst mailbox can't be opened on its own; the quote is the useful part.
-  if (/\.pst$/i.test(src.path || '')) return `<div class="src">✉ <span title="${esc(src.path)}">${esc(name)}${where}</span> <span class="quote">“${esc(src.quote)}”</span></div>`;
-  return `<div class="src">📄 <a data-open="${esc(src.path)}" data-page="${src.page || 0}" title="${esc(src.path)}">${esc(name)}${where}</a> <span class="quote">“${esc(src.quote)}”</span></div>`;
+  if (/\.pst$/i.test(src.path || '')) return `<div class="src">✉ <span title="${esc(src.path)}">${esc(name)}${where}</span> <span class="quote">“${esc(src.quote)}”</span> ${quoteMark(src)}</div>`;
+  return `<div class="src">📄 <a data-open="${esc(src.path)}" data-page="${src.page || 0}" title="${esc(src.path)}">${esc(name)}${where}</a> <span class="quote">“${esc(src.quote)}”</span> ${quoteMark(src)}</div>`;
+}
+
+function linksHtml(list) {
+  return (list || []).filter((s) => /^https?:\/\//i.test(s.url || '')).map((s) => `<div class="src"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></div>`).join('');
 }
 
 function webHtml(web) {
   if (!web) return '';
   if (web.error) return `<div class="web muted">Online look-up failed: ${esc(web.error)}</div>`;
-  const links = (web.sources || []).filter((s) => /^https?:\/\//i.test(s.url || ''));
-  return `<div class="web">🌐 ${esc(web.text)}${links.map((s) => `<div class="src"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></div>`).join('')}</div>`;
+  // Looked up by both AIs, each with its own search engine: do they give the same numbers?
+  let both = '';
+  if (web.second) {
+    const a = AI_NAME[web.by];
+    const b = AI_NAME[web.second.by];
+    const verdict = web.agree === true ? `<div class="chk ok small" data-agree="yes">✓ ${a} and ${b} looked it up separately and found the same values.</div>`
+      : web.agree === false ? `<div class="chk warn small" data-agree="no">⚠ ${a} and ${b} found different values — check the documents below before relying on it.</div>`
+        : `<div class="chk small muted" data-agree="unknown">${b} looked it up too (no numbers to compare).</div>`;
+    both = `${verdict}<details class="small"${web.agree === false ? ' open' : ''}><summary>What ${b} found</summary><div>${esc(web.second.text)}</div>${linksHtml(web.second.sources)}</details>`;
+  }
+  return `<div class="web">🌐 ${esc(web.text)}${linksHtml(web.sources)}${both}</div>`;
 }
 
 function promptCardHtml(c, i) {
@@ -418,7 +483,7 @@ function promptCardHtml(c, i) {
   const fresh = Date.now() - c.at < 15000;
   const sug = (c.suggestions || []).map((s) => `<div class="say">${esc(s.say)}</div><div class="why">${esc(s.why)}</div>${(s.sources || []).map(sourceHtml).join('')}`).join('<hr class="sep">');
   return `<div class="card ${fresh ? 'new' : ''} ${c.pinned ? 'pinned' : ''}" data-i="${i}">
-    ${c.topic ? `<div class="small muted">${esc(c.topic)}</div>` : ''}${sug}${webHtml(c.web)}
+    ${c.topic ? `<div class="small muted">${esc(c.topic)}</div>` : ''}${sug}${checkHtml(c.check)}${webHtml(c.web)}
     <div class="meta"><span>${hms(new Date(c.at))}</span><span class="grow"></span>
       ${c.id === 'summary' ? '' : `<button data-act="good" title="Useful — prefer these documents for this topic">👍</button>
       <button data-act="bad" title="Not useful — avoid these documents for this topic">👎</button>`}
@@ -471,7 +536,7 @@ async function openFile(path, page) {
 function answersHtml() {
   return state.answers.map((a) => (a.thinking ? `<div class="card private"><div class="small"><b>You asked:</b> ${esc(a.q)}</div><div class="thinking">Looking…</div></div>` : `<div class="card private">
       <div class="small"><b>You asked:</b> ${esc(a.q)}</div>
-      ${a.error ? `<div class="err">${esc(a.error)}</div>` : `<div>${esc(a.answer)}</div>${a.say ? `<div class="say" style="margin-top:4px">Say: ${esc(a.say)}</div>` : ''}${(a.sources || []).map(sourceHtml).join('')}${webHtml(a.web)}`}
+      ${a.error ? `<div class="err">${esc(a.error)}</div>` : `<div>${esc(a.answer)}</div>${a.say ? `<div class="say" style="margin-top:4px">Say: ${esc(a.say)}</div>` : ''}${(a.sources || []).map(sourceHtml).join('')}${checkHtml(a.check)}${webHtml(a.web)}`}
     </div>`)).join('');
 }
 
@@ -484,6 +549,10 @@ async function ask(q) {
   q = String(q || '').trim();
   if (!q) return;
   state.settings = state.settings || (await getSettings());
+  if (state.aiPaused) {
+    toast('AI is stopped. Click ▶ Resume AI to ask questions again.');
+    return;
+  }
   const a = { q, at: Date.now(), thinking: true };
   state.answers.unshift(a);
   renderAnswers();
@@ -491,6 +560,7 @@ async function ask(q) {
     const res = await answerQuestion(q, state.entries, { projects: projects() });
     Object.assign(a, res, { thinking: false });
     state.cost += (res.cost || 0) + (res.web?.cost || 0);
+    runCheck(a, renderAnswers);
   } catch (err) {
     Object.assign(a, { thinking: false, error: err.message || String(err) });
   }
@@ -507,7 +577,8 @@ function markdown() {
   const proj = projects()[0];
   const lines = [`# ${state.summary?.title || 'Teams meeting'} — ${date} ${pad(start.getHours())}:${pad(start.getMinutes())}`, ''];
   if (proj) lines.push(`Project: ${proj}`);
-  lines.push(`Length: about ${Math.max(1, mins)} min · Transcribed ${state.stt?.engine === 'gemini' ? 'with Gemini' : 'on this computer (Whisper)'}${state.cost ? ` · AI cost ${money(state.cost)}` : ''}`, '');
+  const how = { gemini: 'with Gemini', both: 'with Gemini, checked by Whisper' }[state.sttEngine || state.stt?.engine] || 'on this computer (Whisper)';
+  lines.push(`Length: about ${Math.max(1, mins)} min · Transcribed ${how}${state.cost ? ` · AI cost ${money(state.cost)}` : ''}`, '');
   if (state.recordedTo) lines.push(`Audio recording (on the computer): ${state.recordedTo}`, '');
   const sm = state.summary;
   if (sm) {
@@ -515,12 +586,18 @@ function markdown() {
     if (sm.decisions?.length) lines.push('## Decisions', '', ...sm.decisions.map((d) => `- ${d}`), '');
     if (sm.action_items?.length) lines.push('## Action items', '', ...sm.action_items.map((a) => `- [ ] ${a.what}${a.who ? ` — ${a.who}` : ''}${a.when ? ` (${a.when})` : ''}`), '');
     if (sm.open_questions?.length) lines.push('## Open questions', '', ...sm.open_questions.map((q) => `- ${q}`), '');
+    const ck = sm.check;
+    if (ck?.by) {
+      const found = [...(ck.issues || []).map((i) => `- “${i.claim}” — ${i.problem}${i.fix && i.fix !== 'remove' ? ` (→ ${i.fix})` : ''}`), ...(ck.missed || []).map((m) => `- Not covered: ${m}`)];
+      lines.push(`## Checked by ${AI_NAME[ck.by]}`, '', ...(found.length ? found : ['No problems found against the transcript.']), '');
+    }
   }
   const shown = state.prompts.filter((p) => !p.thinking && !p.error && !p.empty);
   if (shown.length) {
     lines.push('## Prompts shown', '');
     for (const p of [...shown].reverse()) {
-      for (const sgt of p.suggestions || []) lines.push(`- ${hms(new Date(p.at))} — ${sgt.say}${(sgt.sources || []).length ? ` _(${sgt.sources.map((x) => `${x.path.split('/').pop()}${x.page ? ` ${pageLabel(x.path, x.page)}` : ''}`).join('; ')})_` : ''}`);
+      const flag = p.check?.verdict === 'issues' ? ' ⚠ (the second check disagreed)' : '';
+      for (const sgt of p.suggestions || []) lines.push(`- ${hms(new Date(p.at))} — ${sgt.say}${(sgt.sources || []).length ? ` _(${sgt.sources.map((x) => `${x.path.split('/').pop()}${x.page ? ` ${pageLabel(x.path, x.page)}` : ''}${x.verified === false ? ' — quote not found in the file' : ''}`).join('; ')})_` : ''}${flag}`);
       if (p.web?.text) lines.push(`- ${hms(new Date(p.at))} — 🌐 ${p.web.text.replace(/\n+/g, ' ')}`);
     }
     lines.push('');
@@ -532,7 +609,7 @@ function markdown() {
     lines.push('');
   }
   lines.push('## Transcript', '');
-  for (const e of state.entries) lines.push(`**[${hms(new Date(e.start))}] ${e.who === 'Them' ? 'Them' : e.who}:** ${e.text}  `);
+  for (const e of state.entries) lines.push(`**[${hms(new Date(e.start))}] ${e.who === 'Them' ? 'Them' : e.who}:** ${e.text}${e.unsure ? ` _(unsure — the other transcription heard: “${e.alt}”)_` : ''}  `);
   return lines.join('\n') + '\n';
 }
 
@@ -561,8 +638,8 @@ async function save(final = false) {
     endedAt: final ? Date.now() : null,
     project: projects()[0] || '',
     segments: state.entries,
-    prompts: state.prompts.filter((p) => !p.thinking).map(({ hitPaths, ...p }) => p),
-    answers: state.answers.filter((a) => !a.thinking),
+    prompts: state.prompts.filter((p) => !p.thinking).map(({ hitPaths, review, ...p }) => p),
+    answers: state.answers.filter((a) => !a.thinking).map(({ review, ...a }) => a),
     summary: state.summary,
     cost: state.cost,
     errors: state.errors.slice(-20),
@@ -627,7 +704,7 @@ function scheduleAutosave() {
 function renderSummary() {
   const sm = state.summary;
   if (!sm) return;
-  const card = { id: 'summary', at: Date.now(), topic: 'Meeting summary', suggestions: [{ say: sm.summary, why: [sm.decisions?.length ? `${sm.decisions.length} decision(s)` : '', sm.action_items?.length ? `${sm.action_items.length} action item(s)` : ''].filter(Boolean).join(' · '), sources: [] }], pinned: true };
+  const card = { id: 'summary', at: Date.now(), topic: 'Meeting summary', suggestions: [{ say: sm.summary, why: [sm.decisions?.length ? `${sm.decisions.length} decision(s)` : '', sm.action_items?.length ? `${sm.action_items.length} action item(s)` : ''].filter(Boolean).join(' · '), sources: [] }], pinned: true, check: sm.check ? (sm.check.error ? { error: sm.check.error } : { ...sm.check, verdict: sm.check.verdict }) : null };
   state.prompts.unshift(card);
   renderPrompts();
 }
@@ -704,7 +781,7 @@ async function popOut() {
     pip.document.title = 'Prompts';
     pip.document.body.className = 'pip';
     pip.document.body.innerHTML = `<div class="pip-wrap">
-      <div class="pip-meters"><span>Meeting</span><div class="bar meter"><div class="fill" id="pThem"></div></div><span>Me</span><div class="bar meter"><div class="fill" id="pMe"></div></div><button id="pipAskNow">Ask now</button></div>
+      <div class="pip-meters"><span>Meeting</span><div class="bar meter"><div class="fill" id="pThem"></div></div><span>Me</span><div class="bar meter"><div class="fill" id="pMe"></div></div><button id="pipAskNow">Ask now</button><button id="pipAi" title="Stop / resume AI">⏹ Stop AI</button></div>
       <div class="pip-list" id="pipList"></div>
       <form id="pipAsk" class="row nowrap"><input id="pipQ" class="grow" type="text" placeholder="Ask privately…" autocomplete="off"><button class="primary" type="submit">Ask</button></form>
     </div>`;
@@ -715,6 +792,8 @@ async function popOut() {
       q.value = '';
     });
     pip.document.getElementById('pipAskNow').addEventListener('click', () => runPrompt('asked', { manual: true }));
+    pip.document.getElementById('pipAi').addEventListener('click', toggleAi);
+    renderAi();
     pip.document.getElementById('pipList').addEventListener('click', onPromptClick);
     pip.addEventListener('pagehide', () => {
       state.pip = null;
@@ -771,6 +850,38 @@ $('chkMic').addEventListener('change', async () => {
 });
 $('btnStop').addEventListener('click', stopAndSave);
 $('btnRec').addEventListener('click', toggleRecording);
+
+// ---- the kill switch ----
+function renderAi() {
+  const b = $('btnAi');
+  b.textContent = state.aiPaused ? '▶ Resume AI' : '⏹ Stop AI';
+  b.className = state.aiPaused ? 'primary' : 'danger';
+  b.setAttribute('aria-pressed', String(state.aiPaused));
+  const pip = state.pip?.document.getElementById('pipAi');
+  if (pip) pip.textContent = state.aiPaused ? '▶ Resume AI' : '⏹ Stop AI';
+}
+async function toggleAi() {
+  if (state.aiPaused) {
+    await resumeAI();
+    state.aiPaused = false;
+    toast('AI resumed.');
+  } else {
+    await stopAllAI(); // cancels the calls in progress here and in every other part of the extension
+    state.aiPaused = true;
+    state.prompting?.abort();
+    toast('AI stopped: no prompts, answers or Gemini transcription until you resume. Listening and saving carry on.', 6000);
+  }
+  renderAi();
+}
+$('btnAi').addEventListener('click', toggleAi);
+chrome.runtime.onMessage.addListener((m) => {
+  if (m?.type === 'ai.stopAll' || m?.type === 'ai.resumed') {
+    state.aiPaused = m.type === 'ai.stopAll';
+    if (state.aiPaused) state.prompting?.abort();
+    renderAi();
+  }
+  return false;
+});
 $('btnAsk').addEventListener('click', () => runPrompt('asked', { manual: true }));
 $('btnPip').addEventListener('click', popOut);
 $('prompts').addEventListener('click', onPromptClick);
@@ -793,7 +904,10 @@ window.addEventListener('beforeunload', (e) => {
 
 state.onText = onText; // for the automated tests
 state.nasPathFor = nasPathFor;
+state.renderPrompts = renderPrompts;
 state.settings = await getSettings();
+state.aiPaused = !!state.settings.aiPaused;
+renderAi();
 state.mirrorPaths = (await projectFolders({ withPerm: false }).catch(() => [])).map((f) => f.nasPath);
 await loadProjects();
 state.ready = true;

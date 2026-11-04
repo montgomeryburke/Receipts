@@ -13,6 +13,7 @@
     <h1 class="brand">Meeting assistant</h1>
     <span class="grow"></span>
     <span id="clock" class="pill" hidden></span>
+    <button id="btnAi" class="danger" aria-pressed="false" title="Stop AI: cancel every Claude/Gemini call now and make no new ones until you resume. Listening, the free transcription and saving carry on.">⏹ Stop AI</button>
     <button id="btnSettings" class="icon" title="Meeting settings" aria-label="Meeting settings">⚙</button>
   </div>
   <div id="status" class="small muted" role="status">Not listening. Pick where Teams is running.</div>
@@ -82,6 +83,7 @@
       <select data-key="meetingStt">
         <option value="whisper">Free — on this computer (no key)</option>
         <option value="gemini">Gemini (needs a Gemini key)</option>
+        <option value="both">Gemini, checked by the free one — numbers both must agree on (needs a Gemini key)</option>
       </select>
     </label>
     <label class="field"><span>Prompts</span>

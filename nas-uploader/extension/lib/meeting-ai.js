@@ -12,6 +12,7 @@ import { localAI } from './localai.js';
 import { matchRules } from './teach.js';
 import { pageLabel } from './text.js';
 import { getAll, getSettings } from './db.js';
+import { canCrossCheck, review, quoteFound, unsupportedNumbers, dualLookUp } from './crosscheck.js';
 
 export const PROMPT_SCHEMA = {
   type: 'object',
@@ -172,12 +173,41 @@ async function retrieve(text, projects, { k = 6, charBudget = 3600 } = {}) {
   return { hits, files };
 }
 
+// Each quote is checked here, for free: it must really be in the excerpt it cites.
 function attachSources(list, hits) {
   return (list || []).map((s) => {
     const i = Number(String(s.ref || '').replace(/\D/g, '')) - 1;
     const h = hits[i];
-    return { ref: s.ref, quote: s.quote, path: h?.path || '', page: h?.page || 0 };
+    return { ref: s.ref, quote: s.quote, path: h?.path || '', page: h?.page || 0, verified: Boolean(h && quoteFound(s.quote, h.text)) };
   }).filter((s) => s.quote);
+}
+
+function reviewContext(hits, files, window, extra = '') {
+  return `${excerptsBlock(hits, files)}\n\n<transcript>\n${window}\n</transcript>${extra}`;
+}
+
+/**
+ * The second check of a prompt or a private answer, run after it is shown (so it adds no delay):
+ * local checks (quotes found in their files, numbers found in the excerpts or the transcript) and, with both
+ * keys, the other AI's review against the same excerpts. Returns
+ * {verdict: 'ok'|'issues', by?, issues, missed, badQuotes, unsupported, cost, localOnly?}.
+ */
+export async function checkResult(result, { signal } = {}) {
+  const ctx = result?.review;
+  if (!ctx) return null;
+  const settings = await getSettings();
+  const all = ctx.sourcesList || [];
+  const badQuotes = all.filter((s) => !s.verified).map((s) => s.quote);
+  const unsupported = unsupportedNumbers(ctx.text, ctx.sources);
+  const out = { badQuotes, unsupported, issues: [], missed: [], cost: 0 };
+  if (!canCrossCheck(settings)) {
+    return { ...out, localOnly: true, verdict: badQuotes.length || unsupported.length ? 'issues' : 'ok' };
+  }
+  const hints = [];
+  if (badQuotes.length) hints.push(`these quotes were not found word for word in the cited excerpts: ${badQuotes.map((q) => `"${q}"`).join('; ')}`);
+  if (unsupported.length) hints.push(`these numbers were not found in the excerpts or the transcript: ${unsupported.join(', ')}`);
+  const r = await review(settings, { provider: ctx.provider, what: ctx.what, sources: ctx.sources, text: ctx.text, hints, signal });
+  return { ...out, verdict: r.verdict === 'ok' && !badQuotes.length && !unsupported.length ? 'ok' : 'issues', by: r.by, issues: r.issues, missed: r.missed, cost: r.cost || 0 };
 }
 
 function providerFor(settings) {
@@ -210,6 +240,15 @@ export async function makePrompt(entries, { projects = [], signal } = {}) {
     cost: costOf(res.usage, res.model, settings),
     hitPaths: hits.map((h) => h.path),
   };
+  if (out.needed) {
+    out.review = {
+      provider: res.provider || provider,
+      what: 'meeting prompt (what the user could say next, with quotes from the excerpts)',
+      sources: reviewContext(hits, files, window),
+      text: out.suggestions.map((s) => `Say: ${s.say}\nWhy: ${s.why}\n${s.sources.map((x) => `Quote [${x.ref}]: "${x.quote}"`).join('\n')}`).join('\n\n'),
+      sourcesList: out.suggestions.flatMap((s) => s.sources),
+    };
+  }
   if (out.lookup && settings.meetingWebLookup) out.web = await lookUp(out.lookup, settings, provider, signal).catch((err) => ({ error: err.message }));
   return out;
 }
@@ -234,22 +273,30 @@ export async function answerQuestion(question, entries, { projects = [], signal 
     model: res.model,
     cost: costOf(res.usage, res.model, settings),
   };
+  if (out.answer) {
+    out.review = {
+      provider: res.provider || provider,
+      what: `private answer to the user's question: ${question}`,
+      sources: reviewContext(hits, files, window || '(nothing said yet)'),
+      text: `Answer: ${out.answer}${out.say ? `\nSay: ${out.say}` : ''}\n${out.sources.map((x) => `Quote [${x.ref}]: "${x.quote}"`).join('\n')}`,
+      sourcesList: out.sources,
+    };
+  }
   if (out.lookup && settings.meetingWebLookup) out.web = await lookUp(out.lookup, settings, provider, signal).catch((err) => ({ error: err.message }));
   return out;
 }
 
-/** Looks a standard up online (a separate, small call; only when the files don't have it). */
+const LOOKUP_SYSTEM = 'You look up engineering and construction standards and codes (for example CSA S6, the BC MoTI Supplement to S6, TAC Geometric Design Guide, provincial specifications). Give the requirement in one or two sentences, quote the exact clause text if you find it, and name the document, edition and clause number. If sources disagree or you are not sure, say so. No preamble.';
+
+/**
+ * Looks a standard up online (a separate, small call; only when the files don't have it). With both keys,
+ * Claude (Anthropic's web search) and Gemini (Google Search) look it up independently and their numbers are
+ * compared: {text, sources, by, second: {by, text, sources}, agree: true|false|null, cost}.
+ */
 async function lookUp(what, settings, provider, signal) {
-  const res = await generateText(settings, {
-    provider,
-    web: true,
-    effort: 'low',
-    maxTokens: 900,
-    signal,
-    system: 'You look up engineering and construction standards and codes (for example CSA S6, the BC MoTI Supplement to S6, TAC Geometric Design Guide, provincial specifications). Give the requirement in one or two sentences, quote the exact clause text if you find it, and name the document, edition and clause number. If sources disagree or you are not sure, say so. No preamble.',
-    prompt: `Look up: ${what}`,
-  });
-  return { text: res.text.trim(), sources: res.sources.slice(0, 4), cost: costOf(res.usage, res.model, settings) };
+  if (canCrossCheck(settings) && settings.dualLookUp !== false) return dualLookUp(settings, { provider, what, system: LOOKUP_SYSTEM, signal });
+  const res = await generateText(settings, { provider, web: true, effort: 'low', maxTokens: 900, signal, system: LOOKUP_SYSTEM, prompt: `Look up: ${what}` });
+  return { text: res.text.trim(), sources: res.sources.slice(0, 4), by: res.provider || provider, cost: costOf(res.usage, res.model, settings) };
 }
 
 /** End of meeting: summary, decisions, action items — and remember the key facts for the project. */
@@ -262,7 +309,33 @@ export async function summarize(entries, { projects = [], signal } = {}) {
   const parts = [`<transcript>\n${full}\n</transcript>\n\nSummarise this meeting.`];
   const res = await callLLM(settings, { provider, system: systemPrompt(settings, 'summary'), parts, schema: SUMMARY_SCHEMA, effort: 'low', maxTokens: 3000, signal });
   const d = res.data || {};
+  let cost = costOf(res.usage, res.model, settings) || 0;
+  // Checked by the other AI against the transcript before anything is remembered for the project.
+  let check = null;
+  if (canCrossCheck(settings)) {
+    try {
+      const text = [`Summary: ${d.summary || ''}`, ...(d.decisions || []).map((x) => `Decision: ${x}`), ...(d.action_items || []).map((a) => `Action: ${a.what} — ${a.who || '?'}${a.when ? ` (${a.when})` : ''}`), ...(d.remember || []).map((x) => `To remember: ${x}`)].join('\n');
+      const r = await review(settings, { provider: res.provider || provider, what: 'meeting summary, decisions, action items and facts to remember', sources: `<transcript>\n${full}\n</transcript>`, text, signal });
+      check = { by: r.by, verdict: r.verdict, issues: r.issues, missed: r.missed };
+      cost += r.cost || 0;
+    } catch (err) {
+      check = { error: err.message };
+    }
+  }
+  const flagged = (note) => (check?.issues || []).some((i) => overlaps(i.claim, note));
+  const remembered = [];
   const project = projects[0];
-  if (project) for (const note of (d.remember || []).slice(0, 6)) await addMemory(project, note, 'meeting').catch(() => {});
-  return { ...d, usage: res.usage, model: res.model, cost: costOf(res.usage, res.model, settings) };
+  for (const note of (d.remember || []).slice(0, 6)) {
+    if (flagged(note)) continue; // the second AI disputed it: not remembered
+    remembered.push(note);
+    if (project) await addMemory(project, note, 'meeting').catch(() => {});
+  }
+  return { ...d, remembered, check, usage: res.usage, model: res.model, cost };
+}
+
+function overlaps(a, b) {
+  const n = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}.]+/gu, ' ').trim();
+  const x = n(a);
+  const y = n(b);
+  return Boolean(x && y && (x.includes(y) || y.includes(x)));
 }

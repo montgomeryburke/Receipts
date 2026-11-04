@@ -12,6 +12,7 @@
   <nav class="side" aria-label="Sections">
     <h1>Project Assistant</h1>
     <a href="#ai">AI provider &amp; key</a>
+    <a href="#accuracy">Accuracy &amp; safety</a>
     <a href="#about">About you</a>
     <a href="#instructions">Instructions</a>
     <a href="#nas">NAS connection</a>
@@ -78,6 +79,23 @@
       <label class="check small"><input type="checkbox" data-key="refinePass"> When information is missing, search the files once more and re-check (one extra, smaller call)</label>
     </section>
 
+    <section id="accuracy" class="panel stack">
+      <h2>Accuracy &amp; safety</h2>
+      <p class="small muted">Everything the AI writes is checked a second way. Free checks run on this computer: every quote must really be in the file it cites, every number in a draft must be in the email or the sources, and (with "Gemini, checked by the free one") two transcriptions must hear the same numbers. With <b>both</b> a Claude and a Gemini key, each AI also checks the other's work.</p>
+      <p id="xcState" class="small"></p>
+      <label class="check small"><input type="checkbox" data-key="crossCheck"> With both keys: the other AI checks every email draft, meeting prompt, private answer and meeting summary against the same sources (about double the AI cost)</label>
+      <label class="check small"><input type="checkbox" data-key="crossCheckRevise"> When it finds a problem in an email draft, the first AI corrects the draft once (one more call)</label>
+      <label class="check small"><input type="checkbox" data-key="dualLookUp"> With both keys: standards are looked up online by both (Anthropic's web search and Google Search) and their numbers compared</label>
+      <div class="grid3">
+        <label class="field"><span>Daily AI spending limit, USD (0 = none)</span><input type="number" min="0" step="0.5" data-key="dailyBudgetUsd"></label>
+      </div>
+      <p id="spendState" class="small muted"></p>
+      <div class="row">
+        <button type="button" id="aiToggle" class="danger">⏹ Stop AI</button>
+        <span class="small muted">The kill switch: cancels every Claude and Gemini call in progress (drafts, chat, meeting prompts, Gemini transcription) and makes no new ones until you resume. The same button is in the side panel and the meeting window.</span>
+      </div>
+    </section>
+
     <section id="about" class="panel stack">
       <h2>About you</h2>
       <p class="small muted">Used to write replies in your voice. Kept short so it costs almost nothing.</p>
@@ -142,6 +160,7 @@
           <select data-key="meetingStt">
             <option value="whisper">Free — on this computer (Whisper, no key needed)</option>
             <option value="gemini">Gemini (needs a Gemini key; better with accents and noise)</option>
+            <option value="both">Gemini, checked by the free one: lines where they hear different numbers are flagged</option>
           </select>
         </label>
         <label class="field"><span>Prompts</span>

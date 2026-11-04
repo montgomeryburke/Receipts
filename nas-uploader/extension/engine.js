@@ -9,7 +9,8 @@ import { search, indexSummary, RECENCY_WORDS } from './lib/index.js';
 import { getRootHandle, permissionState } from './lib/fsutil.js';
 import { processEmail, regenerate, decideRequest, runItemAction, applyFolderResults, teachSource, listItems, summarize } from './lib/assistant.js';
 import { pollFolderResponses } from './lib/automate.js';
-import { listModels, hasKey, activeModel } from './lib/llm.js';
+import { listModels, hasKey, activeModel, spentToday, stopAllAI, resumeAI } from './lib/llm.js';
+import { canCrossCheck } from './lib/crosscheck.js';
 import { projectFolders } from './lib/folders.js';
 import { nasClient, configProblem, writeTextFile } from './lib/nas.js';
 import { sendChat, chatHistory, clearChat, runPendingTest } from './lib/chat.js';
@@ -140,6 +141,8 @@ async function drain() {
   draining = true;
   try {
     while (queue.length) {
+      // Stop AI: emails not started yet wait in the queue until Resume AI.
+      if ((await getSettings()).aiPaused) break;
       const { email, force } = queue.shift();
       try {
         await processEmail(email, { force, onChange: onItem });
@@ -227,6 +230,13 @@ async function status() {
     deep: await kvGet('deepApplied'),
     job: job ? { name: job.name, started: job.started, progress: job.progress } : null,
     queue: queue.length + (draining ? 1 : 0),
+    ai: {
+      paused: !!settings.aiPaused,
+      spentToday: await spentToday(),
+      dailyBudgetUsd: Number(settings.dailyBudgetUsd) || 0,
+      crossCheck: canCrossCheck(settings),
+      crossCheckOff: settings.crossCheck === false,
+    },
     chatBusy: !!chatBusy,
     pendingActions: ((await kvGet('pendingActions')) || []).length,
     summary: summarize(items),
@@ -238,6 +248,19 @@ async function status() {
 
 const handlers = {
   ping: async () => ({ ok: true }),
+  // The kill switch: cancels every Claude/Gemini call in progress (here, in the meeting window, anywhere) and
+  // refuses new ones until Resume.
+  'ai.stop': async () => {
+    await stopAllAI();
+    ui('aiState', { paused: true });
+    return { paused: true };
+  },
+  'ai.resume': async () => {
+    await resumeAI();
+    ui('aiState', { paused: false });
+    drain();
+    return { paused: false };
+  },
   status,
   'index.run': async () => startJob('index', doIndex),
   'deep.apply': async (m) => startJob('deep', (o) => doDeep({ ...o, force: !!m.force })),
@@ -326,6 +349,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     .then((res) => sendResponse(res ?? { ok: true }))
     .catch((err) => sendResponse({ error: err.message || String(err), kind: err.kind }));
   return true;
+});
+
+// Resume AI (from any page): drafts that waited in the queue go ahead.
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.type === 'ai.resumed') drain();
+  return false;
 });
 
 await loadConfig();

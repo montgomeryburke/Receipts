@@ -155,8 +155,15 @@ export const DEFAULT_SETTINGS = {
   // timeoutSec, enabled}
   actions: [],
 
+  // Accuracy and safety
+  crossCheck: true,                   // with both keys: the other AI checks drafts, prompts, answers and summaries
+  crossCheckRevise: true,             // …and a draft it finds problems in is revised once by the first AI
+  dualLookUp: true,                   // with both keys: standards are looked up online by both and compared
+  aiPaused: false,                    // the kill switch: no AI calls at all until resumed
+  dailyBudgetUsd: 0,                  // stop AI calls for the day once this much is spent (0 = no limit)
+
   // Meetings
-  meetingStt: 'whisper',              // 'whisper' (free, on this computer) | 'gemini' (needs a Gemini key)
+  meetingStt: 'whisper',              // 'whisper' (free, on this computer) | 'gemini' (needs a Gemini key) | 'both' (Gemini, checked by Whisper)
   meetingPrompts: 'auto',             // 'auto' (when a question or a new topic comes up) | 'manual' (Ask now only) | 'off'
   meetingProvider: '',                // '' = same as provider; or 'anthropic' | 'gemini'
   meetingMinGapSec: 20,               // at most one automatic prompt every N seconds (saves tokens)
