@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-05T19:15:43.675Z",
+ "generated": "2026-11-06T18:42:11.858Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -14,11 +14,11 @@
  "towns": [],
  "events": [
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-11-05|upcoming events. There are no upcoming events. Views Navigat",
+   "id": "src:https://www.theatrenewfoundland.com|2026-11-06|upcoming events. There are no upcoming events. Views Navigat",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-11-05T00:00:00.000Z",
+   "dt": "2026-11-06T00:00:00.000Z",
    "hasTime": false,
    "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "venueCity": "",
@@ -28,27 +28,7 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…upcoming events. There are no upcoming events. Views Navigation Event Views Navigation Month List Month Day This Month 11/5/2026 November 2026 Select date. Calendar of Events There are no upcoming events. Latest Past Events Oct 25 2026 October 25 @ 12:30 pm - 4:00 pm The Great Neddy Norr…",
-   "confirmed": false,
-   "forcedCat": null,
-   "kwHit": null
-  },
-  {
-   "id": "src:https://www.theatrenewfoundland.com|2026-12-03|ether, Dawn, Dana, and TNL’s current artistic producer Nicho",
-   "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-12-03T00:00:00.000Z",
-   "hasTime": false,
-   "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
-   "venueCity": "",
-   "venueLat": 49.9127,
-   "venueLon": -57.8028,
-   "priceMin": null,
-   "priceMax": null,
-   "segment": "arts",
-   "genre": "",
-   "desc": "…ether, Dawn, Dana, and TNL’s current artistic producer Nicholas Leno will form TNL's senior management team. 07/06/2023 12/03/2026 News New Setup at Nurse Myra Bennett Centre Check out our funky new set up at the Nurse Myra Bennett Centre for the performing arts! &#8220; Excellent show. Bo…",
+   "desc": "…upcoming events. There are no upcoming events. Views Navigation Event Views Navigation Month List Month Day This Month 11/6/2026 November 2026 Select date. Calendar of Events There are no upcoming events. Latest Past Events Oct 25 2026 October 25 @ 12:30 pm - 4:00 pm The Great Neddy Norr…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
