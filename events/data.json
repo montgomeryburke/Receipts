@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-07T17:11:46.522Z",
+ "generated": "2026-11-08T17:25:10.707Z",
  "loc": {
   "lat": 49.9127,
   "lon": -57.8028,
@@ -14,11 +14,11 @@
  "towns": [],
  "events": [
   {
-   "id": "src:https://www.theatrenewfoundland.com|2026-11-07|upcoming events. There are no upcoming events. Views Navigat",
+   "id": "src:https://www.theatrenewfoundland.com|2026-11-08|upcoming events. There are no upcoming events. Views Navigat",
    "source": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "title": "Possible event — Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "url": "https://www.theatrenewfoundland.com",
-   "dt": "2026-11-07T00:00:00.000Z",
+   "dt": "2026-11-08T00:00:00.000Z",
    "hasTime": false,
    "venue": "Gros Morne Theatre Festival (Theatre NL, Cow Head)",
    "venueCity": "",
@@ -28,7 +28,7 @@
    "priceMax": null,
    "segment": "arts",
    "genre": "",
-   "desc": "…upcoming events. There are no upcoming events. Views Navigation Event Views Navigation Month List Month Day This Month 11/7/2026 November 2026 Select date. Calendar of Events There are no upcoming events. Latest Past Events Oct 25 2026 October 25 @ 12:30 pm - 4:00 pm The Great Neddy Norr…",
+   "desc": "…upcoming events. There are no upcoming events. Views Navigation Event Views Navigation Month List Month Day This Month 11/8/2026 November 2026 Select date. Calendar of Events There are no upcoming events. Latest Past Events Oct 25 2026 October 25 @ 12:30 pm - 4:00 pm The Great Neddy Norr…",
    "confirmed": false,
    "forcedCat": null,
    "kwHit": null
