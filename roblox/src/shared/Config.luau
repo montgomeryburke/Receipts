@@ -551,6 +551,20 @@ Config.CivilianLines = {
 ]]
 Config.GrenadeKeyWeapon = "Grenade"
 
+--[[
+	You are always armed.
+
+	This is the shape of the whole game: a shooter with sports scattered
+	through it -- the lazy river, the ski run, the hang glider, the hockey
+	rink -- and you can shoot people while playing any of them. No gear, no
+	seat and no minigame may ever take your weapons away.
+
+	It is here as a flag rather than only as a convention so that the sanity
+	test can assert it, and so that anybody adding the next sport reads it
+	before they add a "you cannot shoot while..." check.
+]]
+Config.WeaponsAlwaysAvailable = true
+
 Config.Radar = {
 	Range = 170,
 	-- Contacts further above or below than this are off the dial entirely.
@@ -895,6 +909,7 @@ export type ConfigType = {
 		MaxPoopPiles: number, SplatDuration: number,
 	},
 	GrenadeKeyWeapon: string,
+	WeaponsAlwaysAvailable: boolean,
 	Radar: {
 		Range: number,
 		VerticalRange: number,

@@ -1051,6 +1051,20 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		})
 	end
 
+	-- Resort gear, on the pads the resort picked out: tubes at the summit, at
+	-- the foot of the ski run and round the river, and gliders at the top.
+	for _, at in resort.tubePads do
+		table.insert(vehiclePads, { position = at, kind = "Tube" })
+	end
+	for index, at in resort.skiPads do
+		-- A glider beside the skis at the summit; the lower station gets one
+		-- too, so being shot down is not the end of flying for the round.
+		table.insert(vehiclePads, {
+			position = at + Vector3.new(0, 2, 0),
+			kind = if index == 1 then "Glider" else "Tube",
+		})
+	end
+
 	-- Gear on the sniper towers, because climbing one should be worth it.
 	for index, top in resort.towerTops do
 		table.insert(pickupPads, {

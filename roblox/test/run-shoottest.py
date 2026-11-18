@@ -206,6 +206,56 @@ for _, child in shooterChar:GetChildren() do
 end
 check("only ever one weapon held", heldCount == 1, string.format("%d models", heldCount))
 
+-- --------------------------------------------- armed in every sport
+-- The shape of the whole game: a shooter with sports scattered through it,
+-- and you can shoot people while playing any of them. A seat that quietly
+-- stopped your guns working would be a different game, so every piece of
+-- gear gets checked rather than trusted.
+DUMP("")
+DUMP("Shooting from the sports gear:")
+check("the rule is on", Config.WeaponsAlwaysAvailable == true, "")
+
+do
+	local gear = { "Tube", "Glider" }
+	for _, kind in gear do
+		-- Past the last shot's cooldown. Without this the second piece of
+		-- gear reads as "cannot shoot" when all that happened is the sniper
+		-- was still reloading from the first.
+		ADVANCE(3)
+		local ride = VehicleService.SpawnKind(kind, Vector3.new(0, 5, 0))
+		if not ride then
+			check(kind .. " exists", false, "SpawnKind returned nothing")
+			continue
+		end
+
+		-- Put the shooter in it, the way sitting down would.
+		local seat = ride:FindFirstChild("DriverSeat")
+		local humanoid = shooterChar:FindFirstChildOfClass("Humanoid")
+		seat._props.Occupant = humanoid
+		humanoid._props.SeatPart = seat
+		seat._props.GetPropertyChangedSignal = nil
+		local state = PlayerState.Get(shooter)
+		state.vehicle = ride
+		state.seatRole = "Rider"
+
+		FIRED = {}
+		fireRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0, -1))
+		check("you can shoot from a " .. string.lower(kind), #FIRED_TO("ShotFired") > 0,
+			string.format("%d shots", #FIRED_TO("ShotFired")))
+
+		-- And it must not have silently handed you a mounted gun instead of
+		-- the rifle you were carrying.
+		check("a " .. string.lower(kind) .. " does not replace your weapon",
+			WeaponService.EquippedForTests(shooter) == state.equipped,
+			WeaponService.EquippedForTests(shooter))
+
+		state.vehicle = nil
+		state.seatRole = nil
+		humanoid._props.SeatPart = nil
+		ride:Destroy()
+	end
+end
+
 -- ------------------------------------------------------- the grenade key
 -- Halo's grenade button threw without changing what was in your hands, and
 -- that is the whole point of it: you can throw one mid-fight and still have

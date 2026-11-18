@@ -767,11 +767,6 @@ function WildlifeService.Clear()
 	end
 end
 
---[[ Nothing is rideable any more, but the weapon code still asks. ]]
-function WildlifeService.IsRiding(_player: Player): boolean
-	return false
-end
-
 function WildlifeService.Count(): number
 	return #dwellers
 end

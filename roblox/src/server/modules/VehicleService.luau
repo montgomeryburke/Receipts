@@ -820,6 +820,195 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 end
 
 --[[ Spawn whichever big toy a map pad asks for. ]]
+--[[
+	An inner tube.
+
+	The one piece of kit that works on both halves of the resort: ride it
+	down the ski run and it carries straight on into the lazy river at the
+	bottom, because it is pushed by whatever it is sitting in or on -- the
+	river's current, or gravity down a snow slope -- rather than by an engine
+	of its own.
+
+	It is a seat, so your guns keep working. That is the rule for every sport
+	here: you are always armed.
+]]
+function VehicleService.SpawnTube(position: Vector3): Model
+	local model = Instance.new("Model")
+	model.Name = "Tube"
+
+	local hub = Util.Part({
+		Name = "Chassis",
+		Size = Vector3.new(11, 3, 11),
+		CFrame = CFrame.new(position),
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(250, 150, 40),
+		Material = Enum.Material.Plastic,
+		Anchored = false,
+		-- Light and very slippery, so it skids down snow and bobs along the
+		-- river instead of gripping like a tyre.
+		CustomPhysicalProperties = PhysicalProperties.new(0.25, 0.08, 0.5, 1, 1),
+		Parent = model,
+	})
+	-- A cylinder's flat faces point along its own X, so stand it up.
+	hub.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
+	model.PrimaryPart = hub
+
+	-- The hole in the middle, which is what makes it read as a tube.
+	Util.Part({
+		Name = "TubeHole",
+		Size = Vector3.new(5.4, 3.4, 5.4),
+		CFrame = hub.CFrame,
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(40, 40, 46),
+		Transparency = 0.75,
+		CanCollide = false,
+		Anchored = false,
+		Massless = true,
+		Parent = model,
+	})
+	Util.Weld(hub, model:FindFirstChild("TubeHole") :: BasePart)
+
+	local seat = Instance.new("VehicleSeat")
+	seat.Name = "DriverSeat"
+	seat.Size = Vector3.new(4, 1, 4)
+	seat.CFrame = CFrame.new(position + Vector3.new(0, 1.4, 0))
+	seat.Color = Color3.fromRGB(240, 130, 30)
+	seat.Transparency = 1
+	seat.Anchored = false
+	seat.Massless = true
+	-- No engine of its own: the current and the slope do the work.
+	seat.MaxSpeed = 0
+	seat.Torque = 0
+	seat.TurnSpeed = 0
+	seat.Parent = model
+	Util.Weld(hub, seat)
+
+	-- Steering only. A LinearVelocity in plane mode would fight gravity, so
+	-- the tube is pushed by an impulse each frame instead and this just
+	-- points it.
+	local turn = Instance.new("AngularVelocity")
+	turn.Name = "TurnVelocity"
+	turn.Attachment0 = Util.Attachment(hub, Vector3.new())
+	turn.RelativeTo = Enum.ActuatorRelativeTo.World
+	turn.MaxTorque = 90000
+	turn.AngularVelocity = Vector3.new()
+	turn.Enabled = true
+	turn.Parent = hub
+
+	addSitPrompt(seat, "Ride the tube", "Tube")
+	bindSeat(seat, model, "Rider")
+	addVehicleLabel(hub, "Tube", Color3.fromRGB(255, 190, 120))
+
+	model:SetAttribute("Health", 40)
+	model:SetAttribute("MaxHealth", 40)
+	model:SetAttribute("VehicleKind", "Tube")
+	model.Parent = workspace
+
+	active[model] = {
+		kind = "Tube",
+		chassis = hub,
+		seat = seat,
+		turn = turn,
+	}
+	return model
+end
+
+--[[
+	A hang glider.
+
+	Launched off the summit, it gives you the one thing no other vehicle on
+	the map does: a slow, quiet look down at everybody. It trades height for
+	speed like a real wing -- pull the nose up and you climb briefly and then
+	stall, push it down and you go fast and lose altitude.
+
+	Spacebar bails out, and the existing parachute catches you, which is what
+	makes being shot down survivable rather than just fatal.
+]]
+function VehicleService.SpawnGlider(position: Vector3): Model
+	local model = Instance.new("Model")
+	model.Name = "Glider"
+
+	local frame = Util.Part({
+		Name = "Chassis",
+		Size = Vector3.new(4, 2, 12),
+		CFrame = CFrame.new(position),
+		Color = Color3.fromRGB(70, 74, 82),
+		Material = Enum.Material.Metal,
+		Anchored = false,
+		CustomPhysicalProperties = PhysicalProperties.new(0.2, 0.3, 0.4, 1, 1),
+		Parent = model,
+	})
+	model.PrimaryPart = frame
+
+	-- The wing: a wide shallow delta, in two halves so it reads as swept.
+	for _, side in { -1, 1 } do
+		local panel = Util.Part({
+			Name = "Wing",
+			Size = Vector3.new(26, 0.6, 13),
+			CFrame = CFrame.new(position + Vector3.new(side * 13, 3.4, 0))
+				* CFrame.Angles(0, 0, math.rad(side * -9)),
+			Color = if side < 0 then Color3.fromRGB(235, 80, 70) else Color3.fromRGB(70, 130, 235),
+			Material = Enum.Material.Fabric,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(frame, panel)
+	end
+
+	local seat = Instance.new("VehicleSeat")
+	seat.Name = "DriverSeat"
+	seat.Size = Vector3.new(3, 1, 4)
+	seat.CFrame = CFrame.new(position + Vector3.new(0, 1, 0))
+	seat.Color = Color3.fromRGB(60, 62, 70)
+	seat.Anchored = false
+	seat.Massless = true
+	seat.MaxSpeed = 0
+	seat.Torque = 0
+	seat.TurnSpeed = 0
+	seat.Parent = model
+	Util.Weld(frame, seat)
+
+	local lift = Instance.new("LinearVelocity")
+	lift.Name = "DriveVelocity"
+	lift.Attachment0 = Util.Attachment(frame, Vector3.new())
+	lift.RelativeTo = Enum.ActuatorRelativeTo.World
+	lift.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	lift.ForceLimitsEnabled = false
+	lift.VectorVelocity = Vector3.new()
+	lift.Enabled = false
+	lift.Parent = frame
+
+	local attitude = Instance.new("AlignOrientation")
+	attitude.Name = "Attitude"
+	attitude.Attachment0 = Util.Attachment(frame, Vector3.new(), "AttitudeAnchor")
+	attitude.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	attitude.RigidityEnabled = true
+	attitude.CFrame = frame.CFrame.Rotation
+	attitude.Enabled = false
+	attitude.Parent = frame
+
+	addSitPrompt(seat, "Take the glider", "Hang Glider")
+	bindSeat(seat, model, "Rider")
+	addVehicleLabel(frame, "Hang Glider", Color3.fromRGB(190, 220, 255))
+
+	model:SetAttribute("Health", 55)
+	model:SetAttribute("MaxHealth", 55)
+	model:SetAttribute("VehicleKind", "Glider")
+	model.Parent = workspace
+
+	active[model] = {
+		kind = "Glider",
+		chassis = frame,
+		seat = seat,
+		velocity = lift,
+		orientation = attitude,
+		heading = frame.CFrame.Rotation,
+		airspeed = 0,
+	}
+	return model
+end
+
 function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 	if kind == "TurretTruck" then
 		return VehicleService.SpawnTurretTruck(position)
@@ -829,6 +1018,10 @@ function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 		return VehicleService.SpawnPlane(position)
 	elseif kind == "Torpedo" then
 		return VehicleService.SpawnTorpedo(position)
+	elseif kind == "Tube" then
+		return VehicleService.SpawnTube(position)
+	elseif kind == "Glider" then
+		return VehicleService.SpawnGlider(position)
 	end
 	return nil
 end
@@ -1023,6 +1216,148 @@ end
 	Fly a plane. Throttle changes speed, steering rolls and turns, and the
 	nose pitches with the seat's own up/down input.
 ]]
+--[[
+	Drive a tube.
+
+	A tube has no engine. It goes where it is pushed:
+
+	  - In the river, a FlowZone part carries a direction attribute and the
+	    tube is pushed along it. That is what makes the lazy river lazy and
+	    still a way to travel.
+	  - On snow, gravity does it: the steeper the slope under you, the faster
+	    you go, which is what lets you ride the ski run on a tube and shoot
+	    off the end of it into the water without ever touching a throttle.
+
+	Steering only points you. Nothing here fights gravity, so the tube still
+	falls off a cliff like an object rather than hovering like a vehicle.
+]]
+local TUBE_FLOW_SPEED = 46
+local TUBE_SLOPE_SPEED = 118
+
+local function driveTube(model: Model, state: any, deltaTime: number)
+	local hub = state.chassis :: BasePart
+	local seat = state.seat :: VehicleSeat
+	local turn = state.turn :: AngularVelocity
+
+	-- Steering works whether or not anybody is aboard; an empty tube simply
+	-- is not told to turn.
+	turn.AngularVelocity = if seat.Occupant
+		then Vector3.new(0, -seat.Steer * 1.9, 0)
+		else Vector3.new()
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local occupantCharacter = if seat.Occupant then seat.Occupant.Parent else nil
+	params.FilterDescendantsInstances = if occupantCharacter
+		then { model, occupantCharacter }
+		else { model }
+
+	local push = Vector3.new()
+
+	-- The river first: a current beats a slope.
+	local flowHit = workspace:Raycast(hub.Position + Vector3.new(0, 2, 0), Vector3.new(0, -8, 0), params)
+	local flowPart = if flowHit then flowHit.Instance else nil
+	local onFlow = false
+	if flowPart then
+		local fx = flowPart:GetAttribute("FlowX")
+		local fz = flowPart:GetAttribute("FlowZ")
+		if typeof(fx) == "number" and typeof(fz) == "number" then
+			onFlow = true
+			push = Vector3.new(fx, 0, fz) * TUBE_FLOW_SPEED
+		end
+	end
+
+	if not onFlow then
+		-- Snow: slide downhill, hard. The surface normal gives both the
+		-- direction and the steepness in one go.
+		local ground = workspace:Raycast(hub.Position, Vector3.new(0, -7, 0), params)
+		if ground and ground.Material == Enum.Material.Snow then
+			local normal = ground.Normal
+			local downhill = Vector3.new(normal.X, 0, normal.Z)
+			if downhill.Magnitude > 0.02 then
+				-- A flat surface has a vertical normal and so no downhill
+				-- component at all, which is exactly right: you stop.
+				push = downhill.Unit * (downhill.Magnitude * TUBE_SLOPE_SPEED)
+			end
+		end
+	end
+
+	if push.Magnitude > 0.1 then
+		-- An impulse rather than a velocity constraint, so the tube keeps
+		-- its own vertical motion and still falls, jumps and lands.
+		local current = hub.AssemblyLinearVelocity
+		local flat = Vector3.new(current.X, 0, current.Z)
+		local wanted = push - flat
+		-- Eased, so it accelerates into the current instead of snapping.
+		hub.AssemblyLinearVelocity = current + Vector3.new(wanted.X, 0, wanted.Z) * math.min(1, deltaTime * 3.2)
+	end
+end
+
+--[[
+	Fly a hang glider.
+
+	It trades height for speed the way a wing does: nose down and you gain
+	speed and lose altitude, nose up and you convert speed back into a brief
+	climb and then run out of it. There is no throttle, which is the whole
+	character of the thing.
+]]
+local GLIDE_MIN_SPEED = 42
+local GLIDE_MAX_SPEED = 140
+local GLIDE_SINK = 13
+
+local function driveGlider(model: Model, state: any, deltaTime: number)
+	local frame = state.chassis :: BasePart
+	local seat = state.seat :: VehicleSeat
+	local lift = state.velocity :: LinearVelocity
+	local attitude = state.orientation :: AlignOrientation
+
+	if not seat.Occupant then
+		lift.Enabled = false
+		attitude.Enabled = false
+		state.airspeed = 0
+		return
+	end
+
+	lift.Enabled = true
+	attitude.Enabled = true
+
+	--[[
+		W pushes the nose DOWN, S pulls it up.
+
+		Note the minus sign. A positive rotation about X takes the look
+		vector upward in Roblox, so without it W climbed and the glider lost
+		speed when you asked it to dive -- which the test caught as "diving
+		trades height for speed" failing with the dive SLOWER than level.
+	]]
+	local pitchInput = seat.Throttle
+	local rollInput = seat.Steer
+
+	state.heading = state.heading
+		* CFrame.Angles(-pitchInput * 0.9 * deltaTime, -rollInput * 1.25 * deltaTime, 0)
+
+	-- Keep the nose from going fully vertical either way, which would leave
+	-- the wing with no sensible forward direction at all.
+	local look = state.heading.LookVector
+	if look.Y > 0.72 or look.Y < -0.86 then
+		state.heading = state.heading * CFrame.Angles(pitchInput * 0.9 * deltaTime, 0, 0)
+		look = state.heading.LookVector
+	end
+
+	attitude.CFrame = state.heading
+
+	-- Diving builds speed, climbing spends it.
+	local gain = -look.Y * 95
+	state.airspeed = math.clamp(
+		(state.airspeed or GLIDE_MIN_SPEED) + (gain - 16) * deltaTime,
+		GLIDE_MIN_SPEED,
+		GLIDE_MAX_SPEED
+	)
+
+	-- Always sinking a little, so a glide is a glide and not a hover.
+	local sink = -GLIDE_SINK * (1 - math.clamp(state.airspeed / GLIDE_MAX_SPEED, 0, 1) * 0.55)
+	lift.VectorVelocity = look * state.airspeed + Vector3.new(0, sink, 0)
+end
+
 local function drivePlane(model: Model, state: any, deltaTime: number)
 	local spec = Config.Vehicles.Plane
 	local seat = state.seat :: VehicleSeat
@@ -1391,6 +1726,10 @@ local function step(deltaTime: number)
 			drivePlane(model, state, deltaTime)
 		elseif state.kind == "Torpedo" then
 			driveTorpedo(model, state, deltaTime)
+		elseif state.kind == "Tube" then
+			driveTube(model, state, deltaTime)
+		elseif state.kind == "Glider" then
+			driveGlider(model, state, deltaTime)
 		else
 			driveWheeled(model, state, deltaTime)
 		end

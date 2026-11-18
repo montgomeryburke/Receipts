@@ -98,11 +98,6 @@ local function updateHeldWeapon(player: Player)
 		existing:Destroy()
 	end
 
-	-- Riding an animal means empty hands.
-	if WildlifeService.IsRiding(player) then
-		return
-	end
-
 	local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
 	if not hand or not hand:IsA("BasePart") then
 		return
@@ -379,10 +374,19 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 		return
 	end
 
-	-- Riding an animal means no guns. The animal is the weapon.
-	if WildlifeService.IsRiding(player) then
-		return
-	end
+	--[[
+		There is no state in this game that takes your guns away.
+
+		This used to check WildlifeService.IsRiding, left over from when you
+		could ride a giant animal and the animal was the weapon. The animals
+		became zombies and the function has returned false ever since, so it
+		was a gate that did nothing -- but it was also a gate pointing the
+		wrong way. The game is a shooter with sports scattered through it:
+		tubing the lazy river, skiing the mountain, flying a glider, playing
+		hockey. You are armed in all of them, always, and nothing new should
+		ever be allowed to quietly change that. Config.WeaponsAlwaysAvailable
+		says so and a test enforces it.
+	]]
 
 	local state = PlayerState.Get(player)
 	local slot = state.weapons[weaponName]
