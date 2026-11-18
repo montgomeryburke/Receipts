@@ -311,6 +311,17 @@ Inst.__index = function(self, k)
 end
 Inst.__newindex = function(self, k, v)
 	if k == "Parent" then
+		-- Roblox locks Parent once an instance is destroyed. Allowing a
+		-- destroyed instance back into the world let a test resurrect
+		-- something the real engine would refuse, and hid stale-reference
+		-- bugs where code hangs on to a thing after cleaning it up.
+		if rawget(self, "_destroyed") and v ~= nil then
+			error(
+				`The Parent property of {tostring(rawget(self, "_props").Name or rawget(self, "_class"))}`
+					.. " is locked, current parent: NULL",
+				2
+			)
+		end
 		local old = rawget(self, "_parent")
 		if old then
 			for i, c in old._children do
@@ -355,10 +366,30 @@ end
 ]]
 local function localSignal()
 	local handlers = {}
+	local function disconnect(fn)
+		for index, candidate in handlers do
+			if candidate == fn then
+				table.remove(handlers, index)
+				return
+			end
+		end
+	end
 	return {
 		Connect = function(_, fn)
 			table.insert(handlers, fn)
-			return { Disconnect = function() end }
+			-- A real Disconnect, not a no-op. Code that connects, acts and
+			-- disconnects was being left connected here, so anything that
+			-- unsubscribes to avoid double work looked correct while doing
+			-- the work twice.
+			return {
+				Disconnect = function()
+					disconnect(fn)
+				end,
+			}
+		end,
+		-- What Destroy calls on every signal an instance owns.
+		DisconnectAll = function()
+			table.clear(handlers)
 		end,
 		Wait = function() end,
 		_handlers = handlers,
@@ -451,7 +482,57 @@ local function newInstance(class)
 end
 
 function Inst:IsA(c) return self._class == c or (c == "BasePart" and (self._class == "Part" or self._class == "SpawnLocation")) end
-function Inst:Destroy() self.Parent = nil end
+--[[
+	Destroy, recursively, the way Roblox does.
+
+	The stand-in used to only unparent the instance itself, leaving every
+	descendant still pointing at it. That matters because a great deal of
+	this code guards on `thing.Parent` to ask "does this still exist?" --
+	a delayed callback checking `humanoid.Parent` before touching it, a
+	respawn timer checking its own part. With a shallow Destroy those guards
+	all answered "yes, still here" after the parent model was destroyed, so
+	a whole class of lifetime bug was invisible from a terminal.
+
+	The child list is snapshotted before the loop, because each child's own
+	Destroy removes it from that list.
+]]
+function Inst:Destroy()
+	-- Idempotent. Destroying something twice is not an error in Roblox, and
+	-- the second call must not walk a child list that is already gone.
+	if rawget(self, "_destroyed") then
+		return
+	end
+	rawset(self, "_destroyed", true)
+
+	self.Parent = nil
+
+	-- Snapshotted, because each child's own Destroy removes it from here.
+	for _, child in table.clone(self._children) do
+		child:Destroy()
+	end
+
+	--[[
+		Drop every listener this instance owned.
+
+		Roblox disconnects an instance's connections when it is destroyed. A
+		destroyed part whose Touched handler still fires is worse than a
+		missing feature: it makes a test pass that the real game would fail,
+		which is the one outcome a harness must never produce. The signals
+		already live in _props, so they are found rather than tracked.
+	]]
+	for _, value in rawget(self, "_props") do
+		if type(value) == "table" and type(rawget(value, "DisconnectAll")) == "function" then
+			value.DisconnectAll()
+		end
+	end
+end
+
+--[[ Empty an instance without destroying it. Snapshot, for the same reason. ]]
+function Inst:ClearAllChildren()
+	for _, child in table.clone(self._children) do
+		child:Destroy()
+	end
+end
 function Inst:SetAttribute(k, v) self._attrs[k] = v end
 function Inst:GetAttribute(k) return self._attrs[k] end
 function Inst:FindFirstChild(n)
@@ -491,11 +572,7 @@ end
 	stand-in was the thing that was wrong.
 ]]
 function Inst:GetChildren()
-	local copy = table.create(#self._children)
-	for index, child in self._children do
-		copy[index] = child
-	end
-	return copy
+	return table.clone(self._children)
 end
 function Inst:PivotTo(cf)
 	local primary = self._props.PrimaryPart

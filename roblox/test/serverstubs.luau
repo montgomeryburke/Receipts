@@ -100,10 +100,30 @@ task = {
 
 local function signal()
 	local handlers = {}
+	local function disconnect(fn)
+		for index, candidate in handlers do
+			if candidate == fn then
+				table.remove(handlers, index)
+				return
+			end
+		end
+	end
 	return {
 		Connect = function(_, fn)
 			table.insert(handlers, fn)
-			return { Disconnect = function() end }
+			-- A real Disconnect, not a no-op. Code that connects, acts and
+			-- disconnects was being left connected here, so anything that
+			-- unsubscribes to avoid double work looked correct while doing
+			-- the work twice.
+			return {
+				Disconnect = function()
+					disconnect(fn)
+				end,
+			}
+		end,
+		-- What Destroy calls on every signal an instance owns.
+		DisconnectAll = function()
+			table.clear(handlers)
 		end,
 		Wait = function() end,
 		-- Exposed so a test can ask whether anything is listening at all.
@@ -210,7 +230,23 @@ Instance = { new = function(class)
 		props.OnServerInvoke = nil
 		props.InvokeServer = function() return {} end
 	end
-	props.GetPropertyChangedSignal = function() return SIGNAL() end
+	--[[
+		The SAME signal for the same property, every time.
+
+		Handing back a fresh one per call meant a module that connected on
+		one call and a test that fired on another were holding two unrelated
+		signals, so the handler never ran and the wiring looked dead.
+	]]
+	local changedSignals = {}
+	props.GetPropertyChangedSignal = function(_, property)
+		local existing = changedSignals[property]
+		if existing then
+			return existing
+		end
+		local made = SIGNAL()
+		changedSignals[property] = made
+		return made
+	end
 	props.Destroying = SIGNAL()
 	props.Touched = SIGNAL()
 	props.Triggered = SIGNAL()

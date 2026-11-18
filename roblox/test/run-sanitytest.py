@@ -272,6 +272,138 @@ end
 check("every sound the code asks for exists", #missingReferenced == 0,
 	table.concat(missingReferenced, ", "))
 
+--[[
+	The stand-ins themselves.
+
+	Roughly half the bugs found in this project were holes in this harness
+	rather than in the game, and a hole here does not announce itself -- it
+	shows up as a suite that passes while the real game is broken, or as
+	correct code that looks broken for no reason. So the stand-ins get their
+	own checks, on the specific behaviours that have already bitten.
+]]
+print("")
+print("The harness itself:")
+
+do
+	-- GetChildren must COPY. Returning the live array meant the completely
+	-- ordinary destroy-every-child loop walked a table that was shrinking
+	-- underneath it and cleared about every other one.
+	local parent = Instance.new("Folder")
+	for index = 1, 6 do
+		local child = Instance.new("Part")
+		child._props.Name = "Child" .. index
+		child.Parent = parent
+	end
+
+	local snapshot = parent:GetChildren()
+	check("GetChildren returns a copy, not the live list",
+		snapshot ~= rawget(parent, "_children"), "")
+
+	for _, child in parent:GetChildren() do
+		child:Destroy()
+	end
+	check("destroying every child in a loop clears all of them",
+		#parent:GetChildren() == 0,
+		string.format("%d left behind", #parent:GetChildren()))
+end
+
+do
+	-- Destroy must be recursive. A great deal of this code guards on
+	-- `thing.Parent` to ask "does this still exist?" -- a delayed callback
+	-- checking a humanoid before touching it, a respawn timer checking its
+	-- own part. A shallow Destroy answered "still here" for every
+	-- descendant of a destroyed model, so lifetime bugs were invisible.
+	local model = Instance.new("Model")
+	local limb = Instance.new("Part")
+	limb.Parent = model
+	local nested = Instance.new("Part")
+	nested.Parent = limb
+	model.Parent = workspace
+
+	model:Destroy()
+	check("Destroy unparents the instance", model.Parent == nil, "")
+	check("Destroy reaches its children", limb.Parent == nil, tostring(limb.Parent))
+	check("Destroy reaches grandchildren", nested.Parent == nil, tostring(nested.Parent))
+end
+
+do
+	local parent = Instance.new("Folder")
+	for _ = 1, 4 do
+		Instance.new("Part").Parent = parent
+	end
+	parent:ClearAllChildren()
+	check("ClearAllChildren empties without destroying the parent",
+		#parent:GetChildren() == 0 and parent ~= nil,
+		string.format("%d left", #parent:GetChildren()))
+end
+
+do
+	-- Destroy is idempotent, and locks Parent afterwards the way Roblox
+	-- does. Letting a destroyed instance back into the world let a test
+	-- resurrect something the engine would refuse, and hid stale-reference
+	-- bugs where code hangs on to a thing after cleaning it up.
+	local part = Instance.new("Part")
+	part._props.Name = "Doomed"
+	part.Parent = workspace
+	part:Destroy()
+
+	local twice = pcall(function()
+		part:Destroy()
+	end)
+	check("destroying twice is not an error", twice, "")
+
+	local reparented = pcall(function()
+		part.Parent = workspace
+	end)
+	check("a destroyed instance cannot be re-parented", not reparented, "")
+end
+
+do
+	-- A destroyed part's handlers must stop firing. A Touched that still
+	-- works after Destroy makes a test pass that the real game would fail,
+	-- which is the one thing a harness must never do.
+	local prompt = Instance.new("ProximityPrompt")
+	local fired = 0
+	local triggered = prompt._props.Triggered
+	triggered:Connect(function()
+		fired += 1
+	end)
+	triggered._fire()
+	check("a live prompt's handler fires", fired == 1, string.format("%d", fired))
+
+	prompt:Destroy()
+	triggered._fire()
+	check("a destroyed instance's handler does not fire", fired == 1,
+		string.format("%d after destroy", fired))
+end
+
+do
+	-- Disconnect has to actually disconnect. It was a no-op, so anything
+	-- that unsubscribes to avoid doing work twice looked correct while
+	-- doing it twice.
+	local prompt = Instance.new("ProximityPrompt")
+	local triggered = prompt._props.Triggered
+	local runs = 0
+	local connection = triggered:Connect(function()
+		runs += 1
+	end)
+	triggered._fire()
+	connection:Disconnect()
+	triggered._fire()
+	check("Disconnect stops the handler", runs == 1,
+		string.format("%d runs after disconnecting", runs))
+end
+
+do
+	-- Enum items have to be the SAME value each time or no comparison
+	-- against one can ever be true -- which is how it was discovered that
+	-- no keyboard input had ever actually been testable.
+	check("an Enum item is the same value every time",
+		Enum.KeyCode.F == Enum.KeyCode.F, "")
+	check("and two different items are not equal",
+		Enum.KeyCode.F ~= Enum.KeyCode.Q, "")
+end
+
 print("")
 print(if failures == 0 then "CONFIG IS SANE" else failures .. " FAILURES")
 
