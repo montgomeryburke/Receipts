@@ -52,7 +52,6 @@ local EVENT_NAMES = {
 	"HockeyScore",
 	"FightUpdate",
 	"FightStarted",
-	"FightSwing",
 	"FightResult",
 	-- The sub-games: the menu, the walk-in offer, and joining or leaving one.
 	-- The client tells the server it has scoped, so the server can slow the

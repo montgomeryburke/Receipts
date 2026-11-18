@@ -993,10 +993,6 @@ function HockeyService.Start()
 	end
 	hockeyStarted = true
 
-	Remotes.Event("FightSwing").OnServerEvent:Connect(function(player: Player)
-		HockeyService.Swing(player)
-	end)
-
 	Remotes.Event("HockeyPunch").OnServerEvent:Connect(function(player: Player)
 		HockeyService.Punch(player)
 	end)

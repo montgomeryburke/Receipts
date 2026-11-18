@@ -262,6 +262,19 @@ Remotes.Event("FightStarted").OnClientEvent:Connect(function(payload)
 	Sound.Flat("MeleeSwing")
 end)
 
+Remotes.Event("FightUpdate").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Hud.FightHealth(
+		tonumber(payload.health) or 0,
+		tonumber(payload.opponentHealth) or 0,
+		tonumber(payload.maxHealth) or 100,
+		payload.opponentBlocking == true,
+		payload.blocking == true
+	)
+end)
+
 Remotes.Event("FightResult").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return

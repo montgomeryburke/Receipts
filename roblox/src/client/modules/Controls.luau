@@ -303,7 +303,8 @@ local nextShotFeedback = 0
 
 -- Counts up while a hockey fight is running, so F throws punches as well as
 -- detonating. Zero means no fight.
-local fightSwings = 0
+local inFight = false
+local guardUp = false
 
 local function tryFire()
 	local spec = arsenal[effectiveWeaponName()]
@@ -642,13 +643,20 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		-- deliberate: there is no spare finger during a scrap, and a diamond
 		-- round going off while you are swinging is in the spirit of it.
 		Remotes.Event("MegaDetonate"):FireServer()
-		if fightSwings > 0 then
-			fightSwings += 1
-			Remotes.Event("FightSwing"):FireServer()
-			Hud.FightSwings(fightSwings)
+		if inFight then
+			Remotes.Event("HockeyPunch"):FireServer()
 		end
 	elseif input.KeyCode == Enum.KeyCode.Q then
-		Remotes.Event("Melee"):FireServer()
+		-- Melee normally; mid-fight the same key is the guard, because a
+		-- punch IS the melee once the gloves are off.
+		if inFight then
+			if not guardUp then
+				guardUp = true
+				Remotes.Event("HockeyBlock"):FireServer(true)
+			end
+		else
+			Remotes.Event("Melee"):FireServer()
+		end
 	elseif input.KeyCode == Enum.KeyCode.Space then
 		-- Bail out of whatever you are riding. Harmless on foot.
 		local character = player.Character
@@ -676,6 +684,16 @@ end
 local function onInputEnded(input: InputObject)
 	if input.KeyCode == Enum.KeyCode.Tab then
 		setScoreboard(false)
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Q and inFight then
+		-- The guard is held, not toggled: letting go drops it, which is what
+		-- makes a feint possible.
+		if guardUp then
+			guardUp = false
+			Remotes.Event("HockeyBlock"):FireServer(false)
+		end
 		return
 	end
 
@@ -1058,9 +1076,22 @@ function Controls.ResetForTests()
 	controlsStarted = false
 end
 
---[[ A fight started or finished; F throws punches while one is running. ]]
+--[[
+	A fight started or finished. While one is running F throws punches and Q
+	is the guard; the mouse still works the gun throughout, which is the
+	point of fighting here rather than in a cutscene.
+]]
 function Controls.SetFighting(fighting: boolean)
-	fightSwings = if fighting then 1 else 0
+	inFight = fighting
+	if not fighting and guardUp then
+		guardUp = false
+		Remotes.Event("HockeyBlock"):FireServer(false)
+	end
+end
+
+--[[ For tests: is the guard up right now? ]]
+function Controls.GuardUpForTests(): boolean
+	return guardUp
 end
 
 function Controls.ScoreboardOpenForTests(): boolean

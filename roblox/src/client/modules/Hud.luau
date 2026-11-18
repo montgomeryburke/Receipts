@@ -75,6 +75,10 @@ local respawnLabel: TextLabel? = nil
 local respawnToken = 0
 local fightLabel: TextLabel? = nil
 local fightCount: TextLabel? = nil
+local fightMineBar: Frame? = nil
+local fightMineFill: Frame? = nil
+local fightTheirsBar: Frame? = nil
+local fightTheirsFill: Frame? = nil
 local fightToken = 0
 local arcadePanel: Frame? = nil
 local arcadeList: Frame? = nil
@@ -650,6 +654,38 @@ function Hud.Build()
 		Visible = false,
 		ZIndex = 12,
 	})
+
+	-- Two health bars, Blades of Steel style: yours on the left, theirs on
+	-- the right. A raised guard tints the bar, so you can read your
+	-- opponent's guard off the HUD and time a punch for when it drops.
+	for _, side in {
+		{ name = "Mine", x = 0.5 - 0.30, colour = Color3.fromRGB(90, 200, 255) },
+		{ name = "Theirs", x = 0.5 + 0.08, colour = Color3.fromRGB(255, 110, 90) },
+	} do
+		local bar = makeFrame(screen, {
+			Name = `Fight{side.name}Bar`,
+			Size = UDim2.new(0.22, 0, 0, 18),
+			Position = UDim2.new(side.x, 0, 0.16, 96),
+			BackgroundColor3 = Color3.fromRGB(16, 18, 22),
+			BackgroundTransparency = 0.25,
+			Visible = false,
+			ZIndex = 12,
+		})
+		local fill = makeFrame(bar, {
+			Name = "Fill",
+			Size = UDim2.fromScale(1, 1),
+			Position = UDim2.fromScale(0, 0),
+			BackgroundColor3 = side.colour,
+			BackgroundTransparency = 0,
+			Visible = true,
+			ZIndex = 13,
+		})
+		if side.name == "Mine" then
+			fightMineBar, fightMineFill = bar, fill
+		else
+			fightTheirsBar, fightTheirsFill = bar, fill
+		end
+	end
 
 	-- ------------------------------------------------- the sub-game menu
 	local panel = makeFrame(screen, {
@@ -1303,8 +1339,20 @@ function Hud.ShowFight(opponent: string, duration: number)
 	end
 	fightLabel.Text = `FIGHT!  {string.upper(opponent)}`
 	fightLabel.Visible = true
-	fightCount.Text = "MASH  F"
+	fightCount.Text = "F  PUNCH      Q  BLOCK      MOUSE  STILL SHOOTS"
 	fightCount.Visible = true
+	if fightMineBar then
+		fightMineBar.Visible = true
+	end
+	if fightTheirsBar then
+		fightTheirsBar.Visible = true
+	end
+	if fightMineFill then
+		fightMineFill.Size = UDim2.fromScale(1, 1)
+	end
+	if fightTheirsFill then
+		fightTheirsFill.Size = UDim2.fromScale(1, 1)
+	end
 
 	fightToken += 1
 	local token = fightToken
@@ -1313,6 +1361,12 @@ function Hud.ShowFight(opponent: string, duration: number)
 		if fightToken == token and fightLabel and fightCount then
 			fightLabel.Visible = false
 			fightCount.Visible = false
+			if fightMineBar then
+				fightMineBar.Visible = false
+			end
+			if fightTheirsBar then
+				fightTheirsBar.Visible = false
+			end
 		end
 	end)
 end
@@ -1329,6 +1383,12 @@ function Hud.FightResult(won: boolean, draw: boolean, brokeStick: boolean)
 		elseif won then "YOU WON THE FIGHT"
 		else "YOU LOST THE FIGHT"
 	fightCount.Text = if brokeStick then "YOUR STICK BROKE — USE IT" else ""
+	if fightMineBar then
+		fightMineBar.Visible = false
+	end
+	if fightTheirsBar then
+		fightTheirsBar.Visible = false
+	end
 	task.delay(2.0, function()
 		if fightLabel then
 			fightLabel.Visible = false
@@ -1339,11 +1399,110 @@ function Hud.FightResult(won: boolean, draw: boolean, brokeStick: boolean)
 	end)
 end
 
---[[ Count the mashes back, so mashing feels like it is doing something. ]]
-function Hud.FightSwings(count: number)
-	if fightCount and fightCount.Visible then
-		fightCount.Text = `MASH  F   ×{count}`
+--[[
+	Both fight health bars, and who has their guard up.
+
+	The guard is shown as a tint rather than a separate icon because reading
+	your opponent's guard IS the fight: punching into a raised guard is worth
+	almost nothing, so the whole skill is waiting for it to drop.
+]]
+function Hud.FightHealth(mine: number, theirs: number, maximum: number, theyBlock: boolean, iBlock: boolean)
+	local span = if maximum > 0 then maximum else 1
+
+	if fightMineFill then
+		fightMineFill.Size = UDim2.fromScale(math.clamp(mine / span, 0, 1), 1)
+		fightMineFill.BackgroundColor3 = if iBlock
+			then Color3.fromRGB(190, 230, 255)
+			else Color3.fromRGB(90, 200, 255)
 	end
+	if fightTheirsFill then
+		fightTheirsFill.Size = UDim2.fromScale(math.clamp(theirs / span, 0, 1), 1)
+		fightTheirsFill.BackgroundColor3 = if theyBlock
+			then Color3.fromRGB(255, 220, 140)
+			else Color3.fromRGB(255, 110, 90)
+	end
+	if fightCount and fightCount.Visible then
+		fightCount.Text = if theyBlock
+			then "THEIR GUARD IS UP — WAIT FOR IT TO DROP"
+			else "F  PUNCH      Q  BLOCK      MOUSE  STILL SHOOTS"
+	end
+end
+
+--[[
+	The join-in banner: the name of the game and whose game it is.
+
+	Shown once when you join, not on every respawn, and built on the fly
+	rather than living in the HUD so there is nothing left on screen after it
+	fades.
+]]
+function Hud.Intro(title: string, subtitle: string, hold: number)
+	local screen = Instance.new("ScreenGui")
+	screen.Name = "IntroBanner"
+	screen.IgnoreGuiInset = true
+	screen.ResetOnSpawn = false
+	screen.DisplayOrder = 50
+	screen.Parent = player:WaitForChild("PlayerGui")
+
+	local container = makeFrame(screen, {
+		Name = "Band",
+		Size = UDim2.new(1, 0, 0, 150),
+		Position = UDim2.new(0, 0, 0.33, 0),
+		BackgroundColor3 = Color3.fromRGB(15, 18, 12),
+		BackgroundTransparency = 1,
+		Visible = true,
+		ZIndex = 1,
+	})
+
+	local titleLabel = makeLabel(container, {
+		Name = "Title",
+		Size = UDim2.new(1, 0, 0, 72),
+		Position = UDim2.new(0, 0, 0, 18),
+		Text = title,
+		TextScaled = true,
+		Font = Enum.Font.LuckiestGuy,
+		TextColor3 = Color3.fromRGB(185, 255, 50),
+		TextStrokeColor3 = Color3.new(0, 0, 0),
+		TextStrokeTransparency = 1,
+		TextTransparency = 1,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = true,
+		ZIndex = 2,
+	})
+
+	local subLabel = makeLabel(container, {
+		Name = "Subtitle",
+		Size = UDim2.new(1, 0, 0, 34),
+		Position = UDim2.new(0, 0, 0, 96),
+		Text = subtitle,
+		TextScaled = true,
+		Font = Enum.Font.GothamBold,
+		TextColor3 = Color3.fromRGB(232, 232, 232),
+		TextStrokeColor3 = Color3.new(0, 0, 0),
+		TextStrokeTransparency = 1,
+		TextTransparency = 1,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = true,
+		ZIndex = 2,
+	})
+
+	local fadeIn = TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(container, fadeIn, { BackgroundTransparency = 0.35 }):Play()
+	TweenService:Create(titleLabel, fadeIn, { TextTransparency = 0, TextStrokeTransparency = 0.2 }):Play()
+	TweenService:Create(subLabel, fadeIn, { TextTransparency = 0, TextStrokeTransparency = 0.3 }):Play()
+
+	task.delay(hold, function()
+		if not screen.Parent then
+			return
+		end
+		local fadeOut = TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		TweenService:Create(container, fadeOut, { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(titleLabel, fadeOut, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		local last = TweenService:Create(subLabel, fadeOut, { TextTransparency = 1, TextStrokeTransparency = 1 })
+		last:Play()
+		last.Completed:Connect(function()
+			screen:Destroy()
+		end)
+	end)
 end
 
 --[[
