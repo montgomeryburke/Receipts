@@ -201,6 +201,52 @@ local function findAutoAimTarget(origin: Vector3, aimDirection: Vector3): BasePa
 end
 
 --[[ The direction to actually send to the server this frame. ]]
+--[[
+	Everything the aim ray must not hit: you, and whatever you are riding.
+]]
+local function aimIgnoreList(): { Instance }
+	local ignore: { Instance } = {}
+	local character = player.Character
+	if character then
+		table.insert(ignore, character)
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		local seat = humanoid and humanoid.SeatPart
+		local ride = seat and seat:FindFirstAncestorOfClass("Model")
+		if ride then
+			table.insert(ignore, ride)
+		end
+	end
+	return ignore
+end
+
+--[[
+	What the crosshair is actually sitting on.
+
+	This is the fix for "the aiming isn't lined up with the dot", and the
+	cause was geometry rather than tuning. A shot starts at the HEAD but the
+	direction used to be the CAMERA's look vector -- and the camera sits
+	1.8 studs right and 3.2 up of the head, and a good way behind it. A ray
+	from the head along the camera's direction is a parallel line offset by
+	those studs, so it never passes through what the crosshair covers. Close
+	up the miss is enormous; far away it is a small angle that still reads as
+	"my shots go wide".
+
+	So: cast from the CAMERA through the crosshair -- which is exactly the
+	camera's own look vector, the crosshair being dead centre -- find what is
+	there, and then shoot at THAT from the muzzle. Now the dot is the truth
+	at every range, which is what a crosshair is for.
+]]
+local function crosshairTarget(range: number): Vector3?
+	local cam = getCamera()
+	if not cam then
+		return nil
+	end
+	local from = cam.CFrame.Position
+	local along = cam.CFrame.LookVector
+	local hit = workspace:Raycast(from, along * math.max(range, 64), Util.RayParams(aimIgnoreList()))
+	return if hit then hit.Position else from + along * math.max(range, 64)
+end
+
 local function currentAimDirection(): (Vector3?, Vector3?)
 	local origin = shotOrigin()
 	if not origin then
@@ -211,7 +257,17 @@ local function currentAimDirection(): (Vector3?, Vector3?)
 	if not cam then
 		return nil, nil
 	end
+
+	local spec0 = arsenal[effectiveWeaponName()]
+	local aimAt = crosshairTarget(if spec0 then spec0.Range else 600)
 	local rawDirection = cam.CFrame.LookVector
+	if aimAt then
+		local toTarget = aimAt - origin
+		if toTarget.Magnitude > 0.5 then
+			-- From the muzzle to whatever the dot is on.
+			rawDirection = toTarget.Unit
+		end
+	end
 	local spec = arsenal[effectiveWeaponName()]
 
 	if spec and (spec.AutoAim or (UserInputService.TouchEnabled and not UserInputService.MouseEnabled)) then

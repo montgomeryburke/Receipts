@@ -211,6 +211,21 @@ local function deployPlayer(player: Player, keepProgress: boolean)
 		humanoid.Health = humanoid.MaxHealth
 	end
 
+	--[[
+		How fast you move on foot, and how high you jump.
+
+		Nothing set these. Config.Turbo.WalkSpeed existed and was read when
+		turbo switched OFF and when a flag carrier was slowed down -- but
+		never to establish the baseline -- so everybody walked at Roblox's
+		default 16 studs a second regardless of what the config said, which
+		is a plod across a 2000-stud map.
+	]]
+	if humanoid then
+		humanoid.WalkSpeed = Config.Turbo.WalkSpeed
+		humanoid.JumpPower = Config.Movement.JumpPower
+		humanoid.UseJumpPower = true
+	end
+
 	PlayerState.Reset(player, keepProgress)
 
 	local teamIndex = TeamService.IndexOf(player)

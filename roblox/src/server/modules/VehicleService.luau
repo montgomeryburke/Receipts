@@ -142,43 +142,87 @@ end
 
 	The chassis is what actually rests on the ground.
 ]]
-local function addWheel(chassis: BasePart, offset: Vector3, model: Model): (BasePart, BasePart, CFrame)
-	local localOffset = CFrame.new(offset)
+--[[
+	A wheel that stays on the car.
 
+	The old ones were ANCHORED and had their CFrame written from the chassis
+	once per Heartbeat. That is why they looked like they were falling off:
+	the chassis is moved by physics, continuously and interpolated on the
+	client, while an anchored part teleports sixty times a second from a
+	position that is already stale. At any real speed the wheels visibly
+	trailed the car they belonged to.
+
+	These are unanchored, massless, non-colliding, and held on by a
+	HingeConstraint. Roblox's own solver keeps them attached and the client
+	interpolates them, so they cannot lag or detach -- and because the hinge
+	is a MOTOR, the spin comes from setting one angular velocity rather than
+	rewriting a CFrame every frame.
+
+	Massless and non-colliding matters: a wheel with mass and collision
+	fights the drive constraint, which is what made the cars feel like they
+	were dragging an anchor.
+]]
+local function addWheel(model: Model, chassis: BasePart, offset: Vector3)
 	local wheel = Util.Part({
 		Name = "Wheel",
 		Size = Vector3.new(WHEEL_WIDTH, WHEEL_DIAMETER, WHEEL_DIAMETER),
 		-- A cylinder's flat faces point along its own X, which is already the
 		-- car's left-right axis, so it is already oriented to roll.
-		CFrame = chassis.CFrame * localOffset,
+		CFrame = chassis.CFrame * CFrame.new(offset),
 		Shape = Enum.PartType.Cylinder,
-		Color = Color3.fromRGB(30, 30, 34),
+		Color = Color3.fromRGB(26, 26, 30),
 		Material = Enum.Material.Rubber,
-		Anchored = true,
+		Anchored = false,
 		CanCollide = false,
 		CanQuery = false,
+		Massless = true,
 		Parent = model,
 	})
 
-	-- A pale hub, so the rotation is actually visible from outside.
+	-- A pale hub, welded on, so the rotation is actually visible from outside.
 	local hub = Util.Part({
 		Name = "Hub",
-		Size = Vector3.new(WHEEL_WIDTH + 0.4, WHEEL_DIAMETER * 0.45, WHEEL_DIAMETER * 0.45),
+		Size = Vector3.new(WHEEL_WIDTH + 0.5, WHEEL_DIAMETER * 0.5, WHEEL_DIAMETER * 0.5),
 		CFrame = wheel.CFrame,
 		Shape = Enum.PartType.Cylinder,
-		Color = Color3.fromRGB(190, 190, 200),
+		Color = Color3.fromRGB(198, 198, 208),
 		Material = Enum.Material.Metal,
-		Anchored = true,
+		Anchored = false,
 		CanCollide = false,
 		CanQuery = false,
+		Massless = true,
 		Parent = model,
 	})
-	return wheel, hub, localOffset
+	Util.Weld(wheel, hub)
+
+	-- The axle. Both attachments keep their part's own X as the hinge axis,
+	-- which for the chassis is left-right and for the cylinder is the way it
+	-- rolls -- so no extra orientation is needed.
+	local hubAttachment = Instance.new("Attachment")
+	hubAttachment.Name = "AxleHub"
+	hubAttachment.Position = offset
+	hubAttachment.Parent = chassis
+
+	local wheelAttachment = Instance.new("Attachment")
+	wheelAttachment.Name = "AxleWheel"
+	wheelAttachment.Parent = wheel
+
+	local axle = Instance.new("HingeConstraint")
+	axle.Name = "Axle"
+	axle.Attachment0 = hubAttachment
+	axle.Attachment1 = wheelAttachment
+	axle.ActuatorType = Enum.ActuatorType.Motor
+	axle.AngularVelocity = 0
+	-- Enough torque to hold the spin against nothing in particular; the
+	-- wheels do not drive the car, they only have to look right.
+	axle.MotorMaxAcceleration = math.huge
+	axle.MotorMaxTorque = 120000
+	axle.LimitsEnabled = false
+	axle.Parent = chassis
+
+	return wheel, hub, axle
 end
 
--- ================================================================== CHASSIS ==
-
---[[ The shared skeleton every wheeled vehicle is built on. ]]
 local function buildChassis(
 	name: string,
 	position: Vector3,
@@ -186,7 +230,7 @@ local function buildChassis(
 	color: Color3,
 	wheelbase: number,
 	track: number
-): (Model, BasePart, { { part: BasePart, hub: BasePart, offset: CFrame } })
+): (Model, BasePart, { { part: Part, hub: Part, axle: HingeConstraint } })
 	local model = Instance.new("Model")
 	model.Name = name
 
@@ -275,8 +319,8 @@ local function buildChassis(
 		Vector3.new(-halfTrack, axleDrop, halfBase),
 		Vector3.new(halfTrack, axleDrop, halfBase),
 	} do
-		local wheel, hub, offset = addWheel(chassis, corner, model)
-		table.insert(wheels, { part = wheel, hub = hub, offset = offset })
+		local wheel, hub, axle = addWheel(model, chassis, corner)
+		table.insert(wheels, { part = wheel, hub = hub, axle = axle })
 	end
 
 	return model, chassis, wheels
@@ -289,6 +333,151 @@ end
 	chassis at about 8.5 studs, and a Roblox character jumps roughly 7.2 —
 	so there is no way to climb aboard by walking into it. Walk up, press E.
 ]]
+--[[
+	Bodywork: the bits that make a box look like a car.
+
+	The chassis is one rectangular block, which is fine as a collision hull
+	and reads as a brick. Everything here is welded, massless and
+	non-colliding, so it changes how the thing looks and nothing about how it
+	drives: a cabin set back from the nose, a bonnet, a windscreen raked over
+	it, side windows, bumpers front and back, arches over each wheel, and
+	lights at both ends.
+
+	Massless matters. Bolting a dozen parts with mass onto a tuned chassis
+	changes its centre of gravity and its handling, and then the car that
+	drove well before the bodywork went on drives differently after.
+]]
+local function addBodywork(model: Model, chassis: BasePart, color: Color3, lowSlung: boolean)
+	local size = chassis.Size
+	local halfLength = size.Z * 0.5
+	local halfWidth = size.X * 0.5
+	local roofHeight = if lowSlung then size.Y * 0.55 else size.Y * 0.85
+
+	local function panel(props: { [string]: any }): BasePart
+		props.Anchored = false
+		props.Massless = true
+		props.CanCollide = false
+		props.CanQuery = false
+		props.Parent = model
+		local part = Util.Part(props)
+		Util.Weld(chassis, part)
+		return part
+	end
+
+	local darker = color:Lerp(Color3.new(0, 0, 0), 0.45)
+	local glass = Color3.fromRGB(150, 190, 215)
+
+	-- The cabin, set back from the nose so there is a bonnet in front of it.
+	panel({
+		Name = "Cabin",
+		Size = Vector3.new(size.X * 0.86, roofHeight, size.Z * 0.46),
+		CFrame = chassis.CFrame * CFrame.new(0, size.Y * 0.5 + roofHeight * 0.5, halfLength * 0.18),
+		Color = color,
+		Material = Enum.Material.Metal,
+	})
+
+	-- The windscreen, raked back over the bonnet.
+	panel({
+		Name = "Windscreen",
+		Size = Vector3.new(size.X * 0.8, roofHeight * 0.92, 0.4),
+		CFrame = chassis.CFrame
+			* CFrame.new(0, size.Y * 0.5 + roofHeight * 0.5, halfLength * 0.18 - size.Z * 0.24)
+			* CFrame.Angles(math.rad(-22), 0, 0),
+		Color = glass,
+		Material = Enum.Material.Glass,
+		Transparency = 0.35,
+		Reflectance = 0.22,
+	})
+
+	-- Side glass, and a rear window.
+	for _, side in { -1, 1 } do
+		panel({
+			Name = "SideWindow",
+			Size = Vector3.new(0.3, roofHeight * 0.6, size.Z * 0.4),
+			CFrame = chassis.CFrame
+				* CFrame.new(side * halfWidth * 0.87, size.Y * 0.5 + roofHeight * 0.58, halfLength * 0.18),
+			Color = glass,
+			Material = Enum.Material.Glass,
+			Transparency = 0.42,
+			Reflectance = 0.18,
+		})
+	end
+	panel({
+		Name = "RearWindow",
+		Size = Vector3.new(size.X * 0.78, roofHeight * 0.8, 0.4),
+		CFrame = chassis.CFrame
+			* CFrame.new(0, size.Y * 0.5 + roofHeight * 0.5, halfLength * 0.18 + size.Z * 0.23)
+			* CFrame.Angles(math.rad(16), 0, 0),
+		Color = glass,
+		Material = Enum.Material.Glass,
+		Transparency = 0.38,
+	})
+
+	-- Bonnet and boot, slightly proud of the chassis so there are edges.
+	panel({
+		Name = "Bonnet",
+		Size = Vector3.new(size.X * 0.94, 0.6, size.Z * 0.3),
+		CFrame = chassis.CFrame * CFrame.new(0, size.Y * 0.5 + 0.2, -halfLength * 0.6),
+		Color = color,
+		Material = Enum.Material.Metal,
+	})
+
+	-- Bumpers.
+	for _, endZ in { -1, 1 } do
+		panel({
+			Name = "Bumper",
+			Size = Vector3.new(size.X * 1.02, size.Y * 0.3, 1.6),
+			CFrame = chassis.CFrame * CFrame.new(0, -size.Y * 0.28, endZ * (halfLength + 0.6)),
+			Color = darker,
+			Material = Enum.Material.Metal,
+		})
+	end
+
+	-- Arches over each wheel, which is most of what stops the sides reading
+	-- as a flat slab.
+	for _, side in { -1, 1 } do
+		for _, endZ in { -1, 1 } do
+			panel({
+				Name = "Arch",
+				Size = Vector3.new(1.1, size.Y * 0.5, WHEEL_DIAMETER * 1.25),
+				CFrame = chassis.CFrame
+					* CFrame.new(side * (halfWidth + 0.4), -size.Y * 0.1, endZ * halfLength * 0.56),
+				Color = darker,
+				Material = Enum.Material.Metal,
+			})
+		end
+	end
+
+	-- Headlights and tail lights, with a real beam off the front.
+	for _, side in { -1, 1 } do
+		local lamp = panel({
+			Name = "Headlight",
+			Size = Vector3.new(size.X * 0.22, 1.3, 0.5),
+			CFrame = chassis.CFrame
+				* CFrame.new(side * halfWidth * 0.6, size.Y * 0.1, -(halfLength + 0.3)),
+			Color = Color3.fromRGB(255, 248, 220),
+			Material = Enum.Material.Neon,
+		})
+		local beam = Instance.new("SpotLight")
+		beam.Color = Color3.fromRGB(255, 246, 214)
+		beam.Brightness = 2.2
+		beam.Range = 70
+		beam.Angle = 62
+		beam.Face = Enum.NormalId.Front
+		beam.Shadows = false
+		beam.Parent = lamp
+
+		panel({
+			Name = "TailLight",
+			Size = Vector3.new(size.X * 0.2, 1.1, 0.5),
+			CFrame = chassis.CFrame
+				* CFrame.new(side * halfWidth * 0.62, size.Y * 0.1, halfLength + 0.3),
+			Color = Color3.fromRGB(210, 40, 36),
+			Material = Enum.Material.Neon,
+		})
+	end
+end
+
 local function addSitPrompt(seat: Seat | VehicleSeat, actionText: string, vehicleName: string)
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "SitPrompt"
@@ -523,62 +712,8 @@ function VehicleService.SpawnCar(
 		14,
 		10
 	)
-	-- Realistic automotive details: tinted reflective windshield, headlights with SpotLights, tail lights.
-	local halfW = body.Size.X * 0.5
-	local halfH = body.Size.Y * 0.5
-	local halfL = body.Size.Z * 0.5
-
-	local windshield = Util.Part({
-		Name = "Windshield",
-		Size = Vector3.new(body.Size.X * 0.84, 2.2, 0.35),
-		CFrame = chassis.CFrame * CFrame.new(0, halfH + 1.0, -halfL * 0.36) * CFrame.Angles(math.rad(-26), 0, 0),
-		Color = Color3.fromRGB(36, 52, 68),
-		Material = Enum.Material.Glass,
-		Reflectance = 0.45,
-		Transparency = 0.25,
-		Anchored = false,
-		CanCollide = false,
-		Massless = true,
-		Parent = model,
-	})
-	Util.Weld(chassis, windshield)
-
-	for _, side in { -1, 1 } do
-		local headLight = Util.Part({
-			Name = "Headlight",
-			Size = Vector3.new(1.5, 0.8, 0.3),
-			CFrame = chassis.CFrame * CFrame.new(side * (halfW - 1.3), 0.1, -halfL - 0.1),
-			Color = Color3.fromRGB(255, 246, 214),
-			Material = Enum.Material.Neon,
-			Anchored = false,
-			CanCollide = false,
-			Massless = true,
-			Parent = model,
-		})
-		Util.Weld(chassis, headLight)
-
-		local beam = Instance.new("SpotLight")
-		beam.Face = Enum.NormalId.Front
-		beam.Color = Color3.fromRGB(255, 244, 210)
-		beam.Brightness = 3.2
-		beam.Range = 54
-		beam.Angle = 52
-		beam.Shadows = false
-		beam.Parent = headLight
-
-		local tailLight = Util.Part({
-			Name = "Taillight",
-			Size = Vector3.new(1.6, 0.7, 0.3),
-			CFrame = chassis.CFrame * CFrame.new(side * (halfW - 1.3), 0.2, halfL + 0.1),
-			Color = Color3.fromRGB(235, 36, 36),
-			Material = Enum.Material.Neon,
-			Anchored = false,
-			CanCollide = false,
-			Massless = true,
-			Parent = model,
-		})
-		Util.Weld(chassis, tailLight)
-	end
+	-- Make it look like a car rather than a painted box.
+	addBodywork(model, chassis, body.Color:Lerp(tier.Color, 0.45), body.Name == "Lamborghini")
 
 	local seat = addDriverSeat(chassis, model, Vector3.new(0, body.Size.Y * 0.5 + 0.5, 1))
 	bindSeat(seat, model, "Driver")
@@ -1449,10 +1584,10 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		end
 		if state.wheels then
 			for _, wheel in state.wheels do
-				local resting = chassis.CFrame * wheel.offset * CFrame.Angles(state.wheelSpin or 0, 0, 0)
-				wheel.part.CFrame = resting
-				if wheel.hub then
-					wheel.hub.CFrame = resting
+				-- Parked: stop the wheels turning. Nothing is repositioned,
+				-- because the hinge is what holds them on now.
+				if wheel.axle then
+					wheel.axle.AngularVelocity = 0
 				end
 			end
 		end
@@ -1500,10 +1635,40 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		end
 	end
 
-	drive.Enabled = true
-	turn.Enabled = true
-	drive.LineDirection = driveAxis
-	drive.LineVelocity = current
+	--[[
+		Off a jump, let it FLY.
+
+		The drive constraint pins the car's velocity to a horizontal line. In
+		the air that is exactly wrong: it keeps forcing horizontal speed while
+		gravity pulls down, which flattens the arc into a shove off the lip
+		and a drop. Switching the constraints off the moment the wheels leave
+		the ground lets the car follow a real ballistic curve, which is the
+		difference between hitting a jump and falling off a ramp.
+	]]
+	--[[
+		Airborne, from physics rather than from a raycast.
+
+		The first attempt read `state.groundNormal == nil`, which is wrong
+		twice over: that probe is paced by DISTANCE so its answer is up to
+		four studs stale, and a miss means "the probe did not hit", not "the
+		car is flying". It also meant a car on ground the probe happened to
+		miss switched its own drive off and coasted to a halt.
+
+		Vertical speed needs no raycast and cannot be stale. A car on the
+		ground sits at essentially zero on Y; one that has left a ramp is
+		moving up or down hard.
+	]]
+	local verticalSpeed = chassis.AssemblyLinearVelocity.Y
+	local airborne = math.abs(verticalSpeed) > 22
+	if airborne then
+		drive.Enabled = false
+		turn.Enabled = false
+	else
+		drive.Enabled = true
+		turn.Enabled = true
+		drive.LineDirection = driveAxis
+		drive.LineVelocity = current
+	end
 
 	-- The engine rises and falls with road speed.
 	local engine = chassis:FindFirstChild("Engine")
@@ -1516,18 +1681,17 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		end
 	end
 
-	-- Roll the wheels at whatever speed the car is actually doing. They are
-	-- anchored decoration, so this is the only thing that makes them turn —
-	-- and a car whose wheels are locked solid looks broken even when it is
-	-- driving perfectly well.
+	-- Roll the wheels at whatever speed the car is actually doing, by telling
+	-- the axle motors how fast to turn. One number each, and the hinge keeps
+	-- the wheel attached -- rather than rewriting four CFrames a frame from a
+	-- chassis position that is already stale, which is what made them look
+	-- like they were coming off.
 	if state.wheels then
 		local radius = WHEEL_DIAMETER * 0.5
-		state.wheelSpin = (state.wheelSpin or 0) + (current / radius) * deltaTime
+		local spinRate = current / radius
 		for _, wheel in state.wheels do
-			local spun = chassis.CFrame * wheel.offset * CFrame.Angles(-state.wheelSpin, 0, 0)
-			wheel.part.CFrame = spun
-			if wheel.hub then
-				wheel.hub.CFrame = spun
+			if wheel.axle then
+				wheel.axle.AngularVelocity = spinRate
 			end
 		end
 	end

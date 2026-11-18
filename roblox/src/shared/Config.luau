@@ -220,7 +220,10 @@ Config.Weapons = {
 		-- Halo's sniper had two scope stages. This has four, because the ask
 		-- was to be able to line up close-range headshots too: 2x is usable
 		-- across a room, 10x reaches the other end of the map.
-		ZoomLevels = { 2, 4, 6, 10 },
+		-- 5x, 10x, 50x, stepped round on right click and then back to
+		-- hipfire. The 50 is absurd and that is the point of it: it is for
+		-- picking somebody off the far side of the map.
+		ZoomLevels = { 5, 10, 50 },
 		ZoomFov = 22, AutoAim = true,
 		-- Holds down from the hip; one shot at a time once scoped, so a
 		-- long-range rifle still has to be aimed.
@@ -233,7 +236,7 @@ Config.Weapons = {
 		Slot = 4, Category = "Sniper", DisplayName = "Anti-Truck Rifle", Recoil = 4.5,
 		Kind = "Projectile", Damage = 90, Cooldown = 2.4, Range = 2600, Speed = 1200,
 		MagSize = 3, ReloadTime = 3.6, Spread = 0.0,
-		ZoomLevels = { 2, 5, 10, 16 },
+		ZoomLevels = { 6, 14, 30 },
 		ZoomFov = 16, AutoAim = true,
 		Automatic = true,
 		SemiAutoWhenScoped = true,
@@ -532,7 +535,10 @@ Config.Population = {
 	Civilians = 8,
 	Targets = 12,
 
-	ZombieHealth = 120,
+	-- Two shots from the starting rifle, which does 14. They were 120,
+	-- which is nine shots, and a crowd of them was a chore rather than a
+	-- threat.
+	ZombieHealth = 28,
 	ZombieSpeed = 13,
 	ZombiePoints = 25,
 	-- How close a zombie has to get before it starts swinging.
@@ -589,6 +595,17 @@ Config.GrenadeKeyWeapon = "Grenade"
 	before they add a "you cannot shoot while..." check.
 ]]
 Config.WeaponsAlwaysAvailable = true
+
+--[[
+	Moving about on foot.
+
+	Set on every spawn. These used to be left at Roblox's defaults, which is
+	a 16-stud-a-second walk and a 50 jump -- fine for an obby, a plod across
+	a two-thousand-stud arena.
+]]
+Config.Movement = {
+	JumpPower = 62,
+}
 
 --[[
 	The ice rink.
@@ -719,8 +736,8 @@ Config.MudSpeedFactor = 0.55
 ]]
 Config.Turbo = {
 	Multiplier = 1.9,
-	WalkSpeed = 16,
-	SprintWalkSpeed = 30,
+	WalkSpeed = 24,
+	SprintWalkSpeed = 42,
 }
 
 --[[
@@ -996,6 +1013,7 @@ export type ConfigType = {
 	},
 	GrenadeKeyWeapon: string,
 	WeaponsAlwaysAvailable: boolean,
+	Movement: { JumpPower: number },
 	Hockey: {
 		GoalPoints: number,
 		FightSeconds: number,

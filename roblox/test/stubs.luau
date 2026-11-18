@@ -387,8 +387,17 @@ local function newInstance(class)
 		_attrs = {},
 		_props = { Name = class },
 	}, Inst)
-	if class == "Part" or class == "SpawnLocation" or class == "Seat" or class == "VehicleSeat" then
+	if class == "Part" or class == "SpawnLocation" or class == "Seat" or class == "VehicleSeat"
+		or class == "TrussPart" or class == "WedgePart" or class == "MeshPart"
+	then
 		table.insert(STATS.parts, self)
+		-- A part at rest reads as zero velocity, not nil. Leaving these out
+		-- made any code that asks how fast something is moving throw, which
+		-- is a crash in the harness for code that is perfectly correct.
+		local partProps = rawget(self, "_props")
+		partProps.AssemblyLinearVelocity = Vector3.new()
+		partProps.AssemblyAngularVelocity = Vector3.new()
+		partProps.Velocity = Vector3.new()
 	end
 	if class == "Humanoid" then
 		fitOutHumanoid(self)
