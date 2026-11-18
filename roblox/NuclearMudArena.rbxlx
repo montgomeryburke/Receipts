@@ -147,8 +147,12 @@ Config.Match = {
 
 Config.Combat = {
 	MaxHealth = 100,
-	ShieldRegenDelay = 6,
-	ShieldRegenPerSecond = 8,
+	-- Halo's rhythm: a few seconds of not being shot, then a fast refill. It
+	-- is what makes ducking behind cover mid-fight worth doing, and at the
+	-- old 6 seconds and 8 a second a 50-point shield took seven seconds to
+	-- come back, which is longer than most fights last.
+	ShieldRegenDelay = 3,
+	ShieldRegenPerSecond = 26,
 	SpawnProtection = 3,
 	-- Auto-aim only grabs targets inside this cone, in degrees, and this far.
 	AutoAimConeDegrees = 12,
@@ -468,6 +472,66 @@ Config.Wildlife = {
 	MaxPoopPiles = 40,
 	-- Seconds the victim's screen stays covered.
 	SplatDuration = 4,
+}
+
+--[[
+	SOUND.
+
+	Every path here is an rbxasset:// file that ships inside the Roblox client
+	itself. That matters: a numeric asset ID can fail to load, be moderated,
+	or simply be wrong, and a wrong one is a runtime error in a place that has
+	never been published. These cannot be wrong — they are part of the engine.
+
+	The variety comes from pitch and volume rather than from a big library, so
+	the whole game is scored off about eight files. Swap any `Asset` for a
+	Toolbox sound you prefer and nothing else needs to change.
+
+	Pitch is a range: every play picks a random value inside it, which is what
+	stops a machine gun sounding like a metronome.
+]]
+Config.Sounds = {
+	-- ----------------------------------------------------------- gunfire
+	ShotLight = { Asset = "rbxasset://sounds/clickfast.wav", Volume = 0.45, Pitch = { 1.6, 2.0 } },
+	ShotHeavy = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.6, Pitch = { 1.5, 1.9 } },
+	ShotShotgun = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.85, Pitch = { 0.7, 0.85 } },
+	ShotSniper = { Asset = "rbxasset://sounds/bass.wav", Volume = 0.8, Pitch = { 1.5, 1.6 } },
+	ShotLaunch = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 0.7, Pitch = { 0.8, 1.0 } },
+	ShotDiamond = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.7, Pitch = { 0.8, 1.0 } },
+
+	-- -------------------------------------------------------- explosions
+	Explosion = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.45, 0.6 } },
+	ExplosionBig = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.22, 0.3 } },
+
+	-- ------------------------------------------------------------ combat
+	Hitmarker = { Asset = "rbxasset://sounds/snap.wav", Volume = 0.5, Pitch = { 1.8, 2.0 } },
+	Headshot = { Asset = "rbxasset://sounds/snap.wav", Volume = 0.7, Pitch = { 2.4, 2.6 } },
+	KillConfirm = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.6, Pitch = { 1.3, 1.4 } },
+	Death = { Asset = "rbxasset://sounds/uuhhh.wav", Volume = 0.8, Pitch = { 0.9, 1.1 } },
+	ShieldBreak = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.7, Pitch = { 0.6, 0.7 } },
+	MeleeSwing = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 0.6, Pitch = { 1.4, 1.7 } },
+	MeleeHit = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.9, Pitch = { 0.5, 0.65 } },
+
+	-- -------------------------------------------------------------- kit
+	Pickup = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.55, Pitch = { 1.5, 1.7 } },
+	PickupBig = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.8, Pitch = { 1.0, 1.1 } },
+	WeaponSwitch = { Asset = "rbxasset://sounds/snap.wav", Volume = 0.35, Pitch = { 1.2, 1.3 } },
+
+	-- ------------------------------------------------------------ events
+	FlagTaken = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 1, Pitch = { 0.85, 0.85 } },
+	FlagCapture = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 1.1, 1.1 } },
+	RoundStart = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.9, 0.9 } },
+	RoundEnd = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.6, 0.6 } },
+	Medal = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.9, Pitch = { 1.7, 1.7 } },
+
+	-- --------------------------------------------------------- the world
+	EngineLoop = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.35, Pitch = { 0.5, 0.5 }, Looped = true },
+	Boost = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 0.8, Pitch = { 0.6, 0.7 } },
+	Splash = { Asset = "rbxasset://sounds/impact_water.mp3", Volume = 1, Pitch = { 0.9, 1.1 } },
+	Bell = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 1, Pitch = { 2.2, 2.2 } },
+	ZombieGrowl = { Asset = "rbxasset://sounds/uuhhh.wav", Volume = 0.6, Pitch = { 0.5, 0.65 } },
+	Fart = { Asset = "rbxasset://sounds/uuhhh.wav", Volume = 0.7, Pitch = { 0.35, 0.45 } },
+	ParachuteOpen = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 1, Pitch = { 0.5, 0.6 } },
+	Jump = { Asset = "rbxasset://sounds/action_jump.mp3", Volume = 0.5, Pitch = { 1, 1 } },
 }
 
 --[[
@@ -858,6 +922,12 @@ export type ConfigType = {
 		RespawnDelay: number,
 	},
 	CivilianLines: { string },
+	Sounds: {
+		[string]: {
+			Asset: string, Volume: number,
+			Pitch: { number }, Looped: boolean?,
+		}
+	},
 
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
@@ -932,6 +1002,10 @@ local EVENT_NAMES = {
 	"VoteOptions",
 	"DeathScreen",
 	"Notify",
+	"Hitmarker",
+	"Medal",
+	"KillFeed",
+	"PlaySound",
 	"MountedWeaponState",
 }
 
@@ -1061,6 +1135,159 @@ return Signal
       </Item>
       <Item class="ModuleScript" referent="7">
         <Properties>
+          <string name="Name">Sound</string>
+          <string name="Source"><![CDATA[--!strict
+--[[
+	Sound — one place that plays everything.
+
+	Two ways to use it:
+	  Sound.At(name, position)   a noise somewhere in the world, heard louder
+	                             the closer you are to it
+	  Sound.Flat(name)           a noise in your ears, for the player it
+	                             happened to — hitmarkers, medals, pickups
+
+	Every asset is an rbxasset:// file built into the Roblox client, so none of
+	them can fail to load the way a numeric asset ID can. The variety comes
+	from pitching the same handful of files differently.
+]]
+
+local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+
+local Sound = {}
+
+local rng = Random.new()
+
+-- Beyond this, you cannot hear it at all.
+local WORLD_RANGE = 420
+
+--[[ Build a Sound from a config entry, without playing it. ]]
+local function build(name: string): Instance?
+	local spec = Config.Sounds[name]
+	if not spec then
+		-- A typo in a sound name should not take down whatever was happening.
+		warn(`Sound: no such sound "{name}"`)
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = `Sound_{name}`
+	sound.SoundId = spec.Asset
+	sound.Volume = spec.Volume
+	sound.PlaybackSpeed = rng:NextNumber(spec.Pitch[1], spec.Pitch[2] or spec.Pitch[1])
+	sound.Looped = spec.Looped == true
+	sound.RollOffMaxDistance = WORLD_RANGE
+	sound.RollOffMinDistance = 12
+	sound.RollOffMode = Enum.RollOffMode.InverseTapered
+	return sound
+end
+
+--[[
+	A noise at a place in the world.
+
+	The Sound hangs on a tiny invisible anchor part, because a Sound only
+	plays positionally when it has a part to play from, and the anchor is
+	cleaned up a few seconds later.
+]]
+function Sound.At(name: string, position: Vector3, volumeScale: number?)
+	local sound = build(name)
+	if not sound then
+		return
+	end
+	local real = sound :: Sound
+
+	if volumeScale then
+		real.Volume *= volumeScale
+	end
+
+	local anchor = Instance.new("Part")
+	anchor.Name = "SoundAnchor"
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.CFrame = CFrame.new(position)
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.Transparency = 1
+	anchor.Parent = workspace
+
+	real.Parent = anchor
+	real:Play()
+
+	Debris:AddItem(anchor, 6)
+end
+
+--[[
+	A noise in one player's ears, with no position at all.
+
+	Client only — on the server there is nobody to hear it.
+]]
+function Sound.Flat(name: string, volumeScale: number?)
+	if not RunService:IsClient() then
+		return
+	end
+	local sound = build(name)
+	if not sound then
+		return
+	end
+	local real = sound :: Sound
+
+	if volumeScale then
+		real.Volume *= volumeScale
+	end
+	real.RollOffMaxDistance = 1
+	real.Parent = SoundService
+	real:Play()
+
+	Debris:AddItem(real, 6)
+end
+
+--[[
+	A looping sound attached to something that moves — an engine, mostly.
+
+	Returns the Sound so the caller can change its pitch as the thing speeds
+	up, or stop it when the thing is switched off.
+]]
+function Sound.Attach(name: string, to: BasePart): Sound?
+	local sound = build(name)
+	if not sound then
+		return nil
+	end
+	local real = sound :: Sound
+	real.Parent = to
+	return real
+end
+
+--[[ Which gunshot a weapon should make, from its category. ]]
+function Sound.ForWeapon(spec: Config.WeaponSpec): string
+	if spec.CanMegaDetonate then
+		return "ShotDiamond"
+	end
+	local category = spec.Category
+	if category == "Sniper" then
+		return "ShotSniper"
+	elseif category == "Shotgun" then
+		return "ShotShotgun"
+	elseif category == "Explosive" then
+		return "ShotLaunch"
+	elseif category == "Sidearm" then
+		return "ShotLight"
+	elseif category == "Utility" then
+		return "ShotLaunch"
+	end
+	return "ShotHeavy"
+end
+
+return Sound
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="8">
+        <Properties>
           <string name="Name">Util</string>
           <string name="Source"><![CDATA[--!strict
 --[[
@@ -1183,11 +1410,11 @@ return Util
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="8">
+  <Item class="ServerScriptService" referent="9">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="9">
+    <Item class="Script" referent="10">
       <Properties>
         <string name="Name">Server</string>
         <token name="RunContext">0</token>
@@ -1395,11 +1622,11 @@ end
 print("[Nuclear Mud Arena] Server ready.")
 ]]></string>
       </Properties>
-      <Item class="Folder" referent="10">
+      <Item class="Folder" referent="11">
         <Properties>
           <string name="Name">modules</string>
         </Properties>
-        <Item class="ModuleScript" referent="11">
+        <Item class="ModuleScript" referent="12">
           <Properties>
             <string name="Name">CarnivalService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1420,6 +1647,7 @@ local Debris = game:GetService("Debris")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -1674,6 +1902,7 @@ local function dunk(shooter: Player?)
 	spray.Rate = 0
 	spray.Parent = splash
 	spray:Emit(90)
+	Sound.At("Splash", splash.Position)
 	Debris:AddItem(splash, 3)
 end
 
@@ -1814,6 +2043,10 @@ local function ringBell(shooter: Player?)
 		return
 	end
 	strikerUntil = os.clock() + 2.5
+	local puck = strikerPuck
+	if puck then
+		Sound.At("Bell", puck.Position + Vector3.new(0, 60, 0))
+	end
 	award(shooter, STRIKER_POINTS, "DING! Bell rung.")
 end
 
@@ -1907,7 +2140,7 @@ return CarnivalService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="12">
+        <Item class="ModuleScript" referent="13">
           <Properties>
             <string name="Name">DamageService</string>
             <string name="Source"><![CDATA[--!strict
@@ -1926,6 +2159,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Signal = require(Shared:WaitForChild("Signal"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -1990,6 +2224,15 @@ function DamageService.ApplyDamage(
 		local absorbed = math.min(state.shield, remaining)
 		state.shield -= absorbed
 		remaining -= absorbed
+
+		-- The moment the shield gives out is the moment that matters, so it
+		-- gets its own noise.
+		if state.shield <= 0 then
+			local root = character:FindFirstChild("HumanoidRootPart")
+			if root and root:IsA("BasePart") then
+				Sound.At("ShieldBreak", root.Position)
+			end
+		end
 	end
 
 	if remaining > 0 then
@@ -1999,6 +2242,10 @@ function DamageService.ApplyDamage(
 	PlayerState.Changed.Fire(victim)
 
 	if humanoid.Health <= 0 then
+		local root = character:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			Sound.At("Death", root.Position)
+		end
 		DamageService.HandleDeath(victim, attacker, cause or "Unknown")
 	end
 
@@ -2036,6 +2283,9 @@ function DamageService.Explode(
 	if isMega then
 		DamageService.MegaBlast.Fire(position, radius, attacker)
 	end
+
+	-- Big blasts get the deeper boom.
+	Sound.At(if radius > 60 then "ExplosionBig" else "Explosion", position)
 
 	-- The visible bang. BlastPressure does the ragdoll-throwing; the numbers
 	-- below do the actual damage, so nobody dies to physics alone.
@@ -2115,7 +2365,7 @@ return DamageService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="13">
+        <Item class="ModuleScript" referent="14">
           <Properties>
             <string name="Name">EffectService</string>
             <string name="Source"><![CDATA[--!strict
@@ -2400,7 +2650,7 @@ return EffectService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="15">
           <Properties>
             <string name="Name">FlagService</string>
             <string name="Source"><![CDATA[--!strict
@@ -2426,6 +2676,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Signal = require(Shared:WaitForChild("Signal"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
@@ -2631,6 +2882,7 @@ local function pickUp(flag: Flag, player: Player)
 	setCarrierSpeed(player, true)
 
 	PlayerState.AwardPoints(player, Config.CTF.FlagTakenPoints)
+	Sound.At("FlagTaken", flag.pole.Position)
 	local team = TeamService.Get(flag.teamIndex)
 	announce(`{player.DisplayName} has the {if team then team.Name else ""} flag!`)
 end
@@ -2641,6 +2893,7 @@ local function capture(flag: Flag, player: Player, scorerIndex: number)
 	FlagService.Captured.Fire(player, scorerIndex, earned)
 
 	announce(`{player.DisplayName} CAPTURED THE FLAG! +{earned}`)
+	Sound.At("FlagCapture", flag.home)
 	setCarrierSpeed(player, false)
 	sendHome(flag, true)
 end
@@ -2825,7 +3078,7 @@ return FlagService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">GraphicsService</string>
             <string name="Source"><![CDATA[--!strict
@@ -2940,7 +3193,7 @@ return GraphicsService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">MapService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3672,7 +3925,7 @@ return MapService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="18">
           <Properties>
             <string name="Name">MatchService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3721,6 +3974,75 @@ local votes: { [Player]: number } = {}
 
 -- The one car each player currently owns.
 local playerCars: { [Player]: Model } = {}
+
+--[[
+	Medals.
+
+	Halo's two kinds, and they are different things: a MULTIKILL is several
+	kills close together in time, and a SPREE is many kills without dying.
+	Tracked per player and reset by death.
+]]
+local recentKills: { [Player]: { number } } = {}
+local sprees: { [Player]: number } = {}
+
+local MULTIKILL_WINDOW = 4.5
+
+local MULTIKILL_NAMES = {
+	[2] = "DOUBLE KILL",
+	[3] = "TRIPLE KILL",
+	[4] = "OVERKILL",
+	[5] = "KILLTACULAR",
+	[6] = "KILLTROCITY",
+}
+
+local SPREE_NAMES = {
+	[5] = "KILLING SPREE",
+	[10] = "RUNNING RIOT",
+	[15] = "RAMPAGE",
+	[20] = "UNTOUCHABLE",
+}
+
+--[[ Everybody sees who killed whom. ]]
+local function killFeed(killer: Player?, victim: Player, cause: string)
+	local line = if killer
+		then `{killer.DisplayName}  ▸  {cause}  ▸  {victim.DisplayName}`
+		else `{victim.DisplayName} died — {cause}`
+
+	for _, player in Players:GetPlayers() do
+		Remotes.Event("KillFeed"):FireClient(player, line, player == killer)
+	end
+end
+
+--[[ Work out whether this kill earned a medal, and announce it if so. ]]
+local function awardMedals(killer: Player)
+	local now = os.clock()
+
+	-- Multikill: how many in the last few seconds.
+	local window = recentKills[killer] or {}
+	table.insert(window, now)
+	for index = #window, 1, -1 do
+		if now - window[index] > MULTIKILL_WINDOW then
+			table.remove(window, index)
+		end
+	end
+	recentKills[killer] = window
+
+	local multi = MULTIKILL_NAMES[#window]
+	if multi then
+		Remotes.Event("Medal"):FireClient(killer, multi)
+		Remotes.Event("PlaySound"):FireClient(killer, "Medal")
+	end
+
+	-- Spree: how many since last dying.
+	sprees[killer] = (sprees[killer] or 0) + 1
+	local spree = SPREE_NAMES[sprees[killer]]
+	if spree then
+		for _, player in Players:GetPlayers() do
+			Remotes.Event("Medal"):FireClient(player, `{killer.DisplayName}: {spree}`)
+		end
+		Remotes.Event("PlaySound"):FireClient(killer, "Medal")
+	end
+end
 
 --[[ The two team colours, for painting the spawn pads. ]]
 local function teamColours(): { BrickColor }
@@ -3778,6 +4100,13 @@ local function broadcast()
 			else nil,
 	}
 	Remotes.Event("MatchState"):FireAllClients(payload)
+end
+
+--[[ The same noise in everybody's ears at once, for match-wide moments. ]]
+local function fanfare(soundName: string)
+	for _, player in Players:GetPlayers() do
+		Remotes.Event("PlaySound"):FireClient(player, soundName)
+	end
 end
 
 --[[ Put a player on the ground at their team's end of the map, in a car. ]]
@@ -3922,10 +4251,13 @@ end
 local function runRound()
 	-- The arena is already standing; a round is just the clock and the score.
 	scores = { 0, 0 }
+	table.clear(recentKills)
+	table.clear(sprees)
 	phase = "Playing"
 	phaseEndsAt = os.clock() + Config.Match.RoundDuration
 
 	deployAll()
+	fanfare("RoundStart")
 
 	while os.clock() < phaseEndsAt do
 		broadcast()
@@ -3947,6 +4279,7 @@ local function runIntermission()
 	local winnerIndex = if scores[1] == scores[2] then 0 elseif scores[1] > scores[2] then 1 else 2
 	local winnerName = if winnerIndex == 0 then "NOBODY" else Config.Teams[winnerIndex].Name
 	EffectService.CelebrateWinner(winnerName)
+	fanfare("RoundEnd")
 
 	while os.clock() < phaseEndsAt do
 		broadcast()
@@ -4006,6 +4339,11 @@ function MatchService.Start()
 		end
 
 		EffectService.ShowDeathScreen(victim, if killer then killer.DisplayName else nil)
+		killFeed(killer, victim, cause)
+
+		-- Dying ends your spree and your multikill window.
+		sprees[victim] = 0
+		recentKills[victim] = {}
 
 		if killer and killer ~= victim and phase == "Playing" then
 			-- A sniper shot is worth more than a pistol round, and a running
@@ -4017,6 +4355,8 @@ function MatchService.Start()
 			scores[teamIndex] += earned
 
 			Remotes.Event("Notify"):FireClient(killer, `+{earned} — {cause}`)
+			Remotes.Event("PlaySound"):FireClient(killer, "KillConfirm")
+			awardMedals(killer)
 			broadcast()
 		end
 	end)
@@ -4082,6 +4422,8 @@ function MatchService.Start()
 
 	Players.PlayerRemoving:Connect(function(player)
 		votes[player] = nil
+		recentKills[player] = nil
+		sprees[player] = nil
 		local car = playerCars[player]
 		if car and car.Parent then
 			car:Destroy()
@@ -4122,7 +4464,7 @@ return MatchService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">MonetizationService</string>
             <string name="Source"><![CDATA[--!strict
@@ -4298,7 +4640,7 @@ return MonetizationService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">PickupService</string>
             <string name="Source"><![CDATA[--!strict
@@ -4316,6 +4658,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -4452,7 +4795,15 @@ local function grant(player: Player, kind: string, weapon: string?)
 	end
 
 	PlayerState.Changed.Fire(player)
-	Remotes.Event("Notify"):FireClient(player, `Picked up: {labelFor(kind)}`)
+
+	-- The good ones sound like it.
+	local big = kind == "Invincibility" or kind == "Multiplier" or kind == "Weapon"
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if root and root:IsA("BasePart") then
+		Sound.At(if big then "PickupBig" else "Pickup", root.Position)
+	end
+
+	Remotes.Event("Notify"):FireClient(player, `Picked up: {labelFor(kind, weapon)}`)
 end
 
 --[[ Build the floating, spinning thing you actually drive into. ]]
@@ -4568,7 +4919,7 @@ return PickupService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">PlayerState</string>
             <string name="Source"><![CDATA[--!strict
@@ -4761,7 +5112,7 @@ return PlayerState
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">ProjectileService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5192,7 +5543,7 @@ return ProjectileService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">TeamService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5275,7 +5626,7 @@ return TeamService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5305,6 +5656,7 @@ local Players = game:GetService("Players")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -5501,6 +5853,13 @@ local function buildChassis(
 	local halfBase = wheelbase * 0.5
 	local halfTrack = track * 0.5
 	local axleDrop = -bodySize.Y * 0.5
+
+	-- An engine note, pitched by road speed. A silent vehicle feels like a
+	-- prop being slid along the floor.
+	local engine = Sound.Attach("EngineLoop", chassis)
+	if engine then
+		engine.Name = "Engine"
+	end
 
 	local wheels = {}
 	for _, corner in {
@@ -6142,6 +6501,9 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 
 	-- A boost pad overrides the gradual wind-up entirely: you leave it fast.
 	if boosted and throttle >= 0 then
+		if current < Config.Boost.Speed * 0.9 then
+			Sound.At("Boost", chassis.Position)
+		end
 		current = math.max(current, Config.Boost.Speed)
 	end
 
@@ -6153,6 +6515,10 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		state.currentSpeed = 0
 		drive.Enabled = false
 		turn.Enabled = false
+		local idleEngine = chassis:FindFirstChild("Engine")
+		if idleEngine and idleEngine:IsA("Sound") and idleEngine.IsPlaying then
+			idleEngine:Stop()
+		end
 		if state.wheels then
 			for _, wheel in state.wheels do
 				local resting = chassis.CFrame * wheel.offset * CFrame.Angles(state.wheelSpin or 0, 0, 0)
@@ -6176,6 +6542,17 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	turn.Enabled = true
 	drive.LineDirection = flat
 	drive.LineVelocity = current
+
+	-- The engine rises and falls with road speed.
+	local engine = chassis:FindFirstChild("Engine")
+	if engine and engine:IsA("Sound") then
+		local fraction = math.abs(current) / math.max(topSpeed, 1)
+		engine.PlaybackSpeed = 0.45 + fraction * 1.5
+		engine.Volume = 0.2 + fraction * 0.4
+		if not engine.IsPlaying then
+			engine:Play()
+		end
+	end
 
 	-- Roll the wheels at whatever speed the car is actually doing. They are
 	-- anchored decoration, so this is the only thing that makes them turn —
@@ -6391,6 +6768,7 @@ function VehicleService.Eject(player: Player)
 	descent.Enabled = false
 	descent.Parent = root
 
+	Sound.At("ParachuteOpen", root.Position)
 	Remotes.Event("Notify"):FireClient(player, "Parachute open — steer with WASD.")
 
 	-- Let the launch carry you upward first, then open.
@@ -6551,7 +6929,7 @@ return VehicleService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">WeaponService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6571,6 +6949,7 @@ local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -6781,6 +7160,7 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	local endPoint = if result then result.Position else origin + direction * spec.Range
 	drawTracer(origin, endPoint, spec.Color)
 	muzzleFlash(origin + direction * 2, spec.Color)
+	Sound.At(Sound.ForWeapon(spec), origin)
 
 	if not result then
 		return
@@ -6804,10 +7184,20 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 		if victim and victim ~= player then
 			-- Headshots hurt more, because they should.
 			local damage = spec.Damage
-			if result.Instance.Name == "Head" then
+			local headshot = result.Instance.Name == "Head"
+			if headshot then
 				damage *= 1.8
 			end
-			DamageService.ApplyDamage(victim, damage, player, spec.DisplayName)
+			if DamageService.ApplyDamage(victim, damage, player, spec.DisplayName) then
+				-- Tell the shooter they connected. Without this, hitscan guns
+				-- give you nothing at all to tell you whether you are aiming
+				-- anywhere near the target.
+				Remotes.Event("Hitmarker"):FireClient(player, {
+					damage = math.floor(damage),
+					headshot = headshot,
+					position = result.Position,
+				})
+			end
 			return
 		end
 	end
@@ -7078,6 +7468,8 @@ local function handleMelee(player: Player)
 	end
 	state.nextMeleeAt = now + Config.Melee.Cooldown
 
+	Sound.At("MeleeSwing", root.Position)
+
 	local facing = root.CFrame.LookVector
 	local best: Player? = nil
 	local bestDistance = Config.Melee.Range
@@ -7120,7 +7512,14 @@ local function handleMelee(player: Player)
 		end
 	end
 
-	DamageService.ApplyDamage(best, damage, player, "Melee")
+	Sound.At("MeleeHit", root.Position)
+	if DamageService.ApplyDamage(best, damage, player, "Melee") then
+		Remotes.Event("Hitmarker"):FireClient(player, {
+			damage = math.floor(damage),
+			headshot = damage > Config.Melee.Damage,
+			position = root.Position,
+		})
+	end
 end
 
 --[[ Gunners tell the server where they are looking; the turret follows. ]]
@@ -7225,7 +7624,7 @@ return WeaponService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">WildlifeService</string>
             <string name="Source"><![CDATA[--!strict
@@ -7251,6 +7650,7 @@ local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
@@ -7360,6 +7760,7 @@ local function fart(position: Vector3)
 	cloud.Rate = 0
 	cloud.Parent = anchor
 	cloud:Emit(40)
+	Sound.At("Fart", position)
 
 	Debris:AddItem(anchor, 3)
 end
@@ -7807,6 +8208,7 @@ function WildlifeService.RegisterHit(part: BasePart, damage: number?, attacker: 
 						fart(dweller.root.Position - Vector3.new(0, 1.5, 0))
 					elseif dweller.kind == "Zombie" then
 						say(dweller.root, "RRRAAAGH", Color3.fromRGB(160, 220, 130), 1.5)
+						Sound.At("ZombieGrowl", dweller.root.Position)
 					end
 
 					if dweller.health <= 0 then
@@ -8004,27 +8406,27 @@ return WildlifeService
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="26">
+  <Item class="SoundService" referent="27">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterGui" referent="27">
+  <Item class="StarterGui" referent="28">
     <Properties>
       <string name="Name">StarterGui</string>
       <bool name="ResetPlayerGuiOnSpawn">false</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="28">
+  <Item class="StarterPlayer" referent="29">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="29">
+    <Item class="StarterPlayerScripts" referent="30">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="30">
+      <Item class="LocalScript" referent="31">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
@@ -8040,6 +8442,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 
 local modules = script:WaitForChild("modules")
 local Hud = require(modules:WaitForChild("Hud"))
@@ -8176,6 +8579,35 @@ Remotes.Event("PlayEffect").OnClientEvent:Connect(function(payload)
 	end
 end)
 
+--[[ A shot connected. Marker, number, and the right click in your ears. ]]
+Remotes.Event("Hitmarker").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local headshot = payload.headshot == true
+	Hud.Hit(payload.damage or 0, headshot)
+	Sound.Flat(if headshot then "Headshot" else "Hitmarker")
+end)
+
+Remotes.Event("KillFeed").OnClientEvent:Connect(function(line, mine)
+	if typeof(line) == "string" then
+		Hud.KillFeed(line, mine == true)
+	end
+end)
+
+Remotes.Event("Medal").OnClientEvent:Connect(function(text)
+	if typeof(text) == "string" then
+		Hud.Medal(text)
+	end
+end)
+
+--[[ A noise the server wants this player specifically to hear. ]]
+Remotes.Event("PlaySound").OnClientEvent:Connect(function(name)
+	if typeof(name) == "string" then
+		Sound.Flat(name)
+	end
+end)
+
 Remotes.Event("Notify").OnClientEvent:Connect(function(message)
 	if typeof(message) == "string" then
 		Hud.Toast(message)
@@ -8201,11 +8633,11 @@ end)
 print("[Nuclear Mud Arena] Client ready. WASD drives, F mega-detonates.")
 ]]></string>
         </Properties>
-        <Item class="Folder" referent="31">
+        <Item class="Folder" referent="32">
           <Properties>
             <string name="Name">modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="32">
+          <Item class="ModuleScript" referent="33">
             <Properties>
               <string name="Name">Controls</string>
               <string name="Source"><![CDATA[--!strict
@@ -8232,6 +8664,7 @@ local TweenService = game:GetService("TweenService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local Hud = require(script.Parent:WaitForChild("Hud"))
@@ -8551,6 +8984,7 @@ local function equip(name: string)
 	Remotes.Event("EquipWeapon"):FireServer(name)
 	-- No toast. The weapon bar shows exactly one gun lit, which is clearer
 	-- than a stack of messages naming every gun you just cycled past.
+	Sound.Flat("WeaponSwitch")
 	refreshWeaponBar()
 end
 
@@ -8907,7 +9341,7 @@ return Controls
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="33">
+          <Item class="ModuleScript" referent="34">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--!strict
@@ -8939,6 +9373,10 @@ local turboText: TextLabel
 local statusText: TextLabel
 local zoomText: TextLabel
 local scope: Frame
+local hitmarker: Frame
+local damageHolder: Frame
+local killFeed: Frame
+local medalLabel: TextLabel
 local weaponBar: Frame
 local slotChips: { [number]: TextLabel } = {}
 local weaponLabel: TextLabel
@@ -9233,6 +9671,58 @@ function Hud.Build()
 		TextSize = 16,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextColor3 = Color3.fromRGB(255, 220, 120),
+	})
+
+	-- The hitmarker: four short strokes around the crosshair, flashed the
+	-- instant a shot connects. Hitscan guns give you nothing else to tell
+	-- you whether you are aiming anywhere near the target.
+	hitmarker = makeFrame(screen, {
+		Size = UDim2.fromOffset(40, 40),
+		Position = UDim2.new(0.5, -20, 0.5, -20),
+		BackgroundTransparency = 1,
+		Visible = false,
+		ZIndex = 12,
+	})
+	for _, corner in { Vector2.new(-1, -1), Vector2.new(1, -1), Vector2.new(-1, 1), Vector2.new(1, 1) } do
+		local stroke = makeFrame(hitmarker, {
+			Size = UDim2.fromOffset(10, 3),
+			Position = UDim2.new(0.5, -5 + corner.X * 13, 0.5, -1 + corner.Y * 13),
+			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundTransparency = 0.05,
+			ZIndex = 12,
+		})
+		stroke.Rotation = if corner.X * corner.Y > 0 then 45 else -45
+	end
+
+	-- Floating damage numbers, stacked up beside the crosshair.
+	damageHolder = makeFrame(screen, {
+		Size = UDim2.fromOffset(160, 150),
+		Position = UDim2.new(0.5, 40, 0.5, -40),
+		BackgroundTransparency = 1,
+		ZIndex = 11,
+	})
+
+	-- The kill feed, top right, newest at the top.
+	killFeed = makeFrame(screen, {
+		Size = UDim2.fromOffset(420, 180),
+		Position = UDim2.new(1, -444, 0, 96),
+		BackgroundTransparency = 1,
+	})
+	local feedLayout = Instance.new("UIListLayout")
+	feedLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	feedLayout.Padding = UDim.new(0, 4)
+	feedLayout.Parent = killFeed
+
+	-- Medals. One big line in the middle, briefly.
+	medalLabel = makeLabel(screen, {
+		Size = UDim2.new(1, 0, 0, 56),
+		Position = UDim2.new(0, 0, 0.32, 0),
+		Text = "",
+		TextSize = 44,
+		Font = Enum.Font.LuckiestGuy,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(255, 220, 120),
+		ZIndex = 14,
 	})
 
 	-- The weapon bar: one chip per slot, and exactly one of them is lit.
@@ -9622,6 +10112,121 @@ function Hud.Splat(duration: number)
 	end)
 end
 
+--[[
+	Flash the hitmarker and float the damage number.
+
+	A headshot gets a bigger, hotter marker, because knowing you hit the head
+	is most of what makes a headshot satisfying.
+]]
+function Hud.Hit(damage: number, headshot: boolean)
+	if not hitmarker then
+		return
+	end
+
+	hitmarker.Visible = true
+	hitmarker.Size = if headshot then UDim2.fromOffset(56, 56) else UDim2.fromOffset(40, 40)
+	hitmarker.Position = if headshot
+		then UDim2.new(0.5, -28, 0.5, -28)
+		else UDim2.new(0.5, -20, 0.5, -20)
+	for _, stroke in hitmarker:GetChildren() do
+		if stroke:IsA("Frame") then
+			stroke.BackgroundColor3 = if headshot
+				then Color3.fromRGB(255, 210, 90)
+				else Color3.fromRGB(255, 255, 255)
+		end
+	end
+
+	task.delay(0.12, function()
+		if hitmarker then
+			hitmarker.Visible = false
+		end
+	end)
+
+	-- The number, drifting up and fading.
+	if not damageHolder then
+		return
+	end
+	local number = makeLabel(damageHolder, {
+		Size = UDim2.fromOffset(160, 30),
+		Position = UDim2.fromOffset(0, 60),
+		Text = if headshot then `{damage}  HEAD` else tostring(damage),
+		TextSize = if headshot then 28 else 22,
+		TextColor3 = if headshot then Color3.fromRGB(255, 210, 90) else Color3.fromRGB(255, 255, 255),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 11,
+	})
+
+	local drift = TweenService:Create(number, TweenInfo.new(0.7, Enum.EasingStyle.Quad), {
+		Position = UDim2.fromOffset(26, 0),
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+	})
+	drift:Play()
+	drift.Completed:Connect(function()
+		number:Destroy()
+	end)
+end
+
+--[[ One line in the kill feed. ]]
+function Hud.KillFeed(text: string, mine: boolean)
+	if not killFeed then
+		return
+	end
+
+	-- Keep the list short; the oldest falls off the bottom.
+	local lines = {}
+	for _, child in killFeed:GetChildren() do
+		if child:IsA("TextLabel") then
+			table.insert(lines, child)
+		end
+	end
+	if #lines >= 5 then
+		lines[1]:Destroy()
+	end
+
+	local entry = makeLabel(killFeed, {
+		Size = UDim2.new(1, 0, 0, 24),
+		Text = text,
+		TextSize = 17,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		-- Your own kills stand out from everybody else's.
+		TextColor3 = if mine then Color3.fromRGB(255, 220, 120) else Color3.fromRGB(205, 215, 225),
+	})
+	entry.LayoutOrder = math.floor(os.clock() * 100)
+
+	task.delay(6, function()
+		if entry.Parent then
+			local fade = TweenService:Create(entry, TweenInfo.new(0.5), {
+				TextTransparency = 1,
+				TextStrokeTransparency = 1,
+			})
+			fade:Play()
+			fade.Completed:Wait()
+			entry:Destroy()
+		end
+	end)
+end
+
+--[[ A medal, across the middle of the screen. ]]
+function Hud.Medal(text: string)
+	if not medalLabel then
+		return
+	end
+	medalLabel.Text = text
+	medalLabel.TextTransparency = 0
+	medalLabel.TextStrokeTransparency = 0.3
+
+	task.delay(1.6, function()
+		if not medalLabel then
+			return
+		end
+		TweenService:Create(medalLabel, TweenInfo.new(0.6), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1,
+		}):Play()
+	end)
+end
+
 --[[ Report control health on screen. Green when fine, red when not. ]]
 function Hud.SetStatus(text: string, good: boolean)
 	if not statusText then
@@ -9655,7 +10260,7 @@ return Hud
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="34">
+  <Item class="Workspace" referent="35">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

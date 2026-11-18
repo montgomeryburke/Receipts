@@ -48,6 +48,8 @@ harness = f"""
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+local SoundService = game:GetService("SoundService")
 
 local Config = (function()
 {strip(read(SRC, 'shared', 'Config.luau'))}
@@ -57,6 +59,13 @@ local Signal = (function()
 end)()
 local Util = (function()
 {strip(read(SRC, 'shared', 'Util.luau'))}
+end)()
+local Remotes = (function()
+{strip(read(SRC, 'shared', 'Remotes.luau'))}
+end)()
+local Sound = (function()
+local Config = Config
+{strip(read(SRC, 'shared', 'Sound.luau'))}
 end)()
 local PlayerState = (function()
 {strip(read(SRC, 'server', 'modules', 'PlayerState.luau'))}

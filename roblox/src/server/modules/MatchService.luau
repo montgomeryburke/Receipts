@@ -45,6 +45,75 @@ local votes: { [Player]: number } = {}
 -- The one car each player currently owns.
 local playerCars: { [Player]: Model } = {}
 
+--[[
+	Medals.
+
+	Halo's two kinds, and they are different things: a MULTIKILL is several
+	kills close together in time, and a SPREE is many kills without dying.
+	Tracked per player and reset by death.
+]]
+local recentKills: { [Player]: { number } } = {}
+local sprees: { [Player]: number } = {}
+
+local MULTIKILL_WINDOW = 4.5
+
+local MULTIKILL_NAMES = {
+	[2] = "DOUBLE KILL",
+	[3] = "TRIPLE KILL",
+	[4] = "OVERKILL",
+	[5] = "KILLTACULAR",
+	[6] = "KILLTROCITY",
+}
+
+local SPREE_NAMES = {
+	[5] = "KILLING SPREE",
+	[10] = "RUNNING RIOT",
+	[15] = "RAMPAGE",
+	[20] = "UNTOUCHABLE",
+}
+
+--[[ Everybody sees who killed whom. ]]
+local function killFeed(killer: Player?, victim: Player, cause: string)
+	local line = if killer
+		then `{killer.DisplayName}  ▸  {cause}  ▸  {victim.DisplayName}`
+		else `{victim.DisplayName} died — {cause}`
+
+	for _, player in Players:GetPlayers() do
+		Remotes.Event("KillFeed"):FireClient(player, line, player == killer)
+	end
+end
+
+--[[ Work out whether this kill earned a medal, and announce it if so. ]]
+local function awardMedals(killer: Player)
+	local now = os.clock()
+
+	-- Multikill: how many in the last few seconds.
+	local window = recentKills[killer] or {}
+	table.insert(window, now)
+	for index = #window, 1, -1 do
+		if now - window[index] > MULTIKILL_WINDOW then
+			table.remove(window, index)
+		end
+	end
+	recentKills[killer] = window
+
+	local multi = MULTIKILL_NAMES[#window]
+	if multi then
+		Remotes.Event("Medal"):FireClient(killer, multi)
+		Remotes.Event("PlaySound"):FireClient(killer, "Medal")
+	end
+
+	-- Spree: how many since last dying.
+	sprees[killer] = (sprees[killer] or 0) + 1
+	local spree = SPREE_NAMES[sprees[killer]]
+	if spree then
+		for _, player in Players:GetPlayers() do
+			Remotes.Event("Medal"):FireClient(player, `{killer.DisplayName}: {spree}`)
+		end
+		Remotes.Event("PlaySound"):FireClient(killer, "Medal")
+	end
+end
+
 --[[ The two team colours, for painting the spawn pads. ]]
 local function teamColours(): { BrickColor }
 	local colours = {}
@@ -101,6 +170,13 @@ local function broadcast()
 			else nil,
 	}
 	Remotes.Event("MatchState"):FireAllClients(payload)
+end
+
+--[[ The same noise in everybody's ears at once, for match-wide moments. ]]
+local function fanfare(soundName: string)
+	for _, player in Players:GetPlayers() do
+		Remotes.Event("PlaySound"):FireClient(player, soundName)
+	end
 end
 
 --[[ Put a player on the ground at their team's end of the map, in a car. ]]
@@ -245,10 +321,13 @@ end
 local function runRound()
 	-- The arena is already standing; a round is just the clock and the score.
 	scores = { 0, 0 }
+	table.clear(recentKills)
+	table.clear(sprees)
 	phase = "Playing"
 	phaseEndsAt = os.clock() + Config.Match.RoundDuration
 
 	deployAll()
+	fanfare("RoundStart")
 
 	while os.clock() < phaseEndsAt do
 		broadcast()
@@ -270,6 +349,7 @@ local function runIntermission()
 	local winnerIndex = if scores[1] == scores[2] then 0 elseif scores[1] > scores[2] then 1 else 2
 	local winnerName = if winnerIndex == 0 then "NOBODY" else Config.Teams[winnerIndex].Name
 	EffectService.CelebrateWinner(winnerName)
+	fanfare("RoundEnd")
 
 	while os.clock() < phaseEndsAt do
 		broadcast()
@@ -329,6 +409,11 @@ function MatchService.Start()
 		end
 
 		EffectService.ShowDeathScreen(victim, if killer then killer.DisplayName else nil)
+		killFeed(killer, victim, cause)
+
+		-- Dying ends your spree and your multikill window.
+		sprees[victim] = 0
+		recentKills[victim] = {}
 
 		if killer and killer ~= victim and phase == "Playing" then
 			-- A sniper shot is worth more than a pistol round, and a running
@@ -340,6 +425,8 @@ function MatchService.Start()
 			scores[teamIndex] += earned
 
 			Remotes.Event("Notify"):FireClient(killer, `+{earned} — {cause}`)
+			Remotes.Event("PlaySound"):FireClient(killer, "KillConfirm")
+			awardMedals(killer)
 			broadcast()
 		end
 	end)
@@ -405,6 +492,8 @@ function MatchService.Start()
 
 	Players.PlayerRemoving:Connect(function(player)
 		votes[player] = nil
+		recentKills[player] = nil
+		sprees[player] = nil
 		local car = playerCars[player]
 		if car and car.Parent then
 			car:Destroy()
@@ -434,6 +523,20 @@ function MatchService.Start()
 	})
 
 	task.spawn(loop)
+end
+
+--[[
+	Put the match straight into a running round.
+
+	Only the tests use this: kills are deliberately ignored outside a round,
+	so without it a test would have to wait out the real loop to score one.
+]]
+function MatchService.ForceRoundForTests()
+	phase = "Playing"
+	phaseEndsAt = os.clock() + Config.Match.RoundDuration
+	scores = { 0, 0 }
+	table.clear(recentKills)
+	table.clear(sprees)
 end
 
 --[[ Which phase the game is in, for anything that needs to care. ]]

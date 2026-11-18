@@ -15,6 +15,7 @@ local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -225,6 +226,7 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	local endPoint = if result then result.Position else origin + direction * spec.Range
 	drawTracer(origin, endPoint, spec.Color)
 	muzzleFlash(origin + direction * 2, spec.Color)
+	Sound.At(Sound.ForWeapon(spec), origin)
 
 	if not result then
 		return
@@ -248,10 +250,20 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 		if victim and victim ~= player then
 			-- Headshots hurt more, because they should.
 			local damage = spec.Damage
-			if result.Instance.Name == "Head" then
+			local headshot = result.Instance.Name == "Head"
+			if headshot then
 				damage *= 1.8
 			end
-			DamageService.ApplyDamage(victim, damage, player, spec.DisplayName)
+			if DamageService.ApplyDamage(victim, damage, player, spec.DisplayName) then
+				-- Tell the shooter they connected. Without this, hitscan guns
+				-- give you nothing at all to tell you whether you are aiming
+				-- anywhere near the target.
+				Remotes.Event("Hitmarker"):FireClient(player, {
+					damage = math.floor(damage),
+					headshot = headshot,
+					position = result.Position,
+				})
+			end
 			return
 		end
 	end
@@ -522,6 +534,8 @@ local function handleMelee(player: Player)
 	end
 	state.nextMeleeAt = now + Config.Melee.Cooldown
 
+	Sound.At("MeleeSwing", root.Position)
+
 	local facing = root.CFrame.LookVector
 	local best: Player? = nil
 	local bestDistance = Config.Melee.Range
@@ -564,7 +578,14 @@ local function handleMelee(player: Player)
 		end
 	end
 
-	DamageService.ApplyDamage(best, damage, player, "Melee")
+	Sound.At("MeleeHit", root.Position)
+	if DamageService.ApplyDamage(best, damage, player, "Melee") then
+		Remotes.Event("Hitmarker"):FireClient(player, {
+			damage = math.floor(damage),
+			headshot = damage > Config.Melee.Damage,
+			position = root.Position,
+		})
+	end
 end
 
 --[[ Gunners tell the server where they are looking; the turret follows. ]]

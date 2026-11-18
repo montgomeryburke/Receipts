@@ -27,6 +27,10 @@ local turboText: TextLabel
 local statusText: TextLabel
 local zoomText: TextLabel
 local scope: Frame
+local hitmarker: Frame
+local damageHolder: Frame
+local killFeed: Frame
+local medalLabel: TextLabel
 local weaponBar: Frame
 local slotChips: { [number]: TextLabel } = {}
 local weaponLabel: TextLabel
@@ -321,6 +325,58 @@ function Hud.Build()
 		TextSize = 16,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextColor3 = Color3.fromRGB(255, 220, 120),
+	})
+
+	-- The hitmarker: four short strokes around the crosshair, flashed the
+	-- instant a shot connects. Hitscan guns give you nothing else to tell
+	-- you whether you are aiming anywhere near the target.
+	hitmarker = makeFrame(screen, {
+		Size = UDim2.fromOffset(40, 40),
+		Position = UDim2.new(0.5, -20, 0.5, -20),
+		BackgroundTransparency = 1,
+		Visible = false,
+		ZIndex = 12,
+	})
+	for _, corner in { Vector2.new(-1, -1), Vector2.new(1, -1), Vector2.new(-1, 1), Vector2.new(1, 1) } do
+		local stroke = makeFrame(hitmarker, {
+			Size = UDim2.fromOffset(10, 3),
+			Position = UDim2.new(0.5, -5 + corner.X * 13, 0.5, -1 + corner.Y * 13),
+			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundTransparency = 0.05,
+			ZIndex = 12,
+		})
+		stroke.Rotation = if corner.X * corner.Y > 0 then 45 else -45
+	end
+
+	-- Floating damage numbers, stacked up beside the crosshair.
+	damageHolder = makeFrame(screen, {
+		Size = UDim2.fromOffset(160, 150),
+		Position = UDim2.new(0.5, 40, 0.5, -40),
+		BackgroundTransparency = 1,
+		ZIndex = 11,
+	})
+
+	-- The kill feed, top right, newest at the top.
+	killFeed = makeFrame(screen, {
+		Size = UDim2.fromOffset(420, 180),
+		Position = UDim2.new(1, -444, 0, 96),
+		BackgroundTransparency = 1,
+	})
+	local feedLayout = Instance.new("UIListLayout")
+	feedLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	feedLayout.Padding = UDim.new(0, 4)
+	feedLayout.Parent = killFeed
+
+	-- Medals. One big line in the middle, briefly.
+	medalLabel = makeLabel(screen, {
+		Size = UDim2.new(1, 0, 0, 56),
+		Position = UDim2.new(0, 0, 0.32, 0),
+		Text = "",
+		TextSize = 44,
+		Font = Enum.Font.LuckiestGuy,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(255, 220, 120),
+		ZIndex = 14,
 	})
 
 	-- The weapon bar: one chip per slot, and exactly one of them is lit.
@@ -707,6 +763,121 @@ function Hud.Splat(duration: number)
 		end
 		fade.Completed:Wait()
 		splat:Destroy()
+	end)
+end
+
+--[[
+	Flash the hitmarker and float the damage number.
+
+	A headshot gets a bigger, hotter marker, because knowing you hit the head
+	is most of what makes a headshot satisfying.
+]]
+function Hud.Hit(damage: number, headshot: boolean)
+	if not hitmarker then
+		return
+	end
+
+	hitmarker.Visible = true
+	hitmarker.Size = if headshot then UDim2.fromOffset(56, 56) else UDim2.fromOffset(40, 40)
+	hitmarker.Position = if headshot
+		then UDim2.new(0.5, -28, 0.5, -28)
+		else UDim2.new(0.5, -20, 0.5, -20)
+	for _, stroke in hitmarker:GetChildren() do
+		if stroke:IsA("Frame") then
+			stroke.BackgroundColor3 = if headshot
+				then Color3.fromRGB(255, 210, 90)
+				else Color3.fromRGB(255, 255, 255)
+		end
+	end
+
+	task.delay(0.12, function()
+		if hitmarker then
+			hitmarker.Visible = false
+		end
+	end)
+
+	-- The number, drifting up and fading.
+	if not damageHolder then
+		return
+	end
+	local number = makeLabel(damageHolder, {
+		Size = UDim2.fromOffset(160, 30),
+		Position = UDim2.fromOffset(0, 60),
+		Text = if headshot then `{damage}  HEAD` else tostring(damage),
+		TextSize = if headshot then 28 else 22,
+		TextColor3 = if headshot then Color3.fromRGB(255, 210, 90) else Color3.fromRGB(255, 255, 255),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 11,
+	})
+
+	local drift = TweenService:Create(number, TweenInfo.new(0.7, Enum.EasingStyle.Quad), {
+		Position = UDim2.fromOffset(26, 0),
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+	})
+	drift:Play()
+	drift.Completed:Connect(function()
+		number:Destroy()
+	end)
+end
+
+--[[ One line in the kill feed. ]]
+function Hud.KillFeed(text: string, mine: boolean)
+	if not killFeed then
+		return
+	end
+
+	-- Keep the list short; the oldest falls off the bottom.
+	local lines = {}
+	for _, child in killFeed:GetChildren() do
+		if child:IsA("TextLabel") then
+			table.insert(lines, child)
+		end
+	end
+	if #lines >= 5 then
+		lines[1]:Destroy()
+	end
+
+	local entry = makeLabel(killFeed, {
+		Size = UDim2.new(1, 0, 0, 24),
+		Text = text,
+		TextSize = 17,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		-- Your own kills stand out from everybody else's.
+		TextColor3 = if mine then Color3.fromRGB(255, 220, 120) else Color3.fromRGB(205, 215, 225),
+	})
+	entry.LayoutOrder = math.floor(os.clock() * 100)
+
+	task.delay(6, function()
+		if entry.Parent then
+			local fade = TweenService:Create(entry, TweenInfo.new(0.5), {
+				TextTransparency = 1,
+				TextStrokeTransparency = 1,
+			})
+			fade:Play()
+			fade.Completed:Wait()
+			entry:Destroy()
+		end
+	end)
+end
+
+--[[ A medal, across the middle of the screen. ]]
+function Hud.Medal(text: string)
+	if not medalLabel then
+		return
+	end
+	medalLabel.Text = text
+	medalLabel.TextTransparency = 0
+	medalLabel.TextStrokeTransparency = 0.3
+
+	task.delay(1.6, function()
+		if not medalLabel then
+			return
+		end
+		TweenService:Create(medalLabel, TweenInfo.new(0.6), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1,
+		}):Play()
 	end)
 end
 

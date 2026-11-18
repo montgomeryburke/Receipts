@@ -16,6 +16,106 @@ arena, and players fell through an empty sky. Both runs must print ARENA: true.
 """
 import os, re, sys
 
+# Kept out of the harness f-string on purpose: Luau is full of braces, and
+# an f-string reads every one of them as an expression.
+MEDAL_TEST = '''
+-- ------------------------------------------------------- medals and feed
+-- Throw away whatever boot spawned before testing anything. The match loop
+-- is in there and it never returns, so flushing it would hang.
+SPAWNED = {}
+
+local failures = 0
+local function check(label, condition, detail)
+	if condition then
+		DUMP(string.format("  PASS  %-40s %s", label, detail or ""))
+	else
+		DUMP(string.format("  FAIL  %-40s %s", label, detail or ""))
+		failures += 1
+	end
+end
+
+local function makeFighter(name, userId)
+	local character = Instance.new("Model")
+	character._props.Name = name
+	local root = Instance.new("Part")
+	root._props.Name = "HumanoidRootPart"
+	root._props.CFrame = CFrame.new(0, 5, 0)
+	root.Parent = character
+	local humanoid = Instance.new("Humanoid")
+	humanoid.Parent = character
+	character.Parent = workspace
+
+	local player = Instance.new("Player")
+	player._props.Name = name
+	player._props.DisplayName = name
+	player._props.UserId = userId
+	player._props.Character = character
+	player._props.CharacterAdded = SIGNAL()
+	player._props.LoadCharacterAsync = function() end
+	return player
+end
+
+local killer = makeFighter("Killer", 10)
+local prey = makeFighter("Prey", 11)
+rawget(Players, "_props").GetPlayers = function() return { killer, prey } end
+PLAYERS_FOR_TEAMS = { killer, prey }
+TeamService.Assign(killer)
+TeamService.Assign(prey)
+if killer._props.Team == prey._props.Team then
+	prey._props.Team = TeamService.Get(if TeamService.IndexOf(killer) == 1 then 2 else 1)
+end
+
+MatchService.ForceRoundForTests()
+
+local function medalsSent()
+	local names = {}
+	for _, call in FIRED_TO("Medal") do
+		table.insert(names, tostring(call.args[1]))
+	end
+	return names
+end
+
+FIRED = {}
+DamageService.Killed.Fire(prey, killer, "Sniper Rifle")
+RUN_SPAWNED()
+check("a kill reaches the kill feed", #FIRED_TO("KillFeed") > 0,
+	string.format("%d lines", #FIRED_TO("KillFeed")))
+check("the killer hears a confirm", #FIRED_TO("PlaySound") > 0, "")
+check("one kill earns no medal", #medalsSent() == 0, table.concat(medalsSent(), ", "))
+
+DamageService.Killed.Fire(prey, killer, "Sniper Rifle")
+RUN_SPAWNED()
+check("two quick kills is a DOUBLE KILL",
+	string.find(table.concat(medalsSent(), ","), "DOUBLE KILL") ~= nil,
+	table.concat(medalsSent(), ", "))
+
+FIRED = {}
+DamageService.Killed.Fire(prey, killer, "Sniper Rifle")
+RUN_SPAWNED()
+check("three is a TRIPLE KILL",
+	string.find(table.concat(medalsSent(), ","), "TRIPLE KILL") ~= nil,
+	table.concat(medalsSent(), ", "))
+
+FIRED = {}
+DamageService.Killed.Fire(prey, killer, "Sniper Rifle")
+DamageService.Killed.Fire(prey, killer, "Sniper Rifle")
+RUN_SPAWNED()
+check("five without dying is a SPREE",
+	string.find(table.concat(medalsSent(), ","), "KILLING SPREE") ~= nil,
+	table.concat(medalsSent(), ", "))
+
+FIRED = {}
+DamageService.Killed.Fire(killer, prey, "Pistol")
+RUN_SPAWNED()
+FIRED = {}
+DamageService.Killed.Fire(prey, killer, "Sniper Rifle")
+RUN_SPAWNED()
+check("dying resets the multikill window", #medalsSent() == 0,
+	table.concat(medalsSent(), ", "))
+
+DUMP(if failures == 0 then "MEDALS WORK" else failures .. " MEDAL FAILURES")
+'''
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, '..', 'src')
 BLOCK_DATASTORE = '--block-datastore' in sys.argv
@@ -31,7 +131,7 @@ def strip(s):
         out.append(line)
     return '\n'.join(out)
 
-SHARED = ['Config', 'Signal', 'Util', 'Remotes']
+SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound']
 SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'MatchService', 'GraphicsService']
@@ -96,6 +196,7 @@ local bootOk, bootErr = pcall(function()
 end)
 
 DUMP("boot completed:", bootOk, bootOk and "" or tostring(bootErr))
+--[[MEDALS]]
 local arena = workspace:FindFirstChild("Arena")
 local fallback = workspace:FindFirstChild("FallbackGround")
 DUMP("ARENA:", arena ~= nil, arena and (#arena:GetDescendants() .. " parts") or "-")
@@ -104,4 +205,4 @@ for _, w in WARNINGS do DUMP("  warn:", w) end
 for _, p in PRINTS do DUMP("  print:", p) end
 ''')
 
-sys.stdout.write('\n'.join(parts))
+sys.stdout.write('\n'.join(parts).replace('--[[MEDALS]]', MEDAL_TEST))

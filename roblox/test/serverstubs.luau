@@ -3,10 +3,32 @@
 -- is captured rather than run, so we can inspect what Start() did before it.
 
 SPAWNED = {}
+-- Everything the server sends to a client, so a test can assert on what the
+-- player would actually be told rather than only on internal state.
+WAIT_BUDGET = 100000
+FIRED = {}
+FIRED_TO = function(remoteName)
+	local out = {}
+	for _, call in FIRED do
+		if call.remote == remoteName then table.insert(out, call) end
+	end
+	return out
+end
 DELAYED = {}
 RUN_SPAWNED = function()
 	local pending = SPAWNED
 	SPAWNED = {}
+	WAIT_BUDGET = 20000
+-- Everything the server sends to a client, so a test can assert on what the
+-- player would actually be told rather than only on internal state.
+FIRED = {}
+FIRED_TO = function(remoteName)
+	local out = {}
+	for _, call in FIRED do
+		if call.remote == remoteName then table.insert(out, call) end
+	end
+	return out
+end
 	for _, item in pending do
 		local ok, err = pcall(item.fn, table.unpack(item.args, 1, item.args.n))
 		if not ok then
@@ -63,7 +85,16 @@ task = {
 	delay = function(seconds, fn)
 		table.insert(DELAYED, { at = seconds, fn = fn })
 	end,
-	wait = function() end,
+	-- A safety net. If a test ever flushes a thread containing the match
+	-- loop, that loop never returns and the process dies of memory
+	-- exhaustion with nothing to show for it. This turns the hang into a
+	-- plain error instead.
+	wait = function()
+		WAIT_BUDGET -= 1
+		if WAIT_BUDGET < 0 then
+			error("__RUNAWAY_LOOP__: a flushed thread never finished", 0)
+		end
+	end,
 	defer = function() end,
 }
 
@@ -149,8 +180,20 @@ Instance = { new = function(class)
 	if class == "RemoteEvent" or class == "UnreliableRemoteEvent" then
 		props.OnServerEvent = SIGNAL()
 		props.OnClientEvent = SIGNAL()
-		props.FireClient = function() end
-		props.FireAllClients = function() end
+		props.FireClient = function(self, player, ...)
+			table.insert(FIRED, {
+				remote = rawget(self, "_props").Name,
+				player = player,
+				args = table.pack(...),
+			})
+		end
+		props.FireAllClients = function(self, ...)
+			table.insert(FIRED, {
+				remote = rawget(self, "_props").Name,
+				player = nil,
+				args = table.pack(...),
+			})
+		end
 		props.FireServer = function() end
 	elseif class == "RemoteFunction" then
 		props.OnServerInvoke = nil

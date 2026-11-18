@@ -13,6 +13,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -149,7 +150,15 @@ local function grant(player: Player, kind: string, weapon: string?)
 	end
 
 	PlayerState.Changed.Fire(player)
-	Remotes.Event("Notify"):FireClient(player, `Picked up: {labelFor(kind)}`)
+
+	-- The good ones sound like it.
+	local big = kind == "Invincibility" or kind == "Multiplier" or kind == "Weapon"
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if root and root:IsA("BasePart") then
+		Sound.At(if big then "PickupBig" else "Pickup", root.Position)
+	end
+
+	Remotes.Event("Notify"):FireClient(player, `Picked up: {labelFor(kind, weapon)}`)
 end
 
 --[[ Build the floating, spinning thing you actually drive into. ]]

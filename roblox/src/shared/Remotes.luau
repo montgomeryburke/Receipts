@@ -31,6 +31,10 @@ local EVENT_NAMES = {
 	"VoteOptions",
 	"DeathScreen",
 	"Notify",
+	"Hitmarker",
+	"Medal",
+	"KillFeed",
+	"PlaySound",
 	"MountedWeaponState",
 }
 

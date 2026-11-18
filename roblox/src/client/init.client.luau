@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 
 local modules = script:WaitForChild("modules")
 local Hud = require(modules:WaitForChild("Hud"))
@@ -144,6 +145,35 @@ Remotes.Event("PlayEffect").OnClientEvent:Connect(function(payload)
 		Hud.ShowWiener(payload.team or "NOBODY", payload.duration or 8)
 	elseif payload.effect == "Splat" then
 		Hud.Splat(payload.duration or 4)
+	end
+end)
+
+--[[ A shot connected. Marker, number, and the right click in your ears. ]]
+Remotes.Event("Hitmarker").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local headshot = payload.headshot == true
+	Hud.Hit(payload.damage or 0, headshot)
+	Sound.Flat(if headshot then "Headshot" else "Hitmarker")
+end)
+
+Remotes.Event("KillFeed").OnClientEvent:Connect(function(line, mine)
+	if typeof(line) == "string" then
+		Hud.KillFeed(line, mine == true)
+	end
+end)
+
+Remotes.Event("Medal").OnClientEvent:Connect(function(text)
+	if typeof(text) == "string" then
+		Hud.Medal(text)
+	end
+end)
+
+--[[ A noise the server wants this player specifically to hear. ]]
+Remotes.Event("PlaySound").OnClientEvent:Connect(function(name)
+	if typeof(name) == "string" then
+		Sound.Flat(name)
 	end
 end)
 

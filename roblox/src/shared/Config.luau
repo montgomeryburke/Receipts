@@ -435,6 +435,66 @@ Config.Wildlife = {
 }
 
 --[[
+	SOUND.
+
+	Every path here is an rbxasset:// file that ships inside the Roblox client
+	itself. That matters: a numeric asset ID can fail to load, be moderated,
+	or simply be wrong, and a wrong one is a runtime error in a place that has
+	never been published. These cannot be wrong — they are part of the engine.
+
+	The variety comes from pitch and volume rather than from a big library, so
+	the whole game is scored off about eight files. Swap any `Asset` for a
+	Toolbox sound you prefer and nothing else needs to change.
+
+	Pitch is a range: every play picks a random value inside it, which is what
+	stops a machine gun sounding like a metronome.
+]]
+Config.Sounds = {
+	-- ----------------------------------------------------------- gunfire
+	ShotLight = { Asset = "rbxasset://sounds/clickfast.wav", Volume = 0.45, Pitch = { 1.6, 2.0 } },
+	ShotHeavy = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.6, Pitch = { 1.5, 1.9 } },
+	ShotShotgun = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.85, Pitch = { 0.7, 0.85 } },
+	ShotSniper = { Asset = "rbxasset://sounds/bass.wav", Volume = 0.8, Pitch = { 1.5, 1.6 } },
+	ShotLaunch = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 0.7, Pitch = { 0.8, 1.0 } },
+	ShotDiamond = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.7, Pitch = { 0.8, 1.0 } },
+
+	-- -------------------------------------------------------- explosions
+	Explosion = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.45, 0.6 } },
+	ExplosionBig = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.22, 0.3 } },
+
+	-- ------------------------------------------------------------ combat
+	Hitmarker = { Asset = "rbxasset://sounds/snap.wav", Volume = 0.5, Pitch = { 1.8, 2.0 } },
+	Headshot = { Asset = "rbxasset://sounds/snap.wav", Volume = 0.7, Pitch = { 2.4, 2.6 } },
+	KillConfirm = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.6, Pitch = { 1.3, 1.4 } },
+	Death = { Asset = "rbxasset://sounds/uuhhh.wav", Volume = 0.8, Pitch = { 0.9, 1.1 } },
+	ShieldBreak = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.7, Pitch = { 0.6, 0.7 } },
+	MeleeSwing = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 0.6, Pitch = { 1.4, 1.7 } },
+	MeleeHit = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.9, Pitch = { 0.5, 0.65 } },
+
+	-- -------------------------------------------------------------- kit
+	Pickup = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.55, Pitch = { 1.5, 1.7 } },
+	PickupBig = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.8, Pitch = { 1.0, 1.1 } },
+	WeaponSwitch = { Asset = "rbxasset://sounds/snap.wav", Volume = 0.35, Pitch = { 1.2, 1.3 } },
+
+	-- ------------------------------------------------------------ events
+	FlagTaken = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 1, Pitch = { 0.85, 0.85 } },
+	FlagCapture = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 1.1, 1.1 } },
+	RoundStart = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.9, 0.9 } },
+	RoundEnd = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.6, 0.6 } },
+	Medal = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.9, Pitch = { 1.7, 1.7 } },
+
+	-- --------------------------------------------------------- the world
+	EngineLoop = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.35, Pitch = { 0.5, 0.5 }, Looped = true },
+	Boost = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 0.8, Pitch = { 0.6, 0.7 } },
+	Splash = { Asset = "rbxasset://sounds/impact_water.mp3", Volume = 1, Pitch = { 0.9, 1.1 } },
+	Bell = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 1, Pitch = { 2.2, 2.2 } },
+	ZombieGrowl = { Asset = "rbxasset://sounds/uuhhh.wav", Volume = 0.6, Pitch = { 0.5, 0.65 } },
+	Fart = { Asset = "rbxasset://sounds/uuhhh.wav", Volume = 0.7, Pitch = { 0.35, 0.45 } },
+	ParachuteOpen = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 1, Pitch = { 0.5, 0.6 } },
+	Jump = { Asset = "rbxasset://sounds/action_jump.mp3", Volume = 0.5, Pitch = { 1, 1 } },
+}
+
+--[[
 	THE POPULATION.
 
 	Zombies roam and come for you. Civilians wander and say something
@@ -822,6 +882,12 @@ export type ConfigType = {
 		RespawnDelay: number,
 	},
 	CivilianLines: { string },
+	Sounds: {
+		[string]: {
+			Asset: string, Volume: number,
+			Pitch: { number }, Looped: boolean?,
+		}
+	},
 
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },

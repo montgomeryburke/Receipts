@@ -16,6 +16,7 @@ local Debris = game:GetService("Debris")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -270,6 +271,7 @@ local function dunk(shooter: Player?)
 	spray.Rate = 0
 	spray.Parent = splash
 	spray:Emit(90)
+	Sound.At("Splash", splash.Position)
 	Debris:AddItem(splash, 3)
 end
 
@@ -410,6 +412,10 @@ local function ringBell(shooter: Player?)
 		return
 	end
 	strikerUntil = os.clock() + 2.5
+	local puck = strikerPuck
+	if puck then
+		Sound.At("Bell", puck.Position + Vector3.new(0, 60, 0))
+	end
 	award(shooter, STRIKER_POINTS, "DING! Bell rung.")
 end
 

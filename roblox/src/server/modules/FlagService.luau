@@ -21,6 +21,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Signal = require(Shared:WaitForChild("Signal"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
@@ -226,6 +227,7 @@ local function pickUp(flag: Flag, player: Player)
 	setCarrierSpeed(player, true)
 
 	PlayerState.AwardPoints(player, Config.CTF.FlagTakenPoints)
+	Sound.At("FlagTaken", flag.pole.Position)
 	local team = TeamService.Get(flag.teamIndex)
 	announce(`{player.DisplayName} has the {if team then team.Name else ""} flag!`)
 end
@@ -236,6 +238,7 @@ local function capture(flag: Flag, player: Player, scorerIndex: number)
 	FlagService.Captured.Fire(player, scorerIndex, earned)
 
 	announce(`{player.DisplayName} CAPTURED THE FLAG! +{earned}`)
+	Sound.At("FlagCapture", flag.home)
 	setCarrierSpeed(player, false)
 	sendHome(flag, true)
 end

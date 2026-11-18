@@ -14,6 +14,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Signal = require(Shared:WaitForChild("Signal"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -78,6 +79,15 @@ function DamageService.ApplyDamage(
 		local absorbed = math.min(state.shield, remaining)
 		state.shield -= absorbed
 		remaining -= absorbed
+
+		-- The moment the shield gives out is the moment that matters, so it
+		-- gets its own noise.
+		if state.shield <= 0 then
+			local root = character:FindFirstChild("HumanoidRootPart")
+			if root and root:IsA("BasePart") then
+				Sound.At("ShieldBreak", root.Position)
+			end
+		end
 	end
 
 	if remaining > 0 then
@@ -87,6 +97,10 @@ function DamageService.ApplyDamage(
 	PlayerState.Changed.Fire(victim)
 
 	if humanoid.Health <= 0 then
+		local root = character:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			Sound.At("Death", root.Position)
+		end
 		DamageService.HandleDeath(victim, attacker, cause or "Unknown")
 	end
 
@@ -124,6 +138,9 @@ function DamageService.Explode(
 	if isMega then
 		DamageService.MegaBlast.Fire(position, radius, attacker)
 	end
+
+	-- Big blasts get the deeper boom.
+	Sound.At(if radius > 60 then "ExplosionBig" else "Explosion", position)
 
 	-- The visible bang. BlastPressure does the ragdoll-throwing; the numbers
 	-- below do the actual damage, so nobody dies to physics alone.

@@ -32,7 +32,7 @@ def strip(s):
     return '\n'.join(kept)
 
 
-SHARED = ['Config', 'Signal', 'Util', 'Remotes']
+SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound']
 SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
           'EffectService', 'FlagService']

@@ -25,6 +25,7 @@ local Players = game:GetService("Players")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -221,6 +222,13 @@ local function buildChassis(
 	local halfBase = wheelbase * 0.5
 	local halfTrack = track * 0.5
 	local axleDrop = -bodySize.Y * 0.5
+
+	-- An engine note, pitched by road speed. A silent vehicle feels like a
+	-- prop being slid along the floor.
+	local engine = Sound.Attach("EngineLoop", chassis)
+	if engine then
+		engine.Name = "Engine"
+	end
 
 	local wheels = {}
 	for _, corner in {
@@ -862,6 +870,9 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 
 	-- A boost pad overrides the gradual wind-up entirely: you leave it fast.
 	if boosted and throttle >= 0 then
+		if current < Config.Boost.Speed * 0.9 then
+			Sound.At("Boost", chassis.Position)
+		end
 		current = math.max(current, Config.Boost.Speed)
 	end
 
@@ -873,6 +884,10 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		state.currentSpeed = 0
 		drive.Enabled = false
 		turn.Enabled = false
+		local idleEngine = chassis:FindFirstChild("Engine")
+		if idleEngine and idleEngine:IsA("Sound") and idleEngine.IsPlaying then
+			idleEngine:Stop()
+		end
 		if state.wheels then
 			for _, wheel in state.wheels do
 				local resting = chassis.CFrame * wheel.offset * CFrame.Angles(state.wheelSpin or 0, 0, 0)
@@ -896,6 +911,17 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	turn.Enabled = true
 	drive.LineDirection = flat
 	drive.LineVelocity = current
+
+	-- The engine rises and falls with road speed.
+	local engine = chassis:FindFirstChild("Engine")
+	if engine and engine:IsA("Sound") then
+		local fraction = math.abs(current) / math.max(topSpeed, 1)
+		engine.PlaybackSpeed = 0.45 + fraction * 1.5
+		engine.Volume = 0.2 + fraction * 0.4
+		if not engine.IsPlaying then
+			engine:Play()
+		end
+	end
 
 	-- Roll the wheels at whatever speed the car is actually doing. They are
 	-- anchored decoration, so this is the only thing that makes them turn —
@@ -1111,6 +1137,7 @@ function VehicleService.Eject(player: Player)
 	descent.Enabled = false
 	descent.Parent = root
 
+	Sound.At("ParachuteOpen", root.Position)
 	Remotes.Event("Notify"):FireClient(player, "Parachute open — steer with WASD.")
 
 	-- Let the launch carry you upward first, then open.

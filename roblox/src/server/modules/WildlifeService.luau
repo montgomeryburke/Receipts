@@ -21,6 +21,7 @@ local Debris = game:GetService("Debris")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
@@ -130,6 +131,7 @@ local function fart(position: Vector3)
 	cloud.Rate = 0
 	cloud.Parent = anchor
 	cloud:Emit(40)
+	Sound.At("Fart", position)
 
 	Debris:AddItem(anchor, 3)
 end
@@ -577,6 +579,7 @@ function WildlifeService.RegisterHit(part: BasePart, damage: number?, attacker: 
 						fart(dweller.root.Position - Vector3.new(0, 1.5, 0))
 					elseif dweller.kind == "Zombie" then
 						say(dweller.root, "RRRAAAGH", Color3.fromRGB(160, 220, 130), 1.5)
+						Sound.At("ZombieGrowl", dweller.root.Position)
 					end
 
 					if dweller.health <= 0 then

@@ -39,6 +39,11 @@ local Config = (function()
 --[[CONFIG]]
 end)()
 
+local Sound = (function()
+local Config = Config
+--[[SOUND]]
+end)()
+
 local failures = 0
 local function check(label, condition, detail)
 	if condition then
@@ -203,6 +208,61 @@ check("car tiers climb in speed", (function()
 	return true
 end)(), string.format("%d tiers", #Config.CarTiers))
 
+-- --------------------------------------------------------------------- sound
+print("")
+print("Sound:")
+local soundCount, notBuiltIn, badVolume, badPitch = 0, {}, {}, {}
+for name, spec in Config.Sounds do
+	soundCount += 1
+	-- A numeric asset ID can be wrong, moderated, or simply not load. An
+	-- rbxasset:// path ships inside the client and cannot be any of those.
+	if not string.match(spec.Asset, "^rbxasset://") then
+		table.insert(notBuiltIn, name)
+	end
+	if spec.Volume <= 0 or spec.Volume > 2 then
+		table.insert(badVolume, name)
+	end
+	local low = spec.Pitch and spec.Pitch[1]
+	local high = spec.Pitch and spec.Pitch[2]
+	if not low or low <= 0 or (high and high < low) then
+		table.insert(badPitch, name)
+	end
+end
+
+check("sounds are all engine built-ins", #notBuiltIn == 0, table.concat(notBuiltIn, ", "))
+check("volumes are sane", #badVolume == 0, table.concat(badVolume, ", "))
+check("pitch ranges are sane", #badPitch == 0, table.concat(badPitch, ", "))
+check("the game is not silent", soundCount >= 15, string.format("%d sounds", soundCount))
+
+-- Every weapon must map to a sound that actually exists, or firing it warns
+-- at runtime and plays nothing.
+local missingShot = {}
+for name, spec in Config.Weapons do
+	local soundName = Sound.ForWeapon(spec)
+	if not Config.Sounds[soundName] then
+		table.insert(missingShot, string.format("%s -> %s", name, tostring(soundName)))
+	end
+end
+check("every weapon has a gunshot", #missingShot == 0, table.concat(missingShot, ", "))
+
+-- Names referenced from code, checked here so a rename cannot quietly break
+-- one of them.
+local referenced = {
+	"Hitmarker", "Headshot", "KillConfirm", "Death", "ShieldBreak",
+	"MeleeSwing", "MeleeHit", "Pickup", "PickupBig", "WeaponSwitch",
+	"FlagTaken", "FlagCapture", "RoundStart", "RoundEnd", "Medal",
+	"EngineLoop", "Boost", "Splash", "Bell", "ZombieGrowl", "Fart",
+	"ParachuteOpen", "Explosion", "ExplosionBig",
+}
+local missingReferenced = {}
+for _, name in referenced do
+	if not Config.Sounds[name] then
+		table.insert(missingReferenced, name)
+	end
+end
+check("every sound the code asks for exists", #missingReferenced == 0,
+	table.concat(missingReferenced, ", "))
+
 print("")
 print(if failures == 0 then "CONFIG IS SANE" else failures .. " FAILURES")
 """
@@ -211,6 +271,7 @@ harness = (
     TEMPLATE
     .replace("--[[STUBS]]", read(HERE, "stubs.luau"))
     .replace("--[[CONFIG]]", strip(read(SRC, "shared", "Config.luau")))
+    .replace("--[[SOUND]]", strip(read(SRC, "shared", "Sound.luau")))
 )
 
 sys.stdout.write(harness)

@@ -22,6 +22,7 @@ local TweenService = game:GetService("TweenService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local Hud = require(script.Parent:WaitForChild("Hud"))
@@ -341,6 +342,7 @@ local function equip(name: string)
 	Remotes.Event("EquipWeapon"):FireServer(name)
 	-- No toast. The weapon bar shows exactly one gun lit, which is clearer
 	-- than a stack of messages naming every gun you just cycled past.
+	Sound.Flat("WeaponSwitch")
 	refreshWeaponBar()
 end
 
