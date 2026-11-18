@@ -18,6 +18,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
+local ResortService = require(script.Parent:WaitForChild("ResortService"))
 
 local MapService = {}
 
@@ -26,6 +27,7 @@ export type MapBuild = {
 	teamSpawns: { [number]: { Vector3 } },
 	vehiclePads: { { position: Vector3, kind: string } },
 	pickupPads: { { position: Vector3, kind: string, weapon: string? } },
+	resort: ResortService.ResortBuild,
 }
 
 local SLAB = 3 -- thickness of floors and ramps
@@ -633,7 +635,11 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	-- Roads first, then everything else fitted into the blocks they leave.
 	-- Doing it the other way round is what produced the old maps, where
 	-- buildings sat in the middle of the road and the streets led nowhere.
-	local gridHalf = half - 46 -- an open ring outside the city, for flanking
+	-- The ring outside the city is where the resort lives now -- the lazy
+	-- river runs right round it and the mountain sits in one corner -- so it
+	-- has to be wide enough for a river channel and a mountain base, not
+	-- just a flanking lane.
+	local gridHalf = half - 250
 	local blocksPerSide = math.max(3, math.floor((gridHalf * 2) / 172 + 0.5))
 	local pitch = (gridHalf * 2) / blocksPerSide
 
@@ -643,6 +649,13 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	end
 
 	streets(size, pitch, offsets, model)
+
+	-- The resort: the lazy river right round the city, the mountain in one
+	-- corner, the ski run between them, the chairlift up the side. Built
+	-- before the blocks are handed out so its footprint is known when the
+	-- city is laid down.
+	local resort = ResortService.Build(size, model)
+	local resortReserved = ResortService.ReservedAreas(size)
 
 	-- Walls, so nobody drives off the edge of the world.
 	local wallHeight = 160
@@ -689,11 +702,21 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	--   the spawn rows    both teams need to get out of their base without
 	--                     being funnelled through a doorway
 	local carnival = Vector3.new(size * 0.3, 0, 0)
+
+	--[[ Is this block inside something the resort already owns? ]]
+	local function insideResort(flat: Vector3): boolean
+		for _, area in resortReserved do
+			if (flat - Vector3.new(area.centre.X, 0, area.centre.Z)).Magnitude < area.radius then
+				return true
+			end
+		end
+		return false
+	end
 	local spawnReach = gridHalf - pitch * 0.9
 	local available: { Block } = {}
 	for _, block in blocks do
 		local flat = Vector3.new(block.center.X, 0, block.center.Z)
-		if (flat - carnival).Magnitude < 145 then
+		if (flat - carnival).Magnitude < 145 or insideResort(flat) then
 			block.role = "reserved"
 		elseif math.abs(block.center.Z) > spawnReach and math.abs(block.center.X) < half * 0.45 then
 			block.role = "plaza" -- kept open: this is a team's way out of its base
@@ -1028,12 +1051,25 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		})
 	end
 
+	-- Gear on the sniper towers, because climbing one should be worth it.
+	for index, top in resort.towerTops do
+		table.insert(pickupPads, {
+			position = top + Vector3.new(0, 2, 0),
+			kind = "Weapon",
+			weapon = if index % 2 == 0 then "AntiMaterial" else "Sniper",
+		})
+	end
+
+	-- And something at the summit, which is the longest climb on the map.
+	table.insert(pickupPads, { position = resort.summit + Vector3.new(0, 3, -14), kind = "Multiplier" })
+
 	model.Parent = workspace
 	return {
 		model = model,
 		teamSpawns = teamSpawns,
 		vehiclePads = vehiclePads,
 		pickupPads = pickupPads,
+		resort = resort,
 	}
 end
 

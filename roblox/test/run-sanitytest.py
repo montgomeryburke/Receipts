@@ -274,6 +274,18 @@ check("every sound the code asks for exists", #missingReferenced == 0,
 
 print("")
 print(if failures == 0 then "CONFIG IS SANE" else failures .. " FAILURES")
+
+--[[
+	Exit non-zero on failure.
+
+	Without this the suite only PRINTED its failures and exited 0, so
+	run-all.sh reported success no matter what broke, and any automation
+	trusting its exit code was being told a comforting lie. error() at the
+	top level is what makes the luau CLI exit non-zero.
+]]
+if failures > 0 then
+	error("config: " .. failures .. " failures", 0)
+end
 """
 
 harness = (

@@ -732,16 +732,16 @@ Config.Effects = {
 	for four wheels, not for feet.
 ]]
 Config.Maps = {
-	{ Id = "BogBasin", Name = "Bog Basin", Size = 1150, MudFraction = 0.55, Buildings = 22, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
-	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 1300, MudFraction = 0.25, Buildings = 28, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
-	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 1250, MudFraction = 0.6, Buildings = 18, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
-	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 1200, MudFraction = 0.2, Buildings = 30, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
-	{ Id = "GatorCreek", Name = "Gator Creek", Size = 1200, MudFraction = 0.7, Buildings = 20, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
-	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 1450, MudFraction = 0.15, Buildings = 26, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
-	{ Id = "HollerHills", Name = "Holler Hills", Size = 1250, MudFraction = 0.45, Buildings = 22, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
-	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 1200, MudFraction = 0.3, Buildings = 32, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
-	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 1500, MudFraction = 0.35, Buildings = 24, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
-	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 1300, MudFraction = 0.4, Buildings = 29, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
+	{ Id = "BogBasin", Name = "Bog Basin", Size = 1900, MudFraction = 0.55, Buildings = 22, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
+	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 2050, MudFraction = 0.25, Buildings = 28, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
+	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 1950, MudFraction = 0.6, Buildings = 18, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
+	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 1900, MudFraction = 0.2, Buildings = 30, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
+	{ Id = "GatorCreek", Name = "Gator Creek", Size = 1950, MudFraction = 0.7, Buildings = 20, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
+	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 2150, MudFraction = 0.15, Buildings = 26, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
+	{ Id = "HollerHills", Name = "Holler Hills", Size = 2000, MudFraction = 0.45, Buildings = 22, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
+	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 1900, MudFraction = 0.3, Buildings = 32, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
+	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 2200, MudFraction = 0.35, Buildings = 24, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
+	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 2050, MudFraction = 0.4, Buildings = 29, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
 }
 
 Config.Teams = {

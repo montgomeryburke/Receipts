@@ -266,7 +266,7 @@ def strip(s):
     return '\n'.join(out)
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
-SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
+SERVER = ['PlayerState', 'ResortService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',
           'GraphicsService']
@@ -337,6 +337,44 @@ local fallback = workspace:FindFirstChild("FallbackGround")
 DUMP("ARENA:", arena ~= nil, arena and (#arena:GetDescendants() .. " parts") or "-")
 DUMP("FALLBACK GROUND:", fallback ~= nil)
 for _, w in WARNINGS do DUMP("  warn:", w) end
+
+--[[
+	A subsystem that failed to start is a FAILURE, not a note.
+
+	The bootstrap wraps each service in a pcall on purpose, so one broken
+	module cannot stop the rest of the game coming up. That is right for
+	players and wrong for a test: this harness used to print the warning and
+	exit 0, so MatchService failing to start -- which is precisely the
+	original "player falls through an empty blue sky" bug -- read as a pass.
+]]
+local started = true
+for _, w in WARNINGS do
+	if string.find(tostring(w), "failed to start", 1, true)
+		or string.find(tostring(w), "could not be loaded", 1, true)
+	then
+		DUMP("SUBSYSTEM DID NOT START:", w)
+		started = false
+	end
+end
+
+if not arena then
+	DUMP("NO ARENA WAS BUILT")
+	started = false
+end
+
+DUMP(if started then "SERVER CAME UP CLEAN" else "SERVER DID NOT COME UP")
+
+--[[
+	Exit non-zero on failure.
+
+	Without this the suite only PRINTED its failures and exited 0, so
+	run-all.sh reported success no matter what broke, and any automation
+	trusting its exit code was being told a comforting lie. error() at the
+	top level is what makes the luau CLI exit non-zero.
+]]
+if not started or failures > 0 then
+	error("server did not come up clean", 0)
+end
 for _, p in PRINTS do DUMP("  print:", p) end
 ''')
 

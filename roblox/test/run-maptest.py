@@ -55,8 +55,14 @@ local Config = (function()
 {read(SRC, "shared", "Config.luau")}
 end)()
 
+local ResortService = (function()
+local Util = Util
+{strip_requires(read(SRC, "server", "modules", "ResortService.luau"))}
+end)()
+
 local MapService = (function()
 local Util = Util
+local ResortService = ResortService
 {strip_requires(read(SRC, "server", "modules", "MapService.luau"))}
 end)()
 
@@ -121,6 +127,18 @@ end
 
 print("")
 print(if failures == 0 then "ALL MAPS BUILD CLEAN" else string.format("%d FAILURES", failures))
+
+--[[
+	Exit non-zero on failure.
+
+	Without this the suite only PRINTED its failures and exited 0, so
+	run-all.sh reported success no matter what broke, and any automation
+	trusting its exit code was being told a comforting lie. error() at the
+	top level is what makes the luau CLI exit non-zero.
+]]
+if failures > 0 then
+	error("maps: " .. failures .. " failures", 0)
+end
 """
 
 sys.stdout.write(harness.replace('--[[CITYCHECK]]', CITY_CHECK))

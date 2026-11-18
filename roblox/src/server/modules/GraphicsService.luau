@@ -42,16 +42,25 @@ function GraphicsService.Start()
 		Lighting.Technology = Enum.Technology.ShadowMap
 	end
 
-	Lighting.Brightness = 2.6
+	Lighting.Brightness = 3.1
 	Lighting.ClockTime = 15.2
 	Lighting.GeographicLatitude = 24
 	Lighting.ExposureCompensation = 0.18
 	Lighting.EnvironmentDiffuseScale = 0.55
 	Lighting.EnvironmentSpecularScale = 0.7
 	Lighting.GlobalShadows = true
-	Lighting.Ambient = Color3.fromRGB(78, 82, 92)
-	Lighting.OutdoorAmbient = Color3.fromRGB(104, 112, 128)
-	Lighting.ColorShift_Top = Color3.fromRGB(255, 238, 210)
+	--[[
+		Contrast is what makes it stop looking like a bin of bricks.
+
+		These were set high enough that a sunlit wall and a shadowed alley
+		came out nearly the same grey, and once every surface is the same
+		brightness the shapes stop reading at all -- every building is a flat
+		rectangle again no matter how it is built. Lower ambient and a warmer
+		top shift give sunlit faces somewhere to be bright AGAINST.
+	]]
+	Lighting.Ambient = Color3.fromRGB(48, 52, 64)
+	Lighting.OutdoorAmbient = Color3.fromRGB(88, 96, 116)
+	Lighting.ColorShift_Top = Color3.fromRGB(255, 232, 186)
 	Lighting.ColorShift_Bottom = Color3.fromRGB(70, 78, 96)
 	Lighting.FogEnd = 2200
 	Lighting.FogStart = 400
@@ -60,12 +69,15 @@ function GraphicsService.Start()
 	-- Haze and depth. Distant buildings fade instead of standing there in
 	-- full colour, which is most of what sells a big map as big.
 	local atmosphere = Instance.new("Atmosphere")
-	atmosphere.Density = 0.36
+	-- Haze at 0.36 with Haze 1.6 was a grey sheet over everything past a
+	-- hundred studs: distant buildings did not fade into depth, they faded
+	-- into porridge. Enough to give depth, not enough to eat the skyline.
+	atmosphere.Density = 0.22
 	atmosphere.Offset = 0.15
 	atmosphere.Color = Color3.fromRGB(196, 200, 208)
 	atmosphere.Decay = Color3.fromRGB(104, 112, 128)
 	atmosphere.Glare = 0.28
-	atmosphere.Haze = 1.6
+	atmosphere.Haze = 0.8
 	tag(atmosphere)
 
 	-- A proper sky rather than the flat blue void.
