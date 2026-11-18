@@ -154,6 +154,22 @@ local BRICK_COLORS = {
 	["Institutional white"] = { 248, 248, 248 },
 }
 
+-- A tween's own description. Missing, every call that animated anything
+-- threw on TweenInfo.new -- and because those calls sit inside pcall-guarded
+-- start-up paths, the failure showed up as an unrelated function not working.
+TweenInfo = {
+	new = function(time, style, direction, repeatCount, reverses, delayTime)
+		return {
+			Time = time or 1,
+			EasingStyle = style,
+			EasingDirection = direction,
+			RepeatCount = repeatCount or 0,
+			Reverses = reverses or false,
+			DelayTime = delayTime or 0,
+		}
+	end,
+}
+
 BrickColor = {
 	new = function(name)
 		local rgb = BRICK_COLORS[name] or { 163, 162, 165 }
@@ -349,6 +365,13 @@ local function newInstance(class)
 		props.Stop = function() end
 	elseif class == "Explosion" then
 		props.Hit = SIGNAL and SIGNAL() or nil
+	elseif class == "TextButton" or class == "ImageButton" then
+		-- Buttons carry their own click signals, so a test can tap one and
+		-- see what happens rather than only that it was created.
+		props.Activated = SIGNAL and SIGNAL() or nil
+		props.MouseButton1Click = SIGNAL and SIGNAL() or nil
+		props.MouseButton1Down = SIGNAL and SIGNAL() or nil
+		props.MouseButton1Up = SIGNAL and SIGNAL() or nil
 	end
 
 	return self

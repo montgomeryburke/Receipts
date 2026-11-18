@@ -106,6 +106,10 @@ local function signal()
 			return { Disconnect = function() end }
 		end,
 		Wait = function() end,
+		-- Exposed so a test can ask whether anything is listening at all.
+		-- A button with no handler looks identical to a working one until
+		-- somebody taps it.
+		_handlers = handlers,
 		_fire = function(...)
 			for _, fn in handlers do fn(...) end
 		end,

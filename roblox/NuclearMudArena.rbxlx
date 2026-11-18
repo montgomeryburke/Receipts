@@ -9916,7 +9916,50 @@ end
 
 -- ==================================================================== TOUCH ==
 
---[[ A fire button for phones, since a lot of Roblox is played on one. ]]
+--[[
+	On-screen controls for phones and tablets.
+
+	A phone player could fire, mega-detonate, turbo and work the pedals, but
+	had no way at all to change weapon, throw a grenade, bail out of a
+	vehicle or look at the scoreboard -- there is no number row, no G, no
+	space bar and no Tab on a touch screen. Those are not conveniences; a
+	player who cannot change weapon is playing a different game.
+
+	Entering a vehicle needs no button: Roblox puts its own tappable prompt
+	on screen for a ProximityPrompt on a touch device.
+]]
+local touchGui: ScreenGui? = nil
+local scoreboardOpen = false
+
+local function roundButton(
+	gui: Instance,
+	text: string,
+	colour: Color3,
+	size: number,
+	position: UDim2
+): TextButton
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.fromOffset(size, size)
+	button.Position = position
+	button.BackgroundColor3 = colour
+	button.BackgroundTransparency = 0.25
+	button.Text = text
+	-- Dark text on the bright buttons, light on the dark ones, so every
+	-- label stays readable in sunlight on a phone.
+	local brightness = colour.R * 0.3 + colour.G * 0.6 + colour.B * 0.1
+	button.TextColor3 = if brightness > 0.5 then Color3.new(0, 0, 0) else Color3.new(1, 1, 1)
+	button.TextSize = if size >= 100 then 22 else 17
+	button.Font = Enum.Font.GothamBold
+	button.AutoButtonColor = true
+	button.Parent = gui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = button
+
+	return button
+end
+
 local function buildTouchButton()
 	if not UserInputService.TouchEnabled then
 		return
@@ -9926,22 +9969,10 @@ local function buildTouchButton()
 	gui.Name = "TouchControls"
 	gui.ResetOnSpawn = false
 	gui.Parent = player:WaitForChild("PlayerGui")
+	touchGui = gui
 
-	local fire = Instance.new("TextButton")
-	fire.Size = UDim2.fromOffset(110, 110)
-	fire.Position = UDim2.new(1, -140, 1, -180)
-	fire.BackgroundColor3 = Color3.fromRGB(200, 60, 50)
-	fire.BackgroundTransparency = 0.25
-	fire.Text = "FIRE"
-	fire.TextColor3 = Color3.new(1, 1, 1)
-	fire.TextSize = 22
-	fire.Font = Enum.Font.GothamBold
-	fire.Parent = gui
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(1, 0)
-	corner.Parent = fire
-
+	-- ------------------------------------------------- right hand: shooting
+	local fire = roundButton(gui, "FIRE", Color3.fromRGB(200, 60, 50), 110, UDim2.new(1, -140, 1, -180))
 	fire.MouseButton1Down:Connect(function()
 		firing = true
 		tryFire()
@@ -9950,42 +9981,56 @@ local function buildTouchButton()
 		firing = false
 	end)
 
-	local mega = Instance.new("TextButton")
-	mega.Size = UDim2.fromOffset(90, 90)
-	mega.Position = UDim2.new(1, -250, 1, -160)
-	mega.BackgroundColor3 = Color3.fromRGB(90, 200, 220)
-	mega.BackgroundTransparency = 0.25
-	mega.Text = "MEGA"
-	mega.TextColor3 = Color3.new(0, 0, 0)
-	mega.TextSize = 18
-	mega.Font = Enum.Font.GothamBold
-	mega.Parent = gui
-
-	local megaCorner = Instance.new("UICorner")
-	megaCorner.CornerRadius = UDim.new(1, 0)
-	megaCorner.Parent = mega
-
+	local mega = roundButton(gui, "MEGA", Color3.fromRGB(90, 200, 220), 90, UDim2.new(1, -250, 1, -160))
 	mega.Activated:Connect(function()
 		Remotes.Event("MegaDetonate"):FireServer()
 	end)
 
-	--[[ Gas and brake, for players with no keyboard. ]]
+	local nade = roundButton(gui, "NADE", Color3.fromRGB(130, 190, 110), 86, UDim2.new(1, -250, 1, -268))
+	nade.Activated:Connect(function()
+		local _, direction = currentAimDirection()
+		if direction then
+			Remotes.Event("ThrowGrenade"):FireServer(direction)
+			Feel.Kick(1.2)
+		end
+	end)
+
+	local swap = roundButton(gui, "GUN ▶", Color3.fromRGB(190, 180, 210), 86, UDim2.new(1, -140, 1, -300))
+	swap.Activated:Connect(function()
+		-- Step through every weapon in order, so one button reaches all of
+		-- them. The number keys cycle within a slot; this cycles the lot.
+		local names = {}
+		for name in arsenal do
+			table.insert(names, name)
+		end
+		table.sort(names, function(a, b)
+			local left, right = arsenal[a], arsenal[b]
+			if left.Slot ~= right.Slot then
+				return left.Slot < right.Slot
+			end
+			return a < b
+		end)
+
+		-- Skip the ones you cannot hold on foot, or the button would appear
+		-- to do nothing on the turret and tank guns.
+		local holdable = {}
+		for _, name in names do
+			if not arsenal[name].MountedOnly then
+				table.insert(holdable, name)
+			end
+		end
+		if #holdable == 0 then
+			return
+		end
+
+		local at = table.find(holdable, equipped)
+		local nextName = holdable[if at then (at % #holdable) + 1 else 1]
+		equip(nextName)
+	end)
+
+	-- -------------------------------------------------- left hand: driving
 	local function pedal(text: string, colour: Color3, position: UDim2, value: number)
-		local button = Instance.new("TextButton")
-		button.Size = UDim2.fromOffset(96, 96)
-		button.Position = position
-		button.BackgroundColor3 = colour
-		button.BackgroundTransparency = 0.25
-		button.Text = text
-		button.TextColor3 = Color3.new(0, 0, 0)
-		button.TextSize = 18
-		button.Font = Enum.Font.GothamBold
-		button.Parent = gui
-
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(1, 0)
-		corner.Parent = button
-
+		local button = roundButton(gui, text, colour, 96, position)
 		button.MouseButton1Down:Connect(function()
 			Remotes.Event("SetPedal"):FireServer(value)
 		end)
@@ -9998,21 +10043,8 @@ local function buildTouchButton()
 	pedal("GAS", Color3.fromRGB(120, 220, 130), UDim2.new(0, 30, 1, -150), 1)
 	pedal("BRAKE", Color3.fromRGB(230, 120, 110), UDim2.new(0, 140, 1, -150), -1)
 
-	local turbo = Instance.new("TextButton")
-	turbo.Size = UDim2.fromOffset(90, 90)
-	turbo.Position = UDim2.new(1, -150, 1, -290)
-	turbo.BackgroundColor3 = Color3.fromRGB(255, 200, 80)
-	turbo.BackgroundTransparency = 0.25
-	turbo.Text = "TURBO"
-	turbo.TextColor3 = Color3.new(0, 0, 0)
-	turbo.TextSize = 18
-	turbo.Font = Enum.Font.GothamBold
-	turbo.Parent = gui
-
-	local turboCorner = Instance.new("UICorner")
-	turboCorner.CornerRadius = UDim.new(1, 0)
-	turboCorner.Parent = turbo
-
+	local turbo = roundButton(gui, "TURBO", Color3.fromRGB(255, 200, 80), 90, UDim2.new(1, -150, 1, -290))
+	turbo.Position = UDim2.new(0, 30, 1, -256)
 	turbo.MouseButton1Down:Connect(function()
 		Remotes.Event("SetTurbo"):FireServer(true)
 		Hud.SetTurbo(true)
@@ -10020,6 +10052,28 @@ local function buildTouchButton()
 	turbo.MouseButton1Up:Connect(function()
 		Remotes.Event("SetTurbo"):FireServer(false)
 		Hud.SetTurbo(false)
+	end)
+
+	-- Bail out of a vehicle or a rocket. Deploys the parachute, same as the
+	-- space bar, and is harmless on foot.
+	local bail = roundButton(gui, "BAIL", Color3.fromRGB(240, 160, 60), 86, UDim2.new(0, 140, 1, -256))
+	bail.Activated:Connect(function()
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.SeatPart then
+			Remotes.Event("Eject"):FireServer()
+		end
+	end)
+
+	-- Tapped rather than held: holding a button down to read a scoreboard is
+	-- fine with a thumb on Tab and miserable with a thumb on glass.
+	local scores = roundButton(gui, "SCORE", Color3.fromRGB(120, 150, 200), 78, UDim2.new(0.5, -39, 1, -96))
+	scores.Activated:Connect(function()
+		scoreboardOpen = not scoreboardOpen
+		Hud.ShowScoreboard(scoreboardOpen)
+		if scoreboardOpen then
+			Remotes.Event("RequestScoreboard"):FireServer()
+		end
 	end)
 end
 
