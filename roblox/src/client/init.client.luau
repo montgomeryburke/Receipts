@@ -17,6 +17,7 @@ local modules = script:WaitForChild("modules")
 local Hud = require(modules:WaitForChild("Hud"))
 local Controls = require(modules:WaitForChild("Controls"))
 local Feel = require(modules:WaitForChild("Feel"))
+local Radar = require(modules:WaitForChild("Radar"))
 
 local player = Players.LocalPlayer
 
@@ -44,6 +45,10 @@ end
 -- must not take the controls down with it.
 if not pcall(Feel.Start) then
 	warn("[Nuclear Mud Arena] Camera feel failed to start.")
+end
+
+if not pcall(Radar.Start) then
+	warn("[Nuclear Mud Arena] Motion tracker failed to start.")
 end
 
 local controlsOk, controlsErr = pcall(startControls)

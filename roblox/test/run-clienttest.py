@@ -18,6 +18,8 @@ import sys
 
 FEEL_TEST = '\n-- ================================================== camera feel\n-- Shooting only feels like shooting because the camera moves. These check\n-- that it moves, that it always comes back, and that it can never be driven\n-- somewhere a player cannot recover from.\n\nlocal function cameraPitch()\n\t-- How far off level the camera is looking, in degrees.\n\tlocal look = rawget(workspace, "_props").CurrentCamera._props.CFrame.LookVector\n\treturn math.deg(math.asin(math.clamp(look.Y, -1, 1)))\nend\n\nlocal function level()\n\trawget(workspace, "_props").CurrentCamera._props.CFrame = CFrame.new()\nend\n\n--[[\n\tDrive frames by hand.\n\n\tRoblox\'s own camera script recomputes CurrentCamera.CFrame from scratch\n\tevery frame, BEFORE our step runs -- that is what the render priority is\n\tfor. So the module applies an absolute offset each frame rather than an\n\tincrement, and the test has to level the camera each frame too or it\n\twould be measuring an accumulation the engine never performs.\n\n\tThe step count is rounded rather than floored: 0.3 / (1/30) comes out as\n\t8.999999 in binary, so flooring it silently runs one frame short and the\n\tframerate-independence check fails on a rounding error.\n]]\nlocal function step(seconds, slice)\n\tslice = slice or 1 / 60\n\tfor _ = 1, math.floor(seconds / slice + 0.5) do\n\t\tlevel()\n\t\tRENDER_STEP(slice)\n\tend\nend\n\ncheck("the camera step is bound", RENDER_STEP ~= nil, "")\n\nif RENDER_STEP then\n\tlevel()\n\tFeel.Kick(3.2) -- a sniper shot\n\tRENDER_STEP(1 / 60)\n\tlocal kicked = cameraPitch()\n\tcheck("a shot kicks the view up", kicked > 1.5, string.format("%.2f degrees", kicked))\n\n\t-- It has to come back, or every burst would walk the view at the sky.\n\tstep(0.6)\n\tlocal settled = math.abs(cameraPitch())\n\tcheck("the kick settles back", settled < 0.1, string.format("%.3f degrees left", settled))\n\n\t-- A minigun held down is 22 shots a second. The view must not spin.\n\tfor _ = 1, 60 do\n\t\tlevel()\n\t\tFeel.Kick(0.35)\n\t\tRENDER_STEP(1 / 60)\n\tend\n\tlocal held = Feel.Debug().kick\n\tcheck("held fire cannot spin the camera", held <= 7.0001, string.format("%.2f degrees of kick", held))\n\tcheck("and the view never leaves the cap", math.abs(cameraPitch()) <= 7.5,\n\t\tstring.format("%.2f degrees off level", cameraPitch()))\n\n\t-- Framerate independence: the same kick must take the same TIME to fade\n\t-- at 30fps as at 240, or the game would feel different on every machine.\n\tlocal function decayFrom(slice)\n\t\tFeel.Stop()\n\t\tFeel.Start()\n\t\tFeel.Kick(4)\n\t\tstep(0.3, slice)\n\t\treturn Feel.Debug().kick\n\tend\n\tlocal slow = decayFrom(1 / 30)\n\tlocal fast = decayFrom(1 / 240)\n\tcheck("decay does not depend on framerate",\n\t\tmath.abs(slow - fast) < 0.05, string.format("%.3f at 30fps vs %.3f at 240fps", slow, fast))\n\n\t-- Explosions: violent up close, nothing at all across the map.\n\tFeel.Stop()\n\tFeel.Start()\n\tFeel.ShakeFrom(Vector3.new(0, 0, 10), 3, 100)\n\tlocal near = Feel.Debug().shake\n\tcheck("a blast at your feet shakes hard", near > 1.5, string.format("%.2f", near))\n\n\tFeel.Stop()\n\tFeel.Start()\n\tFeel.ShakeFrom(Vector3.new(0, 0, 4000), 3, 100)\n\tcheck("a blast across the map does nothing", Feel.Debug().shake == 0,\n\t\tstring.format("%.4f", Feel.Debug().shake))\nend\n'
 
+RADAR_TEST = '\n-- ================================================== motion tracker\n-- The radar changes how the map is played, so its geometry has to be right:\n-- a contact behind you must read as behind you, not in front.\n\nlocal radarPlayers = { localPlayer }\nrawget(Players, "_props").GetPlayers = function() return radarPlayers end\n\nlocal function contact(name, position, team, health)\n\tlocal character = Instance.new("Model")\n\tlocal root = Instance.new("Part")\n\troot._props.Name = "HumanoidRootPart"\n\troot._props.CFrame = CFrame.new(position.X, position.Y, position.Z)\n\troot.Parent = character\n\tlocal humanoid = Instance.new("Humanoid")\n\thumanoid._props.Health = health or 100\n\thumanoid.Parent = character\n\n\tlocal p = Instance.new("Player")\n\tp._props.Name = name\n\tp._props.Character = character\n\tp._props.Team = team\n\ttable.insert(radarPlayers, p)\n\treturn p\nend\n\n-- Me at the origin, looking down -Z, which is Roblox\'s forward.\nlocal myCharacter = Instance.new("Model")\nlocal myRoot = Instance.new("Part")\nmyRoot._props.Name = "HumanoidRootPart"\nmyRoot._props.CFrame = CFrame.new(0, 5, 0)\nmyRoot.Parent = myCharacter\nlocal myHumanoid = Instance.new("Humanoid")\nmyHumanoid.Parent = myCharacter\nlocalPlayer._props.Character = myCharacter\n\nlocal redTeam = Instance.new("Team")\nredTeam._props.Name = "Red"\nredTeam._props.TeamColor = BrickColor.new("Bright red")\nlocal blueTeam = Instance.new("Team")\nblueTeam._props.Name = "Blue"\nblueTeam._props.TeamColor = BrickColor.new("Bright blue")\nlocalPlayer._props.Team = redTeam\n\nrawget(workspace, "_props").CurrentCamera._props.CFrame = CFrame.new()\n\nlocal dial = Radar.Build(Instance.new("ScreenGui"))\ncheck("the dial is built", dial ~= nil, "")\n\n-- An enemy 60 studs straight ahead, an ally 60 studs behind, and someone\n-- two maps away who must not appear at all.\nlocal ahead = contact("Ahead", Vector3.new(0, 5, -60), blueTeam)\nlocal behind = contact("Behind", Vector3.new(0, 5, 60), redTeam)\nlocal faraway = contact("Faraway", Vector3.new(0, 5, -4000), blueTeam)\n\nRadar.RefreshForTests()\ncheck("contacts in range show, the far one does not", Radar.VisibleContacts() == 2,\n\tstring.format("%d dots", Radar.VisibleContacts()))\n\nlocal shown = Radar.ContactsForTests()\nlocal aheadDot, behindDot\nfor _, entry in shown do\n\tif entry.offsetY < 0 then aheadDot = entry else behindDot = entry end\nend\n\ncheck("a contact ahead plots above centre", aheadDot ~= nil,\n\taheadDot and string.format("y offset %.0f px", aheadDot.offsetY) or "missing")\ncheck("a contact behind plots below centre", behindDot ~= nil,\n\tbehindDot and string.format("y offset %.0f px", behindDot.offsetY) or "missing")\n\n-- Enemies red, team-mates not.\nif aheadDot and behindDot then\n\tcheck("the enemy ahead is red", aheadDot.color.R > 0.8 and aheadDot.color.G < 0.4,\n\t\tstring.format("%.2f %.2f %.2f", aheadDot.color.R, aheadDot.color.G, aheadDot.color.B))\n\t-- A team-mate has to be clearly NOT red even when your own team colour\n\t-- is red, which is why the ally colour is fixed rather than the team\'s.\n\tcheck("the team-mate behind is clearly not red", behindDot.color.G > 0.6,\n\t\tstring.format("%.2f %.2f %.2f", behindDot.color.R, behindDot.color.G, behindDot.color.B))\nend\n\n-- Turn around. The dots must swap sides, because the dial is oriented to\n-- where you are LOOKING, not to north.\nrawget(workspace, "_props").CurrentCamera._props.CFrame = CFrame.Angles(0, math.pi, 0)\nRadar.RefreshForTests()\nlocal turned = Radar.ContactsForTests()\nlocal nowAhead\nfor _, entry in turned do\n\tif entry.offsetY < 0 then nowAhead = entry end\nend\ncheck("turning around swaps the dots over",\n\tnowAhead ~= nil and nowAhead.color.G > 0.6,\n\tnowAhead and string.format("%.2f %.2f %.2f", nowAhead.color.R, nowAhead.color.G, nowAhead.color.B) or "missing")\n\n-- A dead player is not a contact.\nrawget(workspace, "_props").CurrentCamera._props.CFrame = CFrame.new()\nrawget(ahead, "_props").Character:FindFirstChildOfClass("Humanoid")._props.Health = 0\nRadar.RefreshForTests()\ncheck("a dead player is not tracked", Radar.VisibleContacts() == 1,\n\tstring.format("%d dots", Radar.VisibleContacts()))\n\n-- Someone on a fifth-floor roof must not read as standing on you.\nrawget(ahead, "_props").Character:FindFirstChildOfClass("Humanoid")._props.Health = 100\nrawget(ahead, "_props").Character:FindFirstChild("HumanoidRootPart")._props.CFrame =\n\tCFrame.new(0, 400, -60)\nRadar.RefreshForTests()\ncheck("a contact far overhead is off the dial", Radar.VisibleContacts() == 1,\n\tstring.format("%d dots", Radar.VisibleContacts()))\n\nlocal _ = faraway\n'
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, '..', 'src')
 
@@ -102,10 +104,6 @@ local Remotes = {{
 	end,
 }}
 
-local Hud = (function()
-{strip(read(SRC, 'client', 'modules', 'Hud.luau'))}
-end)()
-
 -- Capture the render-step callback so the test can drive frames by hand.
 RENDER_STEP = nil
 rawget(RunService, "_props").BindToRenderStep = function(_, _name, _priority, fn)
@@ -118,6 +116,17 @@ local Workspace = workspace
 {strip(read(SRC, 'client', 'modules', 'Feel.luau'))}
 end)()
 
+local Radar = (function()
+local Workspace = workspace
+local Config = Config
+{strip(read(SRC, 'client', 'modules', 'Radar.luau'))}
+end)()
+
+local Hud = (function()
+local Radar = Radar
+{strip(read(SRC, 'client', 'modules', 'Hud.luau'))}
+end)()
+
 local Controls = (function()
 local Hud = Hud
 local Feel = Feel
@@ -126,8 +135,8 @@ end)()
 
 Feel.Start()
 
-local hudOk = pcall(Hud.Build)
-DUMP("HUD built:", hudOk)
+local hudOk, hudErr = pcall(Hud.Build)
+DUMP("HUD built:", hudOk, hudOk and "" or tostring(hudErr))
 
 local function startControls(): string
 	Controls.Start()
@@ -155,6 +164,8 @@ end
 
 --[[FEELTEST]]
 
+--[[RADARTEST]]
+
 if not ok then failures += 1 end
 if INPUT_CONNECTIONS < 2 then
 	DUMP("  ^ INPUT NOT WIRED — firing and E would do nothing")
@@ -169,4 +180,8 @@ DUMP("")
 DUMP(if failures == 0 then "CLIENT OK EVEN WITH A DEAD SERVER" else failures .. " FAILURES")
 """
 
-sys.stdout.write(harness.replace('--[[FEELTEST]]', FEEL_TEST))
+sys.stdout.write(
+    harness
+    .replace('--[[FEELTEST]]', FEEL_TEST)
+    .replace('--[[RADARTEST]]', RADAR_TEST)
+)

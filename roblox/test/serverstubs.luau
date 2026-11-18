@@ -134,6 +134,11 @@ service("Players", {
 })
 service("RunService", {
 	Heartbeat = signal(),
+	-- The client draws on RenderStepped. Leaving it out made every HUD that
+	-- animates anything fail to build, and the failure looked like a bug in
+	-- the HUD rather than a hole in the harness.
+	RenderStepped = signal(),
+	PreRender = signal(),
 	Stepped = signal(),
 	IsServer = function() return true end,
 	IsClient = function() return false end,

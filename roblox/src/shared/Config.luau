@@ -542,6 +542,19 @@ Config.CivilianLines = {
 	them and you are flung up to this speed, which is what turns a ramp into
 	serious air.
 ]]
+--[[
+	The motion tracker.
+
+	Deliberately short-sighted, the way Halo's was: far enough that nobody
+	walks up behind you, short enough that it never replaces looking.
+]]
+Config.Radar = {
+	Range = 170,
+	-- Contacts further above or below than this are off the dial entirely.
+	-- Without it a player on a fifth-floor roof shows as standing on you.
+	VerticalRange = 60,
+}
+
 Config.Boost = {
 	-- Horizontal only. This used to be 190, which fired a truck off the
 	-- following ramp like a trampoline; the arrows are meant to make you
@@ -872,6 +885,10 @@ export type ConfigType = {
 		ElephantCount: number, ElephantSpeed: number,
 		PoopInterval: number, PoopLifetime: number, PoopPerPile: number,
 		MaxPoopPiles: number, SplatDuration: number,
+	},
+	Radar: {
+		Range: number,
+		VerticalRange: number,
 	},
 	Boost: { Speed: number, Lift: number },
 	Population: {

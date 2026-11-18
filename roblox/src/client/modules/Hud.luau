@@ -14,6 +14,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
+local Radar = require(script.Parent:WaitForChild("Radar"))
 
 local player = Players.LocalPlayer
 
@@ -552,6 +553,9 @@ function Hud.Build()
 
 	scoreboard = board
 	scoreboardRows = rows
+
+	-- The motion tracker, bottom left above the health bar.
+	Radar.Build(screen)
 
 	-- Drive the vignette from the frame loop rather than from health events,
 	-- so the pulse is smooth no matter how often damage arrives.

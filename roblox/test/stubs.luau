@@ -141,7 +141,25 @@ Color3 = {
 	new = function(r, g, b) return c3(r or 0, g or 0, b or 0) end,
 	fromRGB = function(r, g, b) return c3(r / 255, g / 255, b / 255) end,
 }
-BrickColor = { new = function(name) return { Name = name } end }
+-- A BrickColor carries a real Color3 in `.Color`, and game code reads it to
+-- tint things by team. Without it every such read came back nil and the
+-- failure surfaced somewhere else entirely.
+local BRICK_COLORS = {
+	["Bright red"] = { 196, 40, 28 },
+	["Bright blue"] = { 13, 105, 172 },
+	["Bright green"] = { 75, 151, 75 },
+	["Bright yellow"] = { 245, 205, 48 },
+	["Medium stone grey"] = { 163, 162, 165 },
+	["Really black"] = { 17, 17, 17 },
+	["Institutional white"] = { 248, 248, 248 },
+}
+
+BrickColor = {
+	new = function(name)
+		local rgb = BRICK_COLORS[name] or { 163, 162, 165 }
+		return { Name = name, Color = Color3.fromRGB(rgb[1], rgb[2], rgb[3]) }
+	end,
+}
 ColorSequence = { new = function(...) return { ... } end }
 ColorSequenceKeypoint = { new = function(...) return { ... } end }
 NumberSequence = { new = function(...) return { ... } end }
@@ -150,8 +168,22 @@ Ray = { new = function(...) return { ... } end }
 Region3 = { new = function(...) return { ... } end }
 Rect = { new = function(...) return { ... } end }
 NumberRange = { new = function(...) return { ... } end }
-UDim = { new = function(...) return { ... } end }
-UDim2 = { new = function(...) return {} end, fromScale = function() return {} end, fromOffset = function() return {} end }
+-- UDim and UDim2 were hollow: UDim2.new(...) returned an empty table, so a
+-- test could not read back where anything had been placed. Every layout bug
+-- was invisible by construction. These carry the real fields.
+local function udim(scale: number?, offset: number?)
+	return { Scale = scale or 0, Offset = offset or 0 }
+end
+
+UDim = { new = function(scale, offset) return udim(scale, offset) end }
+
+UDim2 = {
+	new = function(xScale, xOffset, yScale, yOffset)
+		return { X = udim(xScale, xOffset), Y = udim(yScale, yOffset) }
+	end,
+	fromScale = function(x, y) return { X = udim(x, 0), Y = udim(y, 0) } end,
+	fromOffset = function(x, y) return { X = udim(0, x), Y = udim(0, y) } end,
+}
 PhysicalProperties = { new = function(...) return { ... } end }
 
 -- ------------------------------------------------------------------- Random
