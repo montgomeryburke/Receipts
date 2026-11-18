@@ -50,7 +50,17 @@ local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
+local Signal = require(Shared:WaitForChild("Signal"))
+
 local VehicleService = {}
+
+--[[
+	A vehicle just went up: (position, radius, damage, lastDriver).
+
+	DamageService listens and applies the blast. It cannot be called from
+	here, because it requires this module.
+]]
+VehicleService.Wrecked = Signal.new()
 
 local WHEEL_DIAMETER = 7
 local WHEEL_WIDTH = 4
@@ -435,6 +445,14 @@ local function bindSeat(seat: Seat | VehicleSeat, model: Model, role: string)
 				state.vehicle = model
 				state.seatRole = role
 				PlayerState.Changed.Fire(player)
+
+				-- Remembered past the moment they get out, so an explosion
+				-- has somebody to credit. A blast with no attacker scores
+				-- nothing and appears in the kill feed as a nameless death.
+				local vehicleState = active[model]
+				if vehicleState and role == "Driver" then
+					vehicleState.lastDriver = player
+				end
 			end
 			return
 		end
@@ -793,7 +811,10 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 		velocity = velocity,
 		orientation = orientation,
 		heading = body.CFrame.Rotation,
+		-- A second on the pad before it will go off, so it does not detonate
+		-- against the ground the instant it is built.
 		armedAt = os.clock() + 1.0,
+		expiresAt = os.clock() + (spec.Lifetime or 20),
 	}
 	return model
 end
@@ -1069,6 +1090,49 @@ local function driveTorpedo(model: Model, state: any, deltaTime: number)
 		* CFrame.Angles(pitch * turnRate * deltaTime, -steer * turnRate * deltaTime, 0)
 	state.orientation.CFrame = state.heading
 	state.velocity.VectorVelocity = state.heading.LookVector * runSpeed
+
+	--[[
+		Hitting things, and running out.
+
+		Neither of these existed. `armedAt` was written at spawn and never
+		read once, and `Lifetime` was in the config with a comment promising
+		"it dies on its own after this long, with you on it". So the torpedo
+		-- the thing you steer into somebody -- passed straight through them
+		and then flew forever, or until it hit a wall and sat there.
+
+		A raycast ahead rather than a Touched connection: the body is driven
+		by a velocity constraint at 150 studs a second, which is two and a
+		half studs per frame, and contact events on something moving that
+		fast are not something to rely on.
+	]]
+	local now = os.clock()
+	if now < (state.armedAt or 0) then
+		return
+	end
+
+	if now >= (state.expiresAt or math.huge) then
+		VehicleService.Explode(model)
+		return
+	end
+
+	local chassis = state.chassis :: BasePart
+	local nose = state.heading.LookVector
+	-- Far enough ahead to cover a frame of travel plus the shell itself.
+	local reach = runSpeed * math.max(deltaTime, 1 / 60) + 11
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	-- Not itself, and not the person riding it.
+	local rider = seat.Occupant
+	local riderCharacter = if rider then rider.Parent else nil
+	params.FilterDescendantsInstances = if riderCharacter
+		then { model, riderCharacter }
+		else { model }
+
+	local hit = workspace:Raycast(chassis.Position, nose * reach, params)
+	if hit then
+		VehicleService.Explode(model)
+	end
 end
 
 --[[
@@ -1109,6 +1173,18 @@ end
 	without touching your horizontal movement, so you can still steer where
 	you land.
 ]]
+--[[
+	Who is already mid-ejection.
+
+	The Parachute guard below is checked BEFORE a task.wait, and the
+	parachute is only created after it. Ten Eject calls in a single frame
+	therefore all passed the guard, each stacking another 70 studs/sec of
+	upward velocity and another LinearVelocity constraint -- a free launch to
+	the top of the skybox. The claim has to be staked synchronously, before
+	anything yields.
+]]
+local ejecting: { [Player]: true } = {}
+
 function VehicleService.Eject(player: Player)
 	local character = player.Character
 	if not character then
@@ -1122,16 +1198,18 @@ function VehicleService.Eject(player: Player)
 	if not humanoid.SeatPart then
 		return
 	end
-	-- Already under a canopy.
-	if character:FindFirstChild("Parachute") then
+	-- Already under a canopy, or already on the way to one.
+	if character:FindFirstChild("Parachute") or ejecting[player] then
 		return
 	end
+	ejecting[player] = true
 
 	humanoid.Sit = false
 
 	-- Thrown clear of whatever you were riding.
 	task.wait(0.1)
-	if not root.Parent then
+	if not root.Parent or player.Parent == nil then
+		ejecting[player] = nil
 		return
 	end
 	root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + Vector3.new(0, 70, 0)
@@ -1213,6 +1291,7 @@ function VehicleService.Eject(player: Player)
 				break
 			end
 		end
+		ejecting[player] = nil
 		if canopy.Parent then
 			canopy:Destroy()
 		end
@@ -1263,16 +1342,38 @@ function VehicleService.Explode(model: Model)
 	local kind = model:GetAttribute("VehicleKind")
 
 	local blastRadius = 30
+	local blastDamage = 110
 	if kind == "Torpedo" then
-		blastRadius = Config.Vehicles.Torpedo.BlastRadius or 45
+		local torpedo = Config.Vehicles.Torpedo
+		blastRadius = torpedo.BlastRadius or 45
+		blastDamage = torpedo.BlastDamage or 200
 	end
 
+	--[[
+		This used to be a bare Explosion instance and nothing else, which
+		meant **every exploding vehicle dealt exactly zero damage**.
+
+		Roblox's Explosion only hurts a Humanoid by breaking its joints, and
+		DestroyJointRadiusPercent was set to 0 here to stop characters coming
+		apart -- which also switched off the only damage it does. So a torpedo
+		ridden straight into somebody, the one thing the torpedo is for, did
+		nothing at all to them. Same for a tank going up next to a crowd.
+
+		The visible blast stays; the damage goes through DamageService, which
+		is the only thing that knows about teams, shields, point awards and
+		the kill feed.
+	]]
 	local explosion = Instance.new("Explosion")
 	explosion.Position = position
 	explosion.BlastRadius = blastRadius
 	explosion.BlastPressure = 250000
 	explosion.DestroyJointRadiusPercent = 0
 	explosion.Parent = workspace
+
+	-- Announced rather than applied directly. DamageService already requires
+	-- this module, so calling into it from here would be a dependency cycle;
+	-- it listens for this instead, and the dependency stays one-way.
+	VehicleService.Wrecked.Fire(position, blastRadius, blastDamage, state.lastDriver)
 
 	active[model] = nil
 	model:Destroy()
@@ -1341,6 +1442,12 @@ function VehicleService.ClearAll()
 	end
 	table.clear(active)
 end
+
+Players.PlayerRemoving:Connect(function(player)
+	-- Otherwise a player who leaves mid-ejection holds their claim forever,
+	-- and this table holds on to them.
+	ejecting[player] = nil
+end)
 
 RunService.Heartbeat:Connect(step)
 

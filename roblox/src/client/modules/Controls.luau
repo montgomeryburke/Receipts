@@ -24,6 +24,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
+local Shot = require(Shared:WaitForChild("Shot"))
 
 local Hud = require(script.Parent:WaitForChild("Hud"))
 local Feel = require(script.Parent:WaitForChild("Feel"))
@@ -40,6 +41,9 @@ type ArsenalEntry = {
 	MagSize: number,
 	Cooldown: number,
 	Recoil: number,
+	Range: number,
+	Color: Color3,
+	SoundName: string,
 	Automatic: boolean,
 	ZoomFov: number?,
 	ZoomLevels: { number }?,
@@ -208,7 +212,7 @@ end
 
 -- ==================================================================== FIRING ==
 
-local nextKick = 0
+local nextShotFeedback = 0
 
 local function tryFire()
 	local spec = arsenal[effectiveWeaponName()]
@@ -224,21 +228,46 @@ local function tryFire()
 	-- its own, and the server's is the one that counts.
 	nextLocalFire = now + 0.03
 
-	local _origin, direction = currentAimDirection()
-	if not direction then
+	local origin, direction = currentAimDirection()
+	if not origin or not direction then
 		return
 	end
 
 	Remotes.Event("FireWeapon"):FireServer(direction)
 
-	-- Kick the camera, gated on the weapon's REAL cooldown rather than the
-	-- loose network one above. Both sides read the same Config, so this is
-	-- the same rate the server will actually accept shots at, and the view
-	-- does not buzz at 33 Hz while a sniper fires once a second and a half.
-	if now >= nextKick then
-		nextKick = now + spec.Cooldown * 0.9
-		Feel.Kick(spec.Recoil)
+	--[[
+		Everything you see and hear, now, on this machine.
+
+		Gated on the weapon's REAL cooldown rather than the loose network one
+		above. Both sides read the same Config, so this is the same rate the
+		server will actually accept shots at -- which means what you see is
+		what happened, without waiting to be told.
+
+		Before this, the flash, the bang and the tracer were all built on the
+		server and replicated back, so every shot carried a full round trip
+		of delay. That is the single biggest reason the guns felt sluggish,
+		and it is not something you can tune your way out of.
+	]]
+	if now < nextShotFeedback then
+		return
 	end
+	nextShotFeedback = now + spec.Cooldown * 0.9
+
+	Feel.Kick(spec.Recoil)
+	Sound.Flat(spec.SoundName, 0.65)
+
+	local muzzle = origin + direction * 2
+	-- Trace it locally too, so the tracer stops at the wall rather than
+	-- carrying on through it. This raycast decides nothing: the server does
+	-- its own, and the server's is the one that deals damage.
+	local ignore: { Instance } = {}
+	local character = player.Character
+	if character then
+		table.insert(ignore, character)
+	end
+	local look = workspace:Raycast(origin, direction * spec.Range, Util.RayParams(ignore))
+	local endPoint = if look then look.Position else origin + direction * spec.Range
+	Shot.Full(muzzle, endPoint, spec.Color, if look then look.Normal else nil)
 end
 
 -- ==================================================================== ZOOMING ==
@@ -403,9 +432,15 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch
-	then
+	--[[
+		Left click fires. A raw touch does NOT.
+
+		Touch used to be in here with the mouse, which meant any drag on a
+		phone screen -- the only way to look around on a phone -- fired the
+		gun continuously for as long as your thumb was moving. Touch players
+		fire with the FIRE button, which drives the same code directly.
+	]]
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		firing = true
 		tryFire()
 		return
@@ -478,9 +513,7 @@ local function onInputEnded(input: InputObject)
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch
-	then
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		firing = false
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
 		Remotes.Event("SetTurbo"):FireServer(false)
@@ -770,6 +803,9 @@ function Controls.Start()
 			MagSize = spec.MagSize,
 			Cooldown = spec.Cooldown,
 			Recoil = spec.Recoil or 0.8,
+			Range = spec.Range,
+			Color = spec.Color,
+			SoundName = Sound.ForWeapon(spec),
 			Automatic = spec.Automatic == true,
 			ZoomFov = spec.ZoomFov,
 			ZoomLevels = spec.ZoomLevels,

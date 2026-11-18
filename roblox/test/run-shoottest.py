@@ -32,7 +32,7 @@ def strip(s):
     return '\n'.join(kept)
 
 
-SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound']
+SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
 SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
           'EffectService', 'FlagService']
@@ -85,9 +85,22 @@ shooter._props.Character = shooterChar
 shooter._props.CharacterAdded = SIGNAL()
 shooter._props.LoadCharacterAsync = function() end
 
-rawget(Players, "_props").GetPlayers = function() return { shooter } end
+-- A witness standing nearby. Shot visuals are broadcast to everyone close
+-- enough to see them -- and NOT to the shooter, whose own client already drew
+-- the shot the instant they pulled the trigger. With only one player on the
+-- server there is nobody to broadcast to, so the test would prove nothing.
+local witnessChar = makeCharacter("Witness", Vector3.new(14, 5, 0))
+local witness = Instance.new("Player")
+witness._props.Name = "Witness"
+witness._props.UserId = 2
+witness._props.Character = witnessChar
+witness._props.CharacterAdded = SIGNAL()
+witness._props.LoadCharacterAsync = function() end
+
+rawget(Players, "_props").GetPlayers = function() return { shooter, witness } end
 rawget(Players, "_props").GetPlayerFromCharacter = function(_, c)
 	if c == shooterChar then return shooter end
+	if c == witnessChar then return witness end
 	return nil
 end
 
@@ -125,10 +138,29 @@ end
 -- ---------------------------------------------------------------- hitscan
 DUMP("")
 DUMP("Firing the starting weapon:")
-local before = countInWorkspace("Tracer")
+FIRED = {}
 fireRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0, -1))
-local after = countInWorkspace("Tracer")
-check("a shot is fired", after > before, string.format("%d tracers", after - before))
+
+-- The shot now reaches other players as one small event rather than as
+-- replicated parts, and the shooter is deliberately left out: their own
+-- client drew the flash, the bang and the tracer the moment they fired,
+-- instead of a network round trip later.
+local shotEvents = FIRED_TO("ShotFired")
+check("a shot is fired", #shotEvents > 0, string.format("%d broadcasts", #shotEvents))
+
+local toldShooter = false
+for _, call in shotEvents do
+	if call.player == shooter then toldShooter = true end
+end
+check("the shooter is not told about their own shot", not toldShooter, "")
+
+if #shotEvents > 0 then
+	local payload = shotEvents[1].args[1]
+	check("the broadcast carries where the shot went",
+		payload ~= nil and typeof(payload.origin) == "Vector3"
+			and typeof(payload.endPoint) == "Vector3",
+		"")
+end
 
 -- Ammo is endless by design now, so the magazine should NOT go down.
 local state = PlayerState.Get(shooter)

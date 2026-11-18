@@ -68,6 +68,54 @@ function Util.ApplySpread(direction: Vector3, degrees: number, rng: Random): Vec
 end
 
 --[[ The angle between two directions, in degrees. Used by auto-aim. ]]
+--[[
+	Is this a Vector3 a server can safely do arithmetic with?
+
+	Every remote handler that takes a direction used to guard with
+	`typeof(v) ~= "Vector3"` and `v.Magnitude < 0.001`. Neither one rejects
+	NaN, because **every comparison involving NaN is false** -- so
+	`Vector3.new(0/0, 0/0, 0/0)` passed both tests, and `.Unit` stayed NaN,
+	and the NaN went on into CFrame.lookAt, workspace:Raycast and projectile
+	positions. A hostile client could send one from a console.
+
+	A finite check has to be written as its own test, not as a comparison:
+	`value ~= value` is the only thing that catches NaN, and infinity has to
+	be excluded separately.
+]]
+local function finite(value: number): boolean
+	return value == value and value > -math.huge and value < math.huge
+end
+
+function Util.IsSaneVector(value: any): boolean
+	if typeof(value) ~= "Vector3" then
+		return false
+	end
+	local vector = value :: Vector3
+	if not (finite(vector.X) and finite(vector.Y) and finite(vector.Z)) then
+		return false
+	end
+	-- Nothing legitimate is this far out, and a huge-but-finite vector is
+	-- just as good a way to break downstream maths as an infinite one.
+	return vector.Magnitude < 1e6
+end
+
+--[[
+	A direction a server can trust: sane, and long enough to normalise.
+
+	Returns the unit vector, or nil. Returning the normalised value rather
+	than a boolean means a caller cannot forget to normalise it afterwards.
+]]
+function Util.SaneDirection(value: any): Vector3?
+	if not Util.IsSaneVector(value) then
+		return nil
+	end
+	local vector = value :: Vector3
+	if vector.Magnitude < 0.001 then
+		return nil
+	end
+	return vector.Unit
+end
+
 function Util.AngleBetween(a: Vector3, b: Vector3): number
 	local aMag, bMag = a.Magnitude, b.Magnitude
 	if aMag == 0 or bMag == 0 then

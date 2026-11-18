@@ -13,6 +13,7 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
 local Util = require(Shared:WaitForChild("Util"))
 local Radar = require(script.Parent:WaitForChild("Radar"))
 
@@ -44,6 +45,23 @@ local killFeed: Frame
 local medalLabel: TextLabel
 local weaponBar: Frame
 local slotChips: { [number]: TextLabel } = {}
+
+--[[
+	How many weapon slots the bar needs.
+
+	Read off Config rather than written down, because it was written down as
+	6 while the weapon table had grown a 7th -- so poop and the hunter drone
+	had no chip on the bar and picking one up showed nothing at all.
+]]
+local SLOT_COUNT = (function(): number
+	local highest = 1
+	for _, spec in Config.Weapons do
+		if spec.Slot > highest then
+			highest = spec.Slot
+		end
+	end
+	return highest
+end)()
 local weaponLabel: TextLabel
 local ammoLabel: TextLabel
 local statsLabel: TextLabel
@@ -425,7 +443,7 @@ function Hud.Build()
 	barLayout.Padding = UDim.new(0, 6)
 	barLayout.Parent = weaponBar
 
-	for slot = 1, 6 do
+	for slot = 1, SLOT_COUNT do
 		local chip = makeFrame(weaponBar, {
 			Size = UDim2.fromOffset(104, 36),
 			BackgroundColor3 = Color3.fromRGB(28, 32, 38),
@@ -841,7 +859,7 @@ function Hud.SetLoadout(names: { [number]: string }, activeSlot: number)
 		return
 	end
 
-	for slot = 1, 6 do
+	for slot = 1, SLOT_COUNT do
 		local label = slotChips[slot]
 		if label then
 			label.Text = names[slot] or "—"

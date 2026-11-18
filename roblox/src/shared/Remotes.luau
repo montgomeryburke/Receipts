@@ -39,6 +39,10 @@ local EVENT_NAMES = {
 	-- The scoreboard is pulled, not pushed: streaming everyone's score to
 	-- everyone continuously costs bandwidth all match for a panel that is on
 	-- screen a few seconds at a time.
+	-- Cosmetic only: the shooter already drew their own shot locally, this
+	-- tells everybody nearby what it looked like. Cheaper than replicating
+	-- the parts, and far less laggy than drawing them server-side.
+	"ShotFired",
 	"ThrowGrenade",
 	"RequestScoreboard",
 	"Scoreboard",

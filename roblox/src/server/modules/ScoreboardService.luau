@@ -97,16 +97,39 @@ function ScoreboardService.Send(player: Player)
 	})
 end
 
+--[[
+	When each player may next ask for a scoreboard.
+
+	The first version of this had a comment claiming a player spamming the
+	request "only slows themselves". That was wrong: the work happens on the
+	SERVER, and it is a full walk of the player list, a sort and a table
+	serialised per event. A loop firing the remote every frame is twenty
+	players' worth of lag caused by one of them.
+
+	Twice a second is far more often than a human opens a panel, and the
+	client only asks when the key goes down anyway.
+]]
+local nextAllowedAt: { [Player]: number } = {}
+local MIN_INTERVAL = 0.5
+
 function ScoreboardService.Start()
 	Remotes.Event("RequestScoreboard").OnServerEvent:Connect(function(player: Player)
-		-- No rate limit beyond the cost of building it: the panel is held
-		-- down by hand, and a player spamming Tab only slows themselves.
+		local now = os.clock()
+		if now < (nextAllowedAt[player] or 0) then
+			return
+		end
+		nextAllowedAt[player] = now + MIN_INTERVAL
+
 		local ok, err = pcall(function()
 			ScoreboardService.Send(player)
 		end)
 		if not ok then
 			warn(`[Nuclear Mud Arena] Scoreboard failed for {player.Name}: {err}`)
 		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		nextAllowedAt[player] = nil
 	end)
 end
 

@@ -193,6 +193,28 @@ end
 	Carve a crater into the mud. Purely cosmetic, but it is the thing that
 	makes a mega-detonation feel like it mattered.
 ]]
+--[[
+	A wrecked vehicle's blast.
+
+	VehicleService announces these rather than applying them, because it
+	already requires this module and the reverse would be a cycle.
+
+	Before this listener existed, every exploding vehicle dealt exactly zero
+	damage. Roblox's Explosion only hurts a Humanoid by breaking its joints,
+	and the vehicle blast set DestroyJointRadiusPercent to 0 to stop
+	characters coming apart -- which switched off the only damage it did. So
+	riding a torpedo straight into somebody, the entire purpose of the
+	torpedo, did nothing to them whatsoever.
+]]
+VehicleService.Wrecked.Connect(function(
+	position: Vector3,
+	radius: number,
+	damage: number,
+	lastDriver: Player?
+)
+	DamageService.Explode(position, radius, damage, lastDriver, 1.4, false)
+end)
+
 function DamageService.Crater(position: Vector3, radius: number)
 	local crater = Util.Part({
 		Name = "Crater",

@@ -196,6 +196,57 @@ do
 	end
 end
 
+-- ------------------------------------------------- wrecked vehicles hurt
+-- Every exploding vehicle used to deal exactly zero damage: the blast was a
+-- raw Explosion instance with joint-breaking switched off, which is the only
+-- damage a Roblox Explosion does. Riding a torpedo into somebody -- the
+-- entire purpose of the torpedo -- did nothing to them. It typechecked fine
+-- and looked right on screen, which is why it survived so long.
+do
+	local preyHumanoid = prey._props.Character:FindFirstChildOfClass("Humanoid")
+	local preyRoot = prey._props.Character:FindFirstChild("HumanoidRootPart")
+	preyRoot._props.CFrame = CFrame.new(0, 5, 0)
+	preyHumanoid._props.Health = 100
+	preyHumanoid._props.MaxHealth = 100
+	PlayerState.Reset(prey, false)
+
+	local torpedo = VehicleService.SpawnTorpedo(Vector3.new(0, 5, 0))
+	check("a torpedo spawns", torpedo ~= nil, "")
+
+	-- A freshly reset player has spawn protection, and a blast must respect
+	-- it. Worth asserting on the way past, since it is the reason the first
+	-- version of this test read as a failure when the code was fine.
+	local shielded = PlayerState.Get(prey)
+	VehicleService.Explode(torpedo)
+	RUN_SPAWNED()
+	check("spawn protection soaks a blast", preyHumanoid._props.Health == 100,
+		string.format("%.0f health", preyHumanoid._props.Health))
+
+	-- Now out of protection, standing on top of one.
+	shielded.spawnProtectedUntil = 0
+	shielded.burgerUntil = 0
+	shielded.shield = 0
+	local armed = VehicleService.SpawnTorpedo(Vector3.new(0, 5, 0))
+	local before = preyHumanoid._props.Health
+	VehicleService.Explode(armed)
+	RUN_SPAWNED()
+	local after = preyHumanoid._props.Health
+
+	check("a wrecked vehicle damages somebody beside it", after < before,
+		string.format("%.0f health, was %.0f", after, before))
+
+	-- And not somebody on the other side of the map.
+	preyHumanoid._props.Health = 100
+	shielded.spawnProtectedUntil = 0
+	shielded.burgerUntil = 0
+	preyRoot._props.CFrame = CFrame.new(5000, 5, 5000)
+	local faraway = VehicleService.SpawnTorpedo(Vector3.new(0, 5, 0))
+	VehicleService.Explode(faraway)
+	RUN_SPAWNED()
+	check("and not somebody across the map", preyHumanoid._props.Health == 100,
+		string.format("%.0f health", preyHumanoid._props.Health))
+end
+
 DUMP(if failures == 0 then "MEDALS WORK" else failures .. " MEDAL FAILURES")
 '''
 
@@ -214,7 +265,7 @@ def strip(s):
         out.append(line)
     return '\n'.join(out)
 
-SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound']
+SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
 SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',

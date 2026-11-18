@@ -43,85 +43,50 @@ local rng = Random.new()
 	guns, which fire visible projectiles, looked fine. This is deliberately
 	loud: a thick bright beam, a muzzle flash and a spark where it lands.
 ]]
-local function drawTracer(from: Vector3, to: Vector3, color: Color3)
-	local delta = to - from
-	local length = delta.Magnitude
-	if length < 0.5 then
-		return
-	end
-
-	local tracer = Util.Part({
-		Name = "Tracer",
-		Size = Vector3.new(0.55, 0.55, length),
-		CFrame = CFrame.lookAt(from + delta * 0.5, to),
-		Color = color,
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		Transparency = 0.1,
-		Parent = workspace,
-	})
-	Debris:AddItem(tracer, 0.35)
-end
-
---[[ The flash at the muzzle, so you can see your own gun going off. ]]
-local function muzzleFlash(position: Vector3, colour: Color3)
-	local flash = Util.Part({
-		Name = "MuzzleFlash",
-		Size = Vector3.new(2.4, 2.4, 2.4),
-		CFrame = CFrame.new(position),
-		Shape = Enum.PartType.Ball,
-		Color = Color3.fromRGB(255, 230, 150),
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		Parent = workspace,
-	})
-
-	local light = Instance.new("PointLight")
-	light.Color = colour
-	light.Brightness = 6
-	light.Range = 22
-	light.Parent = flash
-
-	Debris:AddItem(flash, 0.09)
-end
-
---[[ Sparks where the shot lands, so you can tell what you hit. ]]
-local function impactSpark(position: Vector3, normal: Vector3, colour: Color3)
-	local anchor = Util.Part({
-		Name = "Impact",
-		Size = Vector3.new(0.6, 0.6, 0.6),
-		CFrame = CFrame.new(position + normal * 0.4),
-		Transparency = 1,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		Parent = workspace,
-	})
-
-	local spark = Instance.new("ParticleEmitter")
-	spark.Color = ColorSequence.new(colour)
-	spark.Size = NumberSequence.new(1.1, 0)
-	spark.Lifetime = NumberRange.new(0.12, 0.3)
-	spark.Speed = NumberRange.new(14, 30)
-	spark.SpreadAngle = Vector2.new(60, 60)
-	spark.Rate = 0
-	spark.Parent = anchor
-	spark:Emit(14)
-
-	Debris:AddItem(anchor, 0.7)
-end
-
 --[[
-	The gun in your hands.
+	Tell everybody except the shooter what a shot looked like.
 
-	Built as a couple of parts welded to the right hand, so there is always
-	something visible to shoot with and you can tell at a glance which weapon
-	you are holding.
+	The shooter's own client already drew it, the instant they pulled the
+	trigger -- which is the whole point. Doing the visuals server-side meant
+	the flash, the bang and the tracer all arrived one network round trip
+	after the trigger, a constant 50-150ms delay on every shot that no amount
+	of damage tuning can make feel good.
+
+	Only players near enough to see it are told. Nobody watches a tracer from
+	the other end of a 1500-stud map, and a minigun firing 22 times a second
+	does not need to tell all twenty of them.
 ]]
+local SHOT_AUDIBLE_RANGE = 420
+
+local function broadcastShot(
+	shooter: Player,
+	origin: Vector3,
+	endPoint: Vector3,
+	spec: Config.WeaponSpec,
+	normal: Vector3?
+)
+	local payload = {
+		origin = origin,
+		endPoint = endPoint,
+		color = spec.Color,
+		normal = normal,
+		sound = Sound.ForWeapon(spec),
+	}
+
+	for _, other in Players:GetPlayers() do
+		if other == shooter then
+			continue
+		end
+		local character = other.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			if (root.Position - origin).Magnitude <= SHOT_AUDIBLE_RANGE then
+				Remotes.Event("ShotFired"):FireClient(other, payload)
+			end
+		end
+	end
+end
+
 local function updateHeldWeapon(player: Player)
 	local character = player.Character
 	if not character then
@@ -224,15 +189,17 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	local result = workspace:Raycast(origin, direction * spec.Range, params)
 
 	local endPoint = if result then result.Position else origin + direction * spec.Range
-	drawTracer(origin, endPoint, spec.Color)
-	muzzleFlash(origin + direction * 2, spec.Color)
-	Sound.At(Sound.ForWeapon(spec), origin)
+	broadcastShot(
+		player,
+		origin + direction * 2,
+		endPoint,
+		spec,
+		if result then result.Normal else nil
+	)
 
 	if not result then
 		return
 	end
-
-	impactSpark(result.Position, result.Normal, spec.Color)
 
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
 	-- Fairground props first: they are neither people nor vehicles.
@@ -321,15 +288,19 @@ end
 local function equippedWeaponName(player: Player): string
 	local state = PlayerState.Get(player)
 
-	-- Sitting on a mounted gun overrides whatever you were carrying.
-	if state.vehicle and state.seatRole == "Gunner" then
+	-- The `.Parent` checks matter: a vehicle destroyed under a seated player
+	-- leaves state.vehicle pointing at it. Without them the player keeps the
+	-- tank cannon after the tank is gone, and muzzleFor -- which does check
+	-- Parent -- falls back to their head, so they walk around firing a tank
+	-- cannon out of their face.
+	if state.vehicle and state.vehicle.Parent and state.seatRole == "Gunner" then
 		local mounted = state.vehicle:GetAttribute("MountedWeapon")
 		if typeof(mounted) == "string" and Config.Weapons[mounted] then
 			return mounted
 		end
 	end
 	-- A plane's pilot has the wing guns.
-	if state.vehicle and state.seatRole == "Driver" then
+	if state.vehicle and state.vehicle.Parent and state.seatRole == "Driver" then
 		local kind = state.vehicle:GetAttribute("VehicleKind")
 		if kind == "Plane" then
 			local mounted = state.vehicle:GetAttribute("MountedWeapon")
@@ -388,10 +359,12 @@ end
 	mid-fight without giving up your rifle.
 ]]
 local function fireWeapon(player: Player, weaponName: string, requestedDirection: any)
-	if typeof(requestedDirection) ~= "Vector3" then
-		return
-	end
-	if requestedDirection.Magnitude < 0.001 then
+	-- NaN slips past a magnitude check, because every comparison involving
+	-- NaN is false. Util.SaneDirection is the only guard here that actually
+	-- rejects it, and it hands back the normalised vector so nothing
+	-- downstream has to remember to do that.
+	local direction = Util.SaneDirection(requestedDirection)
+	if not direction then
 		return
 	end
 
@@ -434,17 +407,56 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 		return
 	end
 
-	-- A mounted gun cannot be carried around on foot.
-	if spec.MountedOnly and not state.vehicle then
+	-- A mounted gun cannot be carried around on foot, and a wrecked vehicle
+	-- is not a vehicle.
+	if spec.MountedOnly and not (state.vehicle and state.vehicle.Parent) then
 		return
+	end
+
+	--[[
+		Is the client shooting roughly where it is looking?
+
+		Config.Combat.AutoAimServerToleranceDegrees has claimed since it was
+		written that "the server re-checks aim against this wider cone before
+		trusting a shot". It did not. Nothing checked the direction against
+		the character at all, so a hostile client could send a vector
+		pointing straight at somebody behind them and the server would
+		happily trace it -- a silent 360-degree aimbot, needing no more than
+		one line in a console.
+
+		The cone is deliberately generous. It has to cover the client's own
+		auto-aim snap, the gunner seats, and a few frames of latency between
+		the client aiming and the server looking. It is not there to make
+		aiming hard; it is there to make "behind me" impossible.
+	]]
+	local aimReference: Vector3? = nil
+	if state.vehicle and state.vehicle.Parent then
+		-- On a mounted gun the barrel does the aiming, not the head.
+		local barrel = state.vehicle:FindFirstChild("Barrel", true)
+		if barrel and barrel:IsA("BasePart") then
+			aimReference = barrel.CFrame.LookVector
+		end
+	elseif humanoid.RootPart then
+		local head = character and character:FindFirstChild("Head")
+		aimReference = if head and head:IsA("BasePart")
+			then head.CFrame.LookVector
+			else humanoid.RootPart.CFrame.LookVector
+	end
+
+	if aimReference and aimReference.Magnitude > 0.001 then
+		local tolerance = Config.Combat.AutoAimServerToleranceDegrees
+		-- Doubled, and then some. The head's own facing lags the camera on
+		-- the client, so a tight cone would reject honest shots taken while
+		-- turning -- which is most of them.
+		if Util.AngleBetween(aimReference, direction) > tolerance * 3.4 then
+			return
+		end
 	end
 
 	slot.nextFireAt = now + spec.Cooldown
 	if not Config.InfiniteAmmo then
 		slot.ammo -= 1
 	end
-
-	local direction = requestedDirection.Unit
 
 	-- Fries give you three barrels for a while; normally this is just one.
 	local barrels = PlayerState.BarrelCount(player)
@@ -558,12 +570,20 @@ end
 ]]
 local function handleMelee(player: Player)
 	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid or humanoid.Health <= 0 then
 		return
 	end
-	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local root = character:FindFirstChild("HumanoidRootPart")
 	if not root or not root:IsA("BasePart") then
+		return
+	end
+
+	-- You cannot punch from the driver's seat of a tank.
+	if humanoid.SeatPart then
 		return
 	end
 
@@ -593,12 +613,29 @@ local function handleMelee(player: Player)
 			continue
 		end
 
+		-- Dead men cannot be knifed again.
+		local otherHumanoid = otherCharacter and otherCharacter:FindFirstChildOfClass("Humanoid")
+		if not otherHumanoid or otherHumanoid.Health <= 0 then
+			continue
+		end
+
 		local toTarget = otherRoot.Position - root.Position
 		local distance = toTarget.Magnitude
 		-- Has to be in front of you, not merely nearby.
 		if distance <= bestDistance and Util.AngleBetween(facing, toTarget) < 70 then
-			best = other
-			bestDistance = distance
+			-- And you have to be able to reach them. Distance and a cone
+			-- alone let you knife somebody through a solid wall, which at
+			-- nine studs of range happens constantly in a city map full of
+			-- two-stud partitions.
+			local blocked = workspace:Raycast(
+				root.Position,
+				toTarget,
+				Util.RayParams({ character, otherCharacter })
+			)
+			if not blocked then
+				best = other
+				bestDistance = distance
+			end
 		end
 	end
 
@@ -630,7 +667,9 @@ end
 
 --[[ Gunners tell the server where they are looking; the turret follows. ]]
 local function handleAim(player: Player, worldTarget: any)
-	if typeof(worldTarget) ~= "Vector3" then
+	-- A NaN here reached HingeConstraint.TargetAngle, which is a poisoned
+	-- turret that no longer responds to anything.
+	if not Util.IsSaneVector(worldTarget) then
 		return
 	end
 	local state = PlayerState.Get(player)

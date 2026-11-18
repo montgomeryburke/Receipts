@@ -1037,6 +1037,10 @@ local EVENT_NAMES = {
 	-- The scoreboard is pulled, not pushed: streaming everyone's score to
 	-- everyone continuously costs bandwidth all match for a panel that is on
 	-- screen a few seconds at a time.
+	-- Cosmetic only: the shooter already drew their own shot locally, this
+	-- tells everybody nearby what it looked like. Cheaper than replicating
+	-- the parts, and far less laggy than drawing them server-side.
+	"ShotFired",
 	"ThrowGrenade",
 	"RequestScoreboard",
 	"Scoreboard",
@@ -1107,6 +1111,132 @@ return Remotes
       </Item>
       <Item class="ModuleScript" referent="6">
         <Properties>
+          <string name="Name">Shot</string>
+          <string name="Source"><![CDATA[--!strict
+--[[
+	Nuclear Mud Arena — what a shot looks like.
+
+	This used to live on the server only, which made every gun feel broken in
+	a way that is hard to name: you pulled the trigger and the flash, the
+	bang and the tracer all appeared one network round trip later. On a
+	50-150ms connection that is a visible, constant delay on every single
+	shot, and no amount of tuning the damage numbers makes a gun with that
+	delay feel good.
+
+	So the visuals live here, where both sides can run them:
+
+	  - The SHOOTER'S client runs them the instant the trigger passes the
+	    weapon's own cooldown. No waiting for anybody.
+	  - The server still runs the raycast, the damage, the points and the
+	    kill feed. It is the only thing anybody trusts.
+	  - Everybody ELSE hears about the shot over one small remote and runs
+	    the same code, which is also cheaper than it was: a replicated part
+	    costs more bandwidth than a position and a colour.
+
+	Nothing in here is authoritative. If a client lies about a tracer, a
+	tracer appears in the wrong place on that client's screen. That is all it
+	can do.
+]]
+
+local Debris = game:GetService("Debris")
+
+local Shot = {}
+
+--[[ The bright line the bullet leaves. ]]
+function Shot.Tracer(from: Vector3, to: Vector3, color: Color3)
+	local delta = to - from
+	local length = delta.Magnitude
+	if length < 0.5 or length ~= length then
+		return
+	end
+
+	local tracer = Instance.new("Part")
+	tracer.Name = "Tracer"
+	tracer.Size = Vector3.new(0.5, 0.5, length)
+	tracer.CFrame = CFrame.lookAt(from + delta * 0.5, to)
+	tracer.Color = color
+	tracer.Material = Enum.Material.Neon
+	tracer.Anchored = true
+	tracer.CanCollide = false
+	tracer.CanQuery = false
+	tracer.CanTouch = false
+	tracer.CastShadow = false
+	tracer.Transparency = 0.1
+	tracer.Parent = workspace
+
+	-- Short. A tracer that hangs for a third of a second reads as a solid
+	-- neon rod stuck in the air rather than a bullet going past.
+	Debris:AddItem(tracer, 0.12)
+end
+
+--[[ The flash at the muzzle, so you can see your own gun going off. ]]
+function Shot.MuzzleFlash(position: Vector3, color: Color3)
+	local flash = Instance.new("Part")
+	flash.Name = "MuzzleFlash"
+	flash.Size = Vector3.new(1.6, 1.6, 1.6)
+	flash.CFrame = CFrame.new(position)
+	flash.Shape = Enum.PartType.Ball
+	flash.Color = Color3.fromRGB(255, 232, 160)
+	flash.Material = Enum.Material.Neon
+	flash.Anchored = true
+	flash.CanCollide = false
+	flash.CanQuery = false
+	flash.CanTouch = false
+	flash.CastShadow = false
+	flash.Parent = workspace
+
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Brightness = 7
+	light.Range = 24
+	light.Shadows = false
+	light.Parent = flash
+
+	Debris:AddItem(flash, 0.06)
+end
+
+--[[ Sparks where the shot lands, so you can tell what you hit. ]]
+function Shot.Impact(position: Vector3, normal: Vector3, color: Color3)
+	local anchor = Instance.new("Part")
+	anchor.Name = "Impact"
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.CFrame = CFrame.new(position, position + normal)
+	anchor.Transparency = 1
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.Parent = workspace
+
+	local sparks = Instance.new("ParticleEmitter")
+	sparks.Color = ColorSequence.new(color)
+	sparks.Size = NumberSequence.new(0.5, 0)
+	sparks.Lifetime = NumberRange.new(0.08, 0.2)
+	sparks.Speed = NumberRange.new(10, 26)
+	sparks.SpreadAngle = Vector2.new(50, 50)
+	sparks.Rate = 0
+	sparks.LightEmission = 1
+	sparks.Parent = anchor
+	sparks:Emit(9)
+
+	Debris:AddItem(anchor, 0.4)
+end
+
+--[[ All three at once, which is what a shot normally wants. ]]
+function Shot.Full(origin: Vector3, endPoint: Vector3, color: Color3, normal: Vector3?)
+	Shot.MuzzleFlash(origin, color)
+	Shot.Tracer(origin, endPoint, color)
+	if normal then
+		Shot.Impact(endPoint, normal, color)
+	end
+end
+
+return Shot
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="7">
+        <Properties>
           <string name="Name">Signal</string>
           <string name="Source"><![CDATA[--!strict
 --[[
@@ -1166,7 +1296,7 @@ return Signal
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="7">
+      <Item class="ModuleScript" referent="8">
         <Properties>
           <string name="Name">Sound</string>
           <string name="Source"><![CDATA[--!strict
@@ -1319,7 +1449,7 @@ return Sound
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="8">
+      <Item class="ModuleScript" referent="9">
         <Properties>
           <string name="Name">Util</string>
           <string name="Source"><![CDATA[--!strict
@@ -1392,6 +1522,54 @@ function Util.ApplySpread(direction: Vector3, degrees: number, rng: Random): Vec
 end
 
 --[[ The angle between two directions, in degrees. Used by auto-aim. ]]
+--[[
+	Is this a Vector3 a server can safely do arithmetic with?
+
+	Every remote handler that takes a direction used to guard with
+	`typeof(v) ~= "Vector3"` and `v.Magnitude < 0.001`. Neither one rejects
+	NaN, because **every comparison involving NaN is false** -- so
+	`Vector3.new(0/0, 0/0, 0/0)` passed both tests, and `.Unit` stayed NaN,
+	and the NaN went on into CFrame.lookAt, workspace:Raycast and projectile
+	positions. A hostile client could send one from a console.
+
+	A finite check has to be written as its own test, not as a comparison:
+	`value ~= value` is the only thing that catches NaN, and infinity has to
+	be excluded separately.
+]]
+local function finite(value: number): boolean
+	return value == value and value > -math.huge and value < math.huge
+end
+
+function Util.IsSaneVector(value: any): boolean
+	if typeof(value) ~= "Vector3" then
+		return false
+	end
+	local vector = value :: Vector3
+	if not (finite(vector.X) and finite(vector.Y) and finite(vector.Z)) then
+		return false
+	end
+	-- Nothing legitimate is this far out, and a huge-but-finite vector is
+	-- just as good a way to break downstream maths as an infinite one.
+	return vector.Magnitude < 1e6
+end
+
+--[[
+	A direction a server can trust: sane, and long enough to normalise.
+
+	Returns the unit vector, or nil. Returning the normalised value rather
+	than a boolean means a caller cannot forget to normalise it afterwards.
+]]
+function Util.SaneDirection(value: any): Vector3?
+	if not Util.IsSaneVector(value) then
+		return nil
+	end
+	local vector = value :: Vector3
+	if vector.Magnitude < 0.001 then
+		return nil
+	end
+	return vector.Unit
+end
+
 function Util.AngleBetween(a: Vector3, b: Vector3): number
 	local aMag, bMag = a.Magnitude, b.Magnitude
 	if aMag == 0 or bMag == 0 then
@@ -1443,11 +1621,11 @@ return Util
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="9">
+  <Item class="ServerScriptService" referent="10">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="10">
+    <Item class="Script" referent="11">
       <Properties>
         <string name="Name">Server</string>
         <token name="RunContext">0</token>
@@ -1657,11 +1835,11 @@ end
 print("[Nuclear Mud Arena] Server ready.")
 ]]></string>
       </Properties>
-      <Item class="Folder" referent="11">
+      <Item class="Folder" referent="12">
         <Properties>
           <string name="Name">modules</string>
         </Properties>
-        <Item class="ModuleScript" referent="12">
+        <Item class="ModuleScript" referent="13">
           <Properties>
             <string name="Name">CarnivalService</string>
             <string name="Source"><![CDATA[--!strict
@@ -2175,7 +2353,7 @@ return CarnivalService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="13">
+        <Item class="ModuleScript" referent="14">
           <Properties>
             <string name="Name">DamageService</string>
             <string name="Source"><![CDATA[--!strict
@@ -2373,6 +2551,28 @@ end
 	Carve a crater into the mud. Purely cosmetic, but it is the thing that
 	makes a mega-detonation feel like it mattered.
 ]]
+--[[
+	A wrecked vehicle's blast.
+
+	VehicleService announces these rather than applying them, because it
+	already requires this module and the reverse would be a cycle.
+
+	Before this listener existed, every exploding vehicle dealt exactly zero
+	damage. Roblox's Explosion only hurts a Humanoid by breaking its joints,
+	and the vehicle blast set DestroyJointRadiusPercent to 0 to stop
+	characters coming apart -- which switched off the only damage it did. So
+	riding a torpedo straight into somebody, the entire purpose of the
+	torpedo, did nothing to them whatsoever.
+]]
+VehicleService.Wrecked.Connect(function(
+	position: Vector3,
+	radius: number,
+	damage: number,
+	lastDriver: Player?
+)
+	DamageService.Explode(position, radius, damage, lastDriver, 1.4, false)
+end)
+
 function DamageService.Crater(position: Vector3, radius: number)
 	local crater = Util.Part({
 		Name = "Crater",
@@ -2400,7 +2600,7 @@ return DamageService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="15">
           <Properties>
             <string name="Name">EffectService</string>
             <string name="Source"><![CDATA[--!strict
@@ -2685,7 +2885,7 @@ return EffectService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">FlagService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3113,7 +3313,7 @@ return FlagService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">GraphicsService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3228,7 +3428,7 @@ return GraphicsService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="18">
           <Properties>
             <string name="Name">MapService</string>
             <string name="Source"><![CDATA[--!strict
@@ -4281,7 +4481,7 @@ return MapService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">MatchService</string>
             <string name="Source"><![CDATA[--!strict
@@ -4839,7 +5039,7 @@ return MatchService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">MonetizationService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5015,7 +5215,7 @@ return MonetizationService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">PickupService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5294,7 +5494,7 @@ return PickupService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">PlayerState</string>
             <string name="Source"><![CDATA[--!strict
@@ -5487,7 +5687,7 @@ return PlayerState
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">ProjectileService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5918,7 +6118,7 @@ return ProjectileService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">ScoreboardService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6020,16 +6220,39 @@ function ScoreboardService.Send(player: Player)
 	})
 end
 
+--[[
+	When each player may next ask for a scoreboard.
+
+	The first version of this had a comment claiming a player spamming the
+	request "only slows themselves". That was wrong: the work happens on the
+	SERVER, and it is a full walk of the player list, a sort and a table
+	serialised per event. A loop firing the remote every frame is twenty
+	players' worth of lag caused by one of them.
+
+	Twice a second is far more often than a human opens a panel, and the
+	client only asks when the key goes down anyway.
+]]
+local nextAllowedAt: { [Player]: number } = {}
+local MIN_INTERVAL = 0.5
+
 function ScoreboardService.Start()
 	Remotes.Event("RequestScoreboard").OnServerEvent:Connect(function(player: Player)
-		-- No rate limit beyond the cost of building it: the panel is held
-		-- down by hand, and a player spamming Tab only slows themselves.
+		local now = os.clock()
+		if now < (nextAllowedAt[player] or 0) then
+			return
+		end
+		nextAllowedAt[player] = now + MIN_INTERVAL
+
 		local ok, err = pcall(function()
 			ScoreboardService.Send(player)
 		end)
 		if not ok then
 			warn(`[Nuclear Mud Arena] Scoreboard failed for {player.Name}: {err}`)
 		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		nextAllowedAt[player] = nil
 	end)
 end
 
@@ -6046,7 +6269,7 @@ return ScoreboardService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">TeamService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6129,7 +6352,7 @@ return TeamService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6184,7 +6407,17 @@ local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
+local Signal = require(Shared:WaitForChild("Signal"))
+
 local VehicleService = {}
+
+--[[
+	A vehicle just went up: (position, radius, damage, lastDriver).
+
+	DamageService listens and applies the blast. It cannot be called from
+	here, because it requires this module.
+]]
+VehicleService.Wrecked = Signal.new()
 
 local WHEEL_DIAMETER = 7
 local WHEEL_WIDTH = 4
@@ -6569,6 +6802,14 @@ local function bindSeat(seat: Seat | VehicleSeat, model: Model, role: string)
 				state.vehicle = model
 				state.seatRole = role
 				PlayerState.Changed.Fire(player)
+
+				-- Remembered past the moment they get out, so an explosion
+				-- has somebody to credit. A blast with no attacker scores
+				-- nothing and appears in the kill feed as a nameless death.
+				local vehicleState = active[model]
+				if vehicleState and role == "Driver" then
+					vehicleState.lastDriver = player
+				end
 			end
 			return
 		end
@@ -6927,7 +7168,10 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 		velocity = velocity,
 		orientation = orientation,
 		heading = body.CFrame.Rotation,
+		-- A second on the pad before it will go off, so it does not detonate
+		-- against the ground the instant it is built.
 		armedAt = os.clock() + 1.0,
+		expiresAt = os.clock() + (spec.Lifetime or 20),
 	}
 	return model
 end
@@ -7203,6 +7447,49 @@ local function driveTorpedo(model: Model, state: any, deltaTime: number)
 		* CFrame.Angles(pitch * turnRate * deltaTime, -steer * turnRate * deltaTime, 0)
 	state.orientation.CFrame = state.heading
 	state.velocity.VectorVelocity = state.heading.LookVector * runSpeed
+
+	--[[
+		Hitting things, and running out.
+
+		Neither of these existed. `armedAt` was written at spawn and never
+		read once, and `Lifetime` was in the config with a comment promising
+		"it dies on its own after this long, with you on it". So the torpedo
+		-- the thing you steer into somebody -- passed straight through them
+		and then flew forever, or until it hit a wall and sat there.
+
+		A raycast ahead rather than a Touched connection: the body is driven
+		by a velocity constraint at 150 studs a second, which is two and a
+		half studs per frame, and contact events on something moving that
+		fast are not something to rely on.
+	]]
+	local now = os.clock()
+	if now < (state.armedAt or 0) then
+		return
+	end
+
+	if now >= (state.expiresAt or math.huge) then
+		VehicleService.Explode(model)
+		return
+	end
+
+	local chassis = state.chassis :: BasePart
+	local nose = state.heading.LookVector
+	-- Far enough ahead to cover a frame of travel plus the shell itself.
+	local reach = runSpeed * math.max(deltaTime, 1 / 60) + 11
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	-- Not itself, and not the person riding it.
+	local rider = seat.Occupant
+	local riderCharacter = if rider then rider.Parent else nil
+	params.FilterDescendantsInstances = if riderCharacter
+		then { model, riderCharacter }
+		else { model }
+
+	local hit = workspace:Raycast(chassis.Position, nose * reach, params)
+	if hit then
+		VehicleService.Explode(model)
+	end
 end
 
 --[[
@@ -7243,6 +7530,18 @@ end
 	without touching your horizontal movement, so you can still steer where
 	you land.
 ]]
+--[[
+	Who is already mid-ejection.
+
+	The Parachute guard below is checked BEFORE a task.wait, and the
+	parachute is only created after it. Ten Eject calls in a single frame
+	therefore all passed the guard, each stacking another 70 studs/sec of
+	upward velocity and another LinearVelocity constraint -- a free launch to
+	the top of the skybox. The claim has to be staked synchronously, before
+	anything yields.
+]]
+local ejecting: { [Player]: true } = {}
+
 function VehicleService.Eject(player: Player)
 	local character = player.Character
 	if not character then
@@ -7256,16 +7555,18 @@ function VehicleService.Eject(player: Player)
 	if not humanoid.SeatPart then
 		return
 	end
-	-- Already under a canopy.
-	if character:FindFirstChild("Parachute") then
+	-- Already under a canopy, or already on the way to one.
+	if character:FindFirstChild("Parachute") or ejecting[player] then
 		return
 	end
+	ejecting[player] = true
 
 	humanoid.Sit = false
 
 	-- Thrown clear of whatever you were riding.
 	task.wait(0.1)
-	if not root.Parent then
+	if not root.Parent or player.Parent == nil then
+		ejecting[player] = nil
 		return
 	end
 	root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + Vector3.new(0, 70, 0)
@@ -7347,6 +7648,7 @@ function VehicleService.Eject(player: Player)
 				break
 			end
 		end
+		ejecting[player] = nil
 		if canopy.Parent then
 			canopy:Destroy()
 		end
@@ -7397,16 +7699,38 @@ function VehicleService.Explode(model: Model)
 	local kind = model:GetAttribute("VehicleKind")
 
 	local blastRadius = 30
+	local blastDamage = 110
 	if kind == "Torpedo" then
-		blastRadius = Config.Vehicles.Torpedo.BlastRadius or 45
+		local torpedo = Config.Vehicles.Torpedo
+		blastRadius = torpedo.BlastRadius or 45
+		blastDamage = torpedo.BlastDamage or 200
 	end
 
+	--[[
+		This used to be a bare Explosion instance and nothing else, which
+		meant **every exploding vehicle dealt exactly zero damage**.
+
+		Roblox's Explosion only hurts a Humanoid by breaking its joints, and
+		DestroyJointRadiusPercent was set to 0 here to stop characters coming
+		apart -- which also switched off the only damage it does. So a torpedo
+		ridden straight into somebody, the one thing the torpedo is for, did
+		nothing at all to them. Same for a tank going up next to a crowd.
+
+		The visible blast stays; the damage goes through DamageService, which
+		is the only thing that knows about teams, shields, point awards and
+		the kill feed.
+	]]
 	local explosion = Instance.new("Explosion")
 	explosion.Position = position
 	explosion.BlastRadius = blastRadius
 	explosion.BlastPressure = 250000
 	explosion.DestroyJointRadiusPercent = 0
 	explosion.Parent = workspace
+
+	-- Announced rather than applied directly. DamageService already requires
+	-- this module, so calling into it from here would be a dependency cycle;
+	-- it listens for this instead, and the dependency stays one-way.
+	VehicleService.Wrecked.Fire(position, blastRadius, blastDamage, state.lastDriver)
 
 	active[model] = nil
 	model:Destroy()
@@ -7476,13 +7800,19 @@ function VehicleService.ClearAll()
 	table.clear(active)
 end
 
+Players.PlayerRemoving:Connect(function(player)
+	-- Otherwise a player who leaves mid-ejection holds their claim forever,
+	-- and this table holds on to them.
+	ejecting[player] = nil
+end)
+
 RunService.Heartbeat:Connect(step)
 
 return VehicleService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">WeaponService</string>
             <string name="Source"><![CDATA[--!strict
@@ -7530,85 +7860,50 @@ local rng = Random.new()
 	guns, which fire visible projectiles, looked fine. This is deliberately
 	loud: a thick bright beam, a muzzle flash and a spark where it lands.
 ]]
-local function drawTracer(from: Vector3, to: Vector3, color: Color3)
-	local delta = to - from
-	local length = delta.Magnitude
-	if length < 0.5 then
-		return
-	end
-
-	local tracer = Util.Part({
-		Name = "Tracer",
-		Size = Vector3.new(0.55, 0.55, length),
-		CFrame = CFrame.lookAt(from + delta * 0.5, to),
-		Color = color,
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		Transparency = 0.1,
-		Parent = workspace,
-	})
-	Debris:AddItem(tracer, 0.35)
-end
-
---[[ The flash at the muzzle, so you can see your own gun going off. ]]
-local function muzzleFlash(position: Vector3, colour: Color3)
-	local flash = Util.Part({
-		Name = "MuzzleFlash",
-		Size = Vector3.new(2.4, 2.4, 2.4),
-		CFrame = CFrame.new(position),
-		Shape = Enum.PartType.Ball,
-		Color = Color3.fromRGB(255, 230, 150),
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		Parent = workspace,
-	})
-
-	local light = Instance.new("PointLight")
-	light.Color = colour
-	light.Brightness = 6
-	light.Range = 22
-	light.Parent = flash
-
-	Debris:AddItem(flash, 0.09)
-end
-
---[[ Sparks where the shot lands, so you can tell what you hit. ]]
-local function impactSpark(position: Vector3, normal: Vector3, colour: Color3)
-	local anchor = Util.Part({
-		Name = "Impact",
-		Size = Vector3.new(0.6, 0.6, 0.6),
-		CFrame = CFrame.new(position + normal * 0.4),
-		Transparency = 1,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		Parent = workspace,
-	})
-
-	local spark = Instance.new("ParticleEmitter")
-	spark.Color = ColorSequence.new(colour)
-	spark.Size = NumberSequence.new(1.1, 0)
-	spark.Lifetime = NumberRange.new(0.12, 0.3)
-	spark.Speed = NumberRange.new(14, 30)
-	spark.SpreadAngle = Vector2.new(60, 60)
-	spark.Rate = 0
-	spark.Parent = anchor
-	spark:Emit(14)
-
-	Debris:AddItem(anchor, 0.7)
-end
-
 --[[
-	The gun in your hands.
+	Tell everybody except the shooter what a shot looked like.
 
-	Built as a couple of parts welded to the right hand, so there is always
-	something visible to shoot with and you can tell at a glance which weapon
-	you are holding.
+	The shooter's own client already drew it, the instant they pulled the
+	trigger -- which is the whole point. Doing the visuals server-side meant
+	the flash, the bang and the tracer all arrived one network round trip
+	after the trigger, a constant 50-150ms delay on every shot that no amount
+	of damage tuning can make feel good.
+
+	Only players near enough to see it are told. Nobody watches a tracer from
+	the other end of a 1500-stud map, and a minigun firing 22 times a second
+	does not need to tell all twenty of them.
 ]]
+local SHOT_AUDIBLE_RANGE = 420
+
+local function broadcastShot(
+	shooter: Player,
+	origin: Vector3,
+	endPoint: Vector3,
+	spec: Config.WeaponSpec,
+	normal: Vector3?
+)
+	local payload = {
+		origin = origin,
+		endPoint = endPoint,
+		color = spec.Color,
+		normal = normal,
+		sound = Sound.ForWeapon(spec),
+	}
+
+	for _, other in Players:GetPlayers() do
+		if other == shooter then
+			continue
+		end
+		local character = other.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			if (root.Position - origin).Magnitude <= SHOT_AUDIBLE_RANGE then
+				Remotes.Event("ShotFired"):FireClient(other, payload)
+			end
+		end
+	end
+end
+
 local function updateHeldWeapon(player: Player)
 	local character = player.Character
 	if not character then
@@ -7711,15 +8006,17 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	local result = workspace:Raycast(origin, direction * spec.Range, params)
 
 	local endPoint = if result then result.Position else origin + direction * spec.Range
-	drawTracer(origin, endPoint, spec.Color)
-	muzzleFlash(origin + direction * 2, spec.Color)
-	Sound.At(Sound.ForWeapon(spec), origin)
+	broadcastShot(
+		player,
+		origin + direction * 2,
+		endPoint,
+		spec,
+		if result then result.Normal else nil
+	)
 
 	if not result then
 		return
 	end
-
-	impactSpark(result.Position, result.Normal, spec.Color)
 
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
 	-- Fairground props first: they are neither people nor vehicles.
@@ -7808,15 +8105,19 @@ end
 local function equippedWeaponName(player: Player): string
 	local state = PlayerState.Get(player)
 
-	-- Sitting on a mounted gun overrides whatever you were carrying.
-	if state.vehicle and state.seatRole == "Gunner" then
+	-- The `.Parent` checks matter: a vehicle destroyed under a seated player
+	-- leaves state.vehicle pointing at it. Without them the player keeps the
+	-- tank cannon after the tank is gone, and muzzleFor -- which does check
+	-- Parent -- falls back to their head, so they walk around firing a tank
+	-- cannon out of their face.
+	if state.vehicle and state.vehicle.Parent and state.seatRole == "Gunner" then
 		local mounted = state.vehicle:GetAttribute("MountedWeapon")
 		if typeof(mounted) == "string" and Config.Weapons[mounted] then
 			return mounted
 		end
 	end
 	-- A plane's pilot has the wing guns.
-	if state.vehicle and state.seatRole == "Driver" then
+	if state.vehicle and state.vehicle.Parent and state.seatRole == "Driver" then
 		local kind = state.vehicle:GetAttribute("VehicleKind")
 		if kind == "Plane" then
 			local mounted = state.vehicle:GetAttribute("MountedWeapon")
@@ -7875,10 +8176,12 @@ end
 	mid-fight without giving up your rifle.
 ]]
 local function fireWeapon(player: Player, weaponName: string, requestedDirection: any)
-	if typeof(requestedDirection) ~= "Vector3" then
-		return
-	end
-	if requestedDirection.Magnitude < 0.001 then
+	-- NaN slips past a magnitude check, because every comparison involving
+	-- NaN is false. Util.SaneDirection is the only guard here that actually
+	-- rejects it, and it hands back the normalised vector so nothing
+	-- downstream has to remember to do that.
+	local direction = Util.SaneDirection(requestedDirection)
+	if not direction then
 		return
 	end
 
@@ -7921,17 +8224,56 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 		return
 	end
 
-	-- A mounted gun cannot be carried around on foot.
-	if spec.MountedOnly and not state.vehicle then
+	-- A mounted gun cannot be carried around on foot, and a wrecked vehicle
+	-- is not a vehicle.
+	if spec.MountedOnly and not (state.vehicle and state.vehicle.Parent) then
 		return
+	end
+
+	--[[
+		Is the client shooting roughly where it is looking?
+
+		Config.Combat.AutoAimServerToleranceDegrees has claimed since it was
+		written that "the server re-checks aim against this wider cone before
+		trusting a shot". It did not. Nothing checked the direction against
+		the character at all, so a hostile client could send a vector
+		pointing straight at somebody behind them and the server would
+		happily trace it -- a silent 360-degree aimbot, needing no more than
+		one line in a console.
+
+		The cone is deliberately generous. It has to cover the client's own
+		auto-aim snap, the gunner seats, and a few frames of latency between
+		the client aiming and the server looking. It is not there to make
+		aiming hard; it is there to make "behind me" impossible.
+	]]
+	local aimReference: Vector3? = nil
+	if state.vehicle and state.vehicle.Parent then
+		-- On a mounted gun the barrel does the aiming, not the head.
+		local barrel = state.vehicle:FindFirstChild("Barrel", true)
+		if barrel and barrel:IsA("BasePart") then
+			aimReference = barrel.CFrame.LookVector
+		end
+	elseif humanoid.RootPart then
+		local head = character and character:FindFirstChild("Head")
+		aimReference = if head and head:IsA("BasePart")
+			then head.CFrame.LookVector
+			else humanoid.RootPart.CFrame.LookVector
+	end
+
+	if aimReference and aimReference.Magnitude > 0.001 then
+		local tolerance = Config.Combat.AutoAimServerToleranceDegrees
+		-- Doubled, and then some. The head's own facing lags the camera on
+		-- the client, so a tight cone would reject honest shots taken while
+		-- turning -- which is most of them.
+		if Util.AngleBetween(aimReference, direction) > tolerance * 3.4 then
+			return
+		end
 	end
 
 	slot.nextFireAt = now + spec.Cooldown
 	if not Config.InfiniteAmmo then
 		slot.ammo -= 1
 	end
-
-	local direction = requestedDirection.Unit
 
 	-- Fries give you three barrels for a while; normally this is just one.
 	local barrels = PlayerState.BarrelCount(player)
@@ -8045,12 +8387,20 @@ end
 ]]
 local function handleMelee(player: Player)
 	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid or humanoid.Health <= 0 then
 		return
 	end
-	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local root = character:FindFirstChild("HumanoidRootPart")
 	if not root or not root:IsA("BasePart") then
+		return
+	end
+
+	-- You cannot punch from the driver's seat of a tank.
+	if humanoid.SeatPart then
 		return
 	end
 
@@ -8080,12 +8430,29 @@ local function handleMelee(player: Player)
 			continue
 		end
 
+		-- Dead men cannot be knifed again.
+		local otherHumanoid = otherCharacter and otherCharacter:FindFirstChildOfClass("Humanoid")
+		if not otherHumanoid or otherHumanoid.Health <= 0 then
+			continue
+		end
+
 		local toTarget = otherRoot.Position - root.Position
 		local distance = toTarget.Magnitude
 		-- Has to be in front of you, not merely nearby.
 		if distance <= bestDistance and Util.AngleBetween(facing, toTarget) < 70 then
-			best = other
-			bestDistance = distance
+			-- And you have to be able to reach them. Distance and a cone
+			-- alone let you knife somebody through a solid wall, which at
+			-- nine studs of range happens constantly in a city map full of
+			-- two-stud partitions.
+			local blocked = workspace:Raycast(
+				root.Position,
+				toTarget,
+				Util.RayParams({ character, otherCharacter })
+			)
+			if not blocked then
+				best = other
+				bestDistance = distance
+			end
 		end
 	end
 
@@ -8117,7 +8484,9 @@ end
 
 --[[ Gunners tell the server where they are looking; the turret follows. ]]
 local function handleAim(player: Player, worldTarget: any)
-	if typeof(worldTarget) ~= "Vector3" then
+	-- A NaN here reached HingeConstraint.TargetAngle, which is a poisoned
+	-- turret that no longer responds to anything.
+	if not Util.IsSaneVector(worldTarget) then
 		return
 	end
 	local state = PlayerState.Get(player)
@@ -8226,7 +8595,7 @@ return WeaponService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">WildlifeService</string>
             <string name="Source"><![CDATA[--!strict
@@ -9051,27 +9420,27 @@ return WildlifeService
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="28">
+  <Item class="SoundService" referent="29">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterGui" referent="29">
+  <Item class="StarterGui" referent="30">
     <Properties>
       <string name="Name">StarterGui</string>
       <bool name="ResetPlayerGuiOnSpawn">false</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="30">
+  <Item class="StarterPlayer" referent="31">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="31">
+    <Item class="StarterPlayerScripts" referent="32">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="32">
+      <Item class="LocalScript" referent="33">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
@@ -9088,6 +9457,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
+local Shot = require(Shared:WaitForChild("Shot"))
 
 local modules = script:WaitForChild("modules")
 local Hud = require(modules:WaitForChild("Hud"))
@@ -9284,6 +9654,28 @@ workspace.DescendantAdded:Connect(function(descendant)
 	Feel.ShakeFrom(blast.Position, math.clamp(radius * 0.06, 0.8, 3.6), radius * 2.6)
 end)
 
+--[[ Somebody else's shot. Ours was drawn locally the moment we fired. ]]
+Remotes.Event("ShotFired").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	if typeof(payload.origin) ~= "Vector3" or typeof(payload.endPoint) ~= "Vector3" then
+		return
+	end
+	local colour = if typeof(payload.color) == "Color3"
+		then payload.color
+		else Color3.fromRGB(255, 240, 180)
+	Shot.Full(
+		payload.origin,
+		payload.endPoint,
+		colour,
+		if typeof(payload.normal) == "Vector3" then payload.normal else nil
+	)
+	if typeof(payload.sound) == "string" then
+		Sound.At(payload.sound, payload.origin)
+	end
+end)
+
 --[[ The scoreboard we asked for, or the one pushed at the end of a round. ]]
 Remotes.Event("Scoreboard").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" or typeof(payload.rows) ~= "table" then
@@ -9346,11 +9738,11 @@ end)
 print("[Nuclear Mud Arena] Client ready. WASD drives, F mega-detonates.")
 ]]></string>
         </Properties>
-        <Item class="Folder" referent="33">
+        <Item class="Folder" referent="34">
           <Properties>
             <string name="Name">modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="34">
+          <Item class="ModuleScript" referent="35">
             <Properties>
               <string name="Name">Controls</string>
               <string name="Source"><![CDATA[--!strict
@@ -9379,6 +9771,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
+local Shot = require(Shared:WaitForChild("Shot"))
 
 local Hud = require(script.Parent:WaitForChild("Hud"))
 local Feel = require(script.Parent:WaitForChild("Feel"))
@@ -9395,6 +9788,9 @@ type ArsenalEntry = {
 	MagSize: number,
 	Cooldown: number,
 	Recoil: number,
+	Range: number,
+	Color: Color3,
+	SoundName: string,
 	Automatic: boolean,
 	ZoomFov: number?,
 	ZoomLevels: { number }?,
@@ -9563,7 +9959,7 @@ end
 
 -- ==================================================================== FIRING ==
 
-local nextKick = 0
+local nextShotFeedback = 0
 
 local function tryFire()
 	local spec = arsenal[effectiveWeaponName()]
@@ -9579,21 +9975,46 @@ local function tryFire()
 	-- its own, and the server's is the one that counts.
 	nextLocalFire = now + 0.03
 
-	local _origin, direction = currentAimDirection()
-	if not direction then
+	local origin, direction = currentAimDirection()
+	if not origin or not direction then
 		return
 	end
 
 	Remotes.Event("FireWeapon"):FireServer(direction)
 
-	-- Kick the camera, gated on the weapon's REAL cooldown rather than the
-	-- loose network one above. Both sides read the same Config, so this is
-	-- the same rate the server will actually accept shots at, and the view
-	-- does not buzz at 33 Hz while a sniper fires once a second and a half.
-	if now >= nextKick then
-		nextKick = now + spec.Cooldown * 0.9
-		Feel.Kick(spec.Recoil)
+	--[[
+		Everything you see and hear, now, on this machine.
+
+		Gated on the weapon's REAL cooldown rather than the loose network one
+		above. Both sides read the same Config, so this is the same rate the
+		server will actually accept shots at -- which means what you see is
+		what happened, without waiting to be told.
+
+		Before this, the flash, the bang and the tracer were all built on the
+		server and replicated back, so every shot carried a full round trip
+		of delay. That is the single biggest reason the guns felt sluggish,
+		and it is not something you can tune your way out of.
+	]]
+	if now < nextShotFeedback then
+		return
 	end
+	nextShotFeedback = now + spec.Cooldown * 0.9
+
+	Feel.Kick(spec.Recoil)
+	Sound.Flat(spec.SoundName, 0.65)
+
+	local muzzle = origin + direction * 2
+	-- Trace it locally too, so the tracer stops at the wall rather than
+	-- carrying on through it. This raycast decides nothing: the server does
+	-- its own, and the server's is the one that deals damage.
+	local ignore: { Instance } = {}
+	local character = player.Character
+	if character then
+		table.insert(ignore, character)
+	end
+	local look = workspace:Raycast(origin, direction * spec.Range, Util.RayParams(ignore))
+	local endPoint = if look then look.Position else origin + direction * spec.Range
+	Shot.Full(muzzle, endPoint, spec.Color, if look then look.Normal else nil)
 end
 
 -- ==================================================================== ZOOMING ==
@@ -9758,9 +10179,15 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch
-	then
+	--[[
+		Left click fires. A raw touch does NOT.
+
+		Touch used to be in here with the mouse, which meant any drag on a
+		phone screen -- the only way to look around on a phone -- fired the
+		gun continuously for as long as your thumb was moving. Touch players
+		fire with the FIRE button, which drives the same code directly.
+	]]
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		firing = true
 		tryFire()
 		return
@@ -9833,9 +10260,7 @@ local function onInputEnded(input: InputObject)
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch
-	then
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		firing = false
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
 		Remotes.Event("SetTurbo"):FireServer(false)
@@ -10125,6 +10550,9 @@ function Controls.Start()
 			MagSize = spec.MagSize,
 			Cooldown = spec.Cooldown,
 			Recoil = spec.Recoil or 0.8,
+			Range = spec.Range,
+			Color = spec.Color,
+			SoundName = Sound.ForWeapon(spec),
 			Automatic = spec.Automatic == true,
 			ZoomFov = spec.ZoomFov,
 			ZoomLevels = spec.ZoomLevels,
@@ -10171,7 +10599,7 @@ return Controls
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="35">
+          <Item class="ModuleScript" referent="36">
             <Properties>
               <string name="Name">Feel</string>
               <string name="Source"><![CDATA[--!strict
@@ -10321,7 +10749,7 @@ return Feel
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="36">
+          <Item class="ModuleScript" referent="37">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--!strict
@@ -10339,6 +10767,7 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
 local Util = require(Shared:WaitForChild("Util"))
 local Radar = require(script.Parent:WaitForChild("Radar"))
 
@@ -10370,6 +10799,23 @@ local killFeed: Frame
 local medalLabel: TextLabel
 local weaponBar: Frame
 local slotChips: { [number]: TextLabel } = {}
+
+--[[
+	How many weapon slots the bar needs.
+
+	Read off Config rather than written down, because it was written down as
+	6 while the weapon table had grown a 7th -- so poop and the hunter drone
+	had no chip on the bar and picking one up showed nothing at all.
+]]
+local SLOT_COUNT = (function(): number
+	local highest = 1
+	for _, spec in Config.Weapons do
+		if spec.Slot > highest then
+			highest = spec.Slot
+		end
+	end
+	return highest
+end)()
 local weaponLabel: TextLabel
 local ammoLabel: TextLabel
 local statsLabel: TextLabel
@@ -10751,7 +11197,7 @@ function Hud.Build()
 	barLayout.Padding = UDim.new(0, 6)
 	barLayout.Parent = weaponBar
 
-	for slot = 1, 6 do
+	for slot = 1, SLOT_COUNT do
 		local chip = makeFrame(weaponBar, {
 			Size = UDim2.fromOffset(104, 36),
 			BackgroundColor3 = Color3.fromRGB(28, 32, 38),
@@ -11167,7 +11613,7 @@ function Hud.SetLoadout(names: { [number]: string }, activeSlot: number)
 		return
 	end
 
-	for slot = 1, 6 do
+	for slot = 1, SLOT_COUNT do
 		local label = slotChips[slot]
 		if label then
 			label.Text = names[slot] or "—"
@@ -11486,7 +11932,7 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="37">
+          <Item class="ModuleScript" referent="38">
             <Properties>
               <string name="Name">Radar</string>
               <string name="Source"><![CDATA[--!strict
@@ -11827,7 +12273,7 @@ return Radar
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="38">
+  <Item class="Workspace" referent="39">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

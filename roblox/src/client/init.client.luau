@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
+local Shot = require(Shared:WaitForChild("Shot"))
 
 local modules = script:WaitForChild("modules")
 local Hud = require(modules:WaitForChild("Hud"))
@@ -206,6 +207,28 @@ workspace.DescendantAdded:Connect(function(descendant)
 	local radius: number = blast.BlastRadius
 	-- Bigger blast, harder shake and felt from further away.
 	Feel.ShakeFrom(blast.Position, math.clamp(radius * 0.06, 0.8, 3.6), radius * 2.6)
+end)
+
+--[[ Somebody else's shot. Ours was drawn locally the moment we fired. ]]
+Remotes.Event("ShotFired").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	if typeof(payload.origin) ~= "Vector3" or typeof(payload.endPoint) ~= "Vector3" then
+		return
+	end
+	local colour = if typeof(payload.color) == "Color3"
+		then payload.color
+		else Color3.fromRGB(255, 240, 180)
+	Shot.Full(
+		payload.origin,
+		payload.endPoint,
+		colour,
+		if typeof(payload.normal) == "Vector3" then payload.normal else nil
+	)
+	if typeof(payload.sound) == "string" then
+		Sound.At(payload.sound, payload.origin)
+	end
 end)
 
 --[[ The scoreboard we asked for, or the one pushed at the end of a round. ]]
