@@ -343,6 +343,40 @@ local function fitOutHumanoid(inst)
 	props.Move = function() end
 end
 
+--[[
+	A signal, for harnesses that do not load serverstubs.
+
+	The instance stand-ins below hand out signals for things like
+	ProximityPrompt.Triggered. They used to write `SIGNAL and SIGNAL() or nil`,
+	and SIGNAL is defined in serverstubs -- so in the map harness, which
+	loads only this file, every one of those came out nil and any builder
+	that wired up a prompt threw. Silently, because nil is a perfectly good
+	value right up until something calls :Connect on it.
+]]
+local function localSignal()
+	local handlers = {}
+	return {
+		Connect = function(_, fn)
+			table.insert(handlers, fn)
+			return { Disconnect = function() end }
+		end,
+		Wait = function() end,
+		_handlers = handlers,
+		_fire = function(...)
+			for _, fn in handlers do fn(...) end
+		end,
+	}
+end
+
+local function anySignal()
+	-- Prefer the shared one when it exists, so a test that inspects
+	-- SIGNAL-made signals still sees the same shape.
+	if SIGNAL then
+		return SIGNAL()
+	end
+	return localSignal()
+end
+
 local function newInstance(class)
 	STATS.created += 1
 	STATS.byClass[class] = (STATS.byClass[class] or 0) + 1
@@ -379,14 +413,20 @@ local function newInstance(class)
 		props.Play = function() end
 		props.Stop = function() end
 	elseif class == "Explosion" then
-		props.Hit = SIGNAL and SIGNAL() or nil
+		props.Hit = anySignal()
+	elseif class == "ProximityPrompt" then
+		-- Prompts carry their own signals; without Triggered, every builder
+		-- that wires one up throws while laying out the map.
+		props.Triggered = anySignal()
+		props.PromptShown = anySignal()
+		props.PromptHidden = anySignal()
 	elseif class == "TextButton" or class == "ImageButton" then
 		-- Buttons carry their own click signals, so a test can tap one and
 		-- see what happens rather than only that it was created.
-		props.Activated = SIGNAL and SIGNAL() or nil
-		props.MouseButton1Click = SIGNAL and SIGNAL() or nil
-		props.MouseButton1Down = SIGNAL and SIGNAL() or nil
-		props.MouseButton1Up = SIGNAL and SIGNAL() or nil
+		props.Activated = anySignal()
+		props.MouseButton1Click = anySignal()
+		props.MouseButton1Down = anySignal()
+		props.MouseButton1Up = anySignal()
 	end
 
 	return self

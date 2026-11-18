@@ -285,13 +285,17 @@ local function muzzleFor(player: Player): Vector3?
 	local state = PlayerState.Get(player)
 
 	if state.vehicle and state.vehicle.Parent then
-		local barrel = state.vehicle:FindFirstChild("Barrel", true)
-		if barrel and barrel:IsA("BasePart") then
-			local muzzle = barrel:FindFirstChild("Muzzle")
-			if muzzle and muzzle:IsA("Attachment") then
-				return muzzle.WorldPosition
+		local isMountedUser = state.seatRole == "Gunner"
+			or (state.seatRole == "Driver" and state.vehicle:GetAttribute("VehicleKind") == "Plane")
+		if isMountedUser then
+			local barrel = state.vehicle:FindFirstChild("Barrel", true)
+			if barrel and barrel:IsA("BasePart") then
+				local muzzle = barrel:FindFirstChild("Muzzle")
+				if muzzle and muzzle:IsA("Attachment") then
+					return muzzle.WorldPosition
+				end
+				return barrel.Position
 			end
-			return barrel.Position
 		end
 	end
 
@@ -354,13 +358,17 @@ local function beginReload(player: Player, weaponName: string)
 		return
 	end
 
-	slot.reloadingUntil = os.clock() + spec.ReloadTime
+	local expectedUntil = os.clock() + spec.ReloadTime
+	slot.reloadingUntil = expectedUntil
 	PlayerState.Changed.Fire(player)
 
 	task.delay(spec.ReloadTime, function()
+		if not player.Parent then
+			return
+		end
 		local current = PlayerState.Get(player)
 		local currentSlot = current.weapons[weaponName]
-		if currentSlot then
+		if currentSlot and currentSlot.reloadingUntil == expectedUntil then
 			currentSlot.ammo = spec.MagSize
 			currentSlot.reloadingUntil = 0
 			PlayerState.Changed.Fire(player)
@@ -461,13 +469,13 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 		aiming hard; it is there to make "behind me" impossible.
 	]]
 	local aimReference: Vector3? = nil
-	if state.vehicle and state.vehicle.Parent then
-		-- On a mounted gun the barrel does the aiming, not the head.
+	if state.vehicle and state.vehicle.Parent and spec.MountedOnly then
 		local barrel = state.vehicle:FindFirstChild("Barrel", true)
 		if barrel and barrel:IsA("BasePart") then
 			aimReference = barrel.CFrame.LookVector
 		end
-	elseif humanoid.RootPart then
+	end
+	if not aimReference and humanoid.RootPart then
 		local head = character and character:FindFirstChild("Head")
 		aimReference = if head and head:IsA("BasePart")
 			then head.CFrame.LookVector
@@ -476,17 +484,18 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 
 	if aimReference and aimReference.Magnitude > 0.001 then
 		local tolerance = Config.Combat.AutoAimServerToleranceDegrees
-		-- Doubled, and then some. The head's own facing lags the camera on
-		-- the client, so a tight cone would reject honest shots taken while
-		-- turning -- which is most of them.
 		if Util.AngleBetween(aimReference, direction) > tolerance * 3.4 then
 			return
 		end
 	end
 
+	if spec.AmmoFromPickupsOnly and slot.ammo <= 0 then
+		return
+	end
+
 	slot.nextFireAt = now + spec.Cooldown
-	if not Config.InfiniteAmmo then
-		slot.ammo -= 1
+	if (not Config.InfiniteAmmo) or spec.AmmoFromPickupsOnly then
+		slot.ammo = math.max(0, slot.ammo - 1)
 	end
 
 	-- Fries give you three barrels for a while; normally this is just one.
@@ -496,9 +505,8 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 	for barrel = 1, barrels do
 		local barrelDirection = direction
 		if barrels > 1 then
-			-- Fan the extra barrels out evenly either side of where you aimed.
 			local offset = (barrel - (barrels + 1) * 0.5) * barrelSpread
-			barrelDirection = (CFrame.new(Vector3.zero, direction) * CFrame.Angles(0, math.rad(offset), 0)).LookVector
+			barrelDirection = (Util.LookAt(Vector3.zero, direction) * CFrame.Angles(0, math.rad(offset), 0)).LookVector
 		end
 
 		if spec.Kind == "Hitscan" then
@@ -766,7 +774,7 @@ function WeaponService.Start()
 	end)
 
 	Remotes.Event("SetPedal").OnServerEvent:Connect(function(player, value)
-		if typeof(value) == "number" then
+		if typeof(value) == "number" and value == value and math.abs(value) < math.huge then
 			VehicleService.SetPedal(player, value)
 		end
 	end)

@@ -171,6 +171,8 @@ service("Lighting", {})
 -- Raycasts and spatial queries find nothing; combat is not what we are testing.
 rawget(workspace, "_props").Raycast = function() return nil end
 rawget(workspace, "_props").GetPartBoundsInRadius = function() return {} end
+-- The box query, used by the chairlift to find a vehicle parked on a deck.
+rawget(workspace, "_props").GetPartBoundsInBox = function() return {} end
 
 game = {
 	GetService = function(_, name)

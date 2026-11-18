@@ -25,12 +25,43 @@
 	terrain buoyancy is not.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
 
 local ResortService = {}
+
+type LiftCarrier = {
+	model: Model,
+	deck: BasePart,
+	hanger: BasePart,
+	phase: number,
+	lastPos: Vector3,
+	lockedVehicle: Model?,
+	lockWeld: WeldConstraint?,
+	wasAtStation: boolean,
+}
+
+type LiftSystem = {
+	bottomDeck: Vector3,
+	topDeck: Vector3,
+	cableBottom: Vector3,
+	cableTop: Vector3,
+	dir: Vector3,
+	right: Vector3,
+	laneOffset: number,
+	carriers: { LiftCarrier },
+	bullwheels: { BasePart },
+}
+
+local activeLift: LiftSystem? = nil
+local liftStarted = false
+local CARRIER_COUNT = 6
+local CARRIER_SPEED = 0.028 -- full loop fraction per second (~18s one-way)
+local STATION_DWELL = 0.045 -- slow boarding zone at each end
 
 export type ResortBuild = {
 	-- Where a tube can be found, on the river and at the mountain top.
@@ -105,14 +136,14 @@ local function riverRun(from: Vector3, to: Vector3, parent: Instance)
 		Parent = parent,
 	})
 
-	-- The current.
+	-- The current (CanQuery = true so tubes and swimmers detect FlowZone).
 	local flow = Util.Part({
 		Name = "FlowZone",
 		Size = Vector3.new(WATER_WIDTH, 10, length),
 		CFrame = facing * CFrame.new(0, 5, 0),
 		Transparency = 1,
 		CanCollide = false,
-		CanQuery = false,
+		CanQuery = true,
 		CanTouch = true,
 		Parent = parent,
 	})
@@ -343,13 +374,13 @@ local function tableTop(centre: Vector3, heading: Vector3, scale: number, parent
 
 	local facing = CFrame.lookAt(centre, centre + flat)
 
-	-- The run-up kicker.
+	-- The run-up kicker (uphill side, +Z in facing space).
 	Util.Part({
 		Name = "JumpKicker",
 		Size = Vector3.new(width, 2.5, 22 * scale),
 		CFrame = facing
-			* CFrame.new(0, lift * 0.5, -(deck * 0.5 + 11 * scale))
-			* CFrame.Angles(math.rad(-16), 0, 0),
+			* CFrame.new(0, lift * 0.5, deck * 0.5 + 11 * scale)
+			* CFrame.Angles(math.rad(16), 0, 0),
 		Color = Color3.fromRGB(236, 242, 250),
 		Material = Enum.Material.Snow,
 		Parent = parent,
@@ -365,13 +396,13 @@ local function tableTop(centre: Vector3, heading: Vector3, scale: number, parent
 		Parent = parent,
 	})
 
-	-- The lip you leave from.
+	-- The lip you leave from (downhill side, -Z in facing space).
 	local lip = Util.Part({
 		Name = "JumpLip",
 		Size = Vector3.new(width, 2.5, 12 * scale),
 		CFrame = facing
-			* CFrame.new(0, lift + 1.6, deck * 0.5 + 6 * scale)
-			* CFrame.Angles(math.rad(13), 0, 0),
+			* CFrame.new(0, lift + 1.6, -(deck * 0.5 + 6 * scale))
+			* CFrame.Angles(math.rad(-14), 0, 0),
 		Color = Color3.fromRGB(246, 250, 255),
 		Material = Enum.Material.Snow,
 		Parent = parent,
@@ -465,68 +496,388 @@ end
 	The carriers themselves are built and moved by LiftService; this lays
 	down the structure and hands back the two stations.
 ]]
+--[[ Compute world position and facing of a chairlift carrier at loop phase t in [0, 1). ]]
+local function carrierPose(lift: LiftSystem, t: number): (Vector3, CFrame, boolean)
+	local phase = t % 1
+	local bottomD = lift.bottomDeck
+	local topD = lift.topDeck
+	local right = lift.right
+	local lane = lift.laneOffset
+	local dir = lift.dir
+
+	-- 0.00..0.46: ascending on +right lane
+	-- 0.46..0.50: top bullwheel turnaround (boarding dwell)
+	-- 0.50..0.96: descending on -right lane
+	-- 0.96..1.00: bottom bullwheel turnaround (boarding dwell)
+	if phase < 0.46 then
+		local u = phase / 0.46
+		local pos = bottomD:Lerp(topD, u) + right * lane
+		local atStation = u < STATION_DWELL or u > (1 - STATION_DWELL)
+		return pos, CFrame.lookAt(pos, pos + dir), atStation
+	elseif phase < 0.50 then
+		local u = (phase - 0.46) / 0.04
+		local ang = u * math.pi
+		local offset = right * (math.cos(ang) * lane) + dir * (math.sin(ang) * lane)
+		local pos = topD + offset
+		local tangent = -right * math.sin(ang) + dir * math.cos(ang)
+		return pos, CFrame.lookAt(pos, pos + tangent), true
+	elseif phase < 0.96 then
+		local u = (phase - 0.50) / 0.46
+		local pos = topD:Lerp(bottomD, u) - right * lane
+		local atStation = u < STATION_DWELL or u > (1 - STATION_DWELL)
+		return pos, CFrame.lookAt(pos, pos - dir), atStation
+	else
+		local u = (phase - 0.96) / 0.04
+		local ang = math.pi + u * math.pi
+		local offset = right * (math.cos(ang) * lane) + dir * (math.sin(ang) * lane)
+		local pos = bottomD + offset
+		local tangent = -right * math.sin(ang) + dir * math.cos(ang)
+		return pos, CFrame.lookAt(pos, pos + tangent), true
+	end
+end
+
+local function unlockCarrierVehicle(carrier: LiftCarrier)
+	if carrier.lockWeld then
+		carrier.lockWeld:Destroy()
+		carrier.lockWeld = nil
+	end
+	if carrier.lockedVehicle then
+		if carrier.lockedVehicle.Parent then
+			carrier.lockedVehicle:SetAttribute("LiftLocked", false)
+		end
+		carrier.lockedVehicle = nil
+	end
+end
+
+--[[ Lock any vehicle parked directly on top of a carrier deck. ]]
+local function tryLockVehicleOnDeck(carrier: LiftCarrier)
+	if carrier.lockedVehicle and carrier.lockedVehicle.Parent then
+		return
+	end
+	unlockCarrierVehicle(carrier)
+
+	local regionCf = carrier.deck.CFrame * CFrame.new(0, 4.5, 0)
+	local regionSize = Vector3.new(17, 7, 24)
+	local parts = workspace:GetPartBoundsInBox(regionCf, regionSize)
+	for _, part in parts do
+		local model = part:FindFirstAncestorOfClass("Model")
+		if model and model:GetAttribute("VehicleKind") and model.PrimaryPart and not model:GetAttribute("LiftLocked") then
+			local chassis = model.PrimaryPart
+			if not chassis.Anchored then
+				local weld = Instance.new("WeldConstraint")
+				weld.Name = "LiftLock"
+				weld.Part0 = carrier.deck
+				weld.Part1 = chassis
+				weld.Parent = carrier.deck
+				model:SetAttribute("LiftLocked", true)
+				carrier.lockedVehicle = model
+				carrier.lockWeld = weld
+				return
+			end
+		end
+	end
+end
+
+local function buildCarrier(lift: LiftSystem, index: number, parent: Instance): LiftCarrier
+	local model = Instance.new("Model")
+	model.Name = `LiftCarrier_{index}`
+
+	local initialPhase = (index - 1) / CARRIER_COUNT
+	local pos, cf = carrierPose(lift, initialPhase)
+
+	-- Wide steel vehicle-capable platform deck (fits G-Wagon, Hummer, Jeep, and players).
+	local deck = Util.Part({
+		Name = "CarrierDeck",
+		Size = Vector3.new(18, 1.8, 26),
+		CFrame = cf,
+		Color = Color3.fromRGB(86, 92, 102),
+		Material = Enum.Material.DiamondPlate,
+		Anchored = true,
+		Parent = model,
+	})
+	model.PrimaryPart = deck
+
+	-- Low hazard side curbs so cars stay centered during the climb.
+	for _, side in { -1, 1 } do
+		local curb = Util.Part({
+			Name = "CarrierCurb",
+			Size = Vector3.new(1.2, 2.2, 26),
+			CFrame = cf * CFrame.new(side * 8.6, 1.8, 0),
+			Color = Color3.fromRGB(224, 178, 36),
+			Material = Enum.Material.Metal,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(deck, curb)
+	end
+
+	-- Overhead steel gantry arch + cable hanger pylon.
+	local hanger = Util.Part({
+		Name = "CarrierHanger",
+		Size = Vector3.new(1.4, 24, 1.4),
+		CFrame = cf * CFrame.new(0, 13, 0),
+		Color = Color3.fromRGB(58, 62, 70),
+		Material = Enum.Material.Metal,
+		Anchored = false,
+		CanCollide = false,
+		Massless = true,
+		Parent = model,
+	})
+	Util.Weld(deck, hanger)
+
+	-- Warm safety beacon at the top of the hanger so moving carriers are visible from afar.
+	local beacon = Util.Part({
+		Name = "CarrierBeacon",
+		Size = Vector3.new(1.6, 1.6, 1.6),
+		CFrame = cf * CFrame.new(0, 24.5, 0),
+		Shape = Enum.PartType.Ball,
+		Color = Color3.fromRGB(255, 200, 90),
+		Material = Enum.Material.Neon,
+		Anchored = false,
+		CanCollide = false,
+		CanQuery = false,
+		Massless = true,
+		Parent = model,
+	})
+	Util.Weld(deck, beacon)
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Toggle Vehicle Lock"
+	prompt.ObjectText = "Chairlift Carrier"
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 18
+	prompt.Parent = deck
+
+	local carrier: LiftCarrier = {
+		model = model,
+		deck = deck,
+		hanger = hanger,
+		phase = initialPhase,
+		lastPos = pos,
+		lockedVehicle = nil,
+		lockWeld = nil,
+		wasAtStation = true,
+	}
+
+	prompt.Triggered:Connect(function()
+		if carrier.lockedVehicle then
+			unlockCarrierVehicle(carrier)
+		else
+			tryLockVehicleOnDeck(carrier)
+		end
+	end)
+
+	model.Parent = parent
+	return carrier
+end
+
 local function chairlift(bottom: Vector3, top: Vector3, parent: Instance): { Vector3 }
 	local delta = top - bottom
+	local flatDelta = Vector3.new(delta.X, 0, delta.Z)
+	local dir = if flatDelta.Magnitude > 0.01 then flatDelta.Unit else Vector3.new(0, 0, 1)
+	local right = Vector3.new(-dir.Z, 0, dir.X)
+	local laneOffset = 12
+	local cableOffset = 25
 	local towers = 6
 
+	-- Grounded steel towers + properly rotated cross-arms perpendicular to the cable.
 	for index = 0, towers do
 		local fraction = index / towers
-		local footBase = bottom + delta * fraction
-		-- Towers stand on the ground, so only the cable follows the climb.
-		local towerHeight = 34 + fraction * 10
+		local cablePoint = bottom + delta * fraction + Vector3.new(0, cableOffset + 3, 0)
+		local columnHeight = math.max(28, cablePoint.Y)
+		local footY = cablePoint.Y - columnHeight
+
 		Util.Part({
 			Name = "LiftTower",
-			Size = Vector3.new(4, towerHeight, 4),
-			CFrame = CFrame.new(footBase + Vector3.new(0, towerHeight * 0.5, 0)),
-			Color = Color3.fromRGB(96, 100, 108),
+			Size = Vector3.new(4.2, columnHeight, 4.2),
+			CFrame = CFrame.new(cablePoint.X, footY + columnHeight * 0.5, cablePoint.Z),
+			Color = Color3.fromRGB(82, 88, 98),
 			Material = Enum.Material.Metal,
 			Parent = parent,
 		})
 
-		-- The arm the cable hangs from.
+		-- Cross-arm oriented perpendicular to the lift direction.
+		local armCf = CFrame.lookAt(cablePoint, cablePoint + dir)
 		Util.Part({
 			Name = "LiftArm",
-			Size = Vector3.new(16, 2, 2),
-			CFrame = CFrame.new(footBase + Vector3.new(0, towerHeight, 0)),
-			Color = Color3.fromRGB(110, 114, 122),
+			Size = Vector3.new(laneOffset * 2 + 4, 2.2, 2.4),
+			CFrame = armCf,
+			Color = Color3.fromRGB(108, 114, 124),
 			Material = Enum.Material.Metal,
 			CanCollide = false,
 			Parent = parent,
 		})
 	end
 
-	-- The cable, in one run per span so it follows the slope.
-	for index = 0, towers - 1 do
-		local a = bottom + delta * (index / towers) + Vector3.new(0, 34 + (index / towers) * 10, 0)
-		local b = bottom + delta * ((index + 1) / towers)
-			+ Vector3.new(0, 34 + ((index + 1) / towers) * 10, 0)
-		local span = b - a
-		Util.Part({
-			Name = "LiftCable",
-			Size = Vector3.new(0.7, 0.7, span.Magnitude),
-			CFrame = CFrame.lookAt(a + span * 0.5, b),
-			Color = Color3.fromRGB(40, 42, 46),
-			Material = Enum.Material.Metal,
-			CanCollide = false,
-			Parent = parent,
-		})
+	-- Dual parallel haul cables (ascending +right lane, descending -right lane).
+	for _, side in { -1, 1 } do
+		for index = 0, towers - 1 do
+			local a = bottom + delta * (index / towers) + Vector3.new(0, cableOffset + 3, 0) + right * (side * laneOffset)
+			local b = bottom + delta * ((index + 1) / towers) + Vector3.new(0, cableOffset + 3, 0) + right * (side * laneOffset)
+			local span = b - a
+			Util.Part({
+				Name = "LiftCable",
+				Size = Vector3.new(0.7, 0.7, span.Magnitude),
+				CFrame = CFrame.lookAt(a + span * 0.5, b),
+				Color = Color3.fromRGB(36, 38, 44),
+				Material = Enum.Material.Metal,
+				CanCollide = false,
+				Parent = parent,
+			})
+		end
 	end
 
-	-- Boarding decks at both ends, flat and wide enough to drive onto.
+	-- Boarding decks + rotating overhead bullwheels at both ends.
 	local stations: { Vector3 } = {}
-	for _, at in { bottom, top } do
+	local bullwheels: { BasePart } = {}
+	for idx, at in { bottom, top } do
+		local deckCf = CFrame.lookAt(at + Vector3.new(0, 1.5, 0), at + Vector3.new(0, 1.5, 0) + dir)
 		Util.Part({
 			Name = "LiftStation",
-			Size = Vector3.new(48, 3, 48),
-			CFrame = CFrame.new(at + Vector3.new(0, 1.5, 0)),
-			Color = Color3.fromRGB(122, 118, 110),
+			Size = Vector3.new(54, 3, 52),
+			CFrame = deckCf,
+			Color = Color3.fromRGB(118, 114, 106),
 			Material = Enum.Material.DiamondPlate,
 			Parent = parent,
 		})
+
+		local wheel = Util.Part({
+			Name = "LiftBullwheel",
+			Size = Vector3.new(2, laneOffset * 2, laneOffset * 2),
+			CFrame = CFrame.new(at + Vector3.new(0, cableOffset + 3, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			Shape = Enum.PartType.Cylinder,
+			Color = Color3.fromRGB(186, 62, 46),
+			Material = Enum.Material.Metal,
+			CanCollide = false,
+			Parent = parent,
+		})
+		table.insert(bullwheels, wheel)
+
+		-- Warm station floodlight for Future lighting contrast.
+		local lamp = Util.Part({
+			Name = "StationLamp",
+			Size = Vector3.new(2.2, 2.2, 2.2),
+			CFrame = CFrame.new(at + Vector3.new(0, cableOffset + 7, 0)),
+			Shape = Enum.PartType.Ball,
+			Color = Color3.fromRGB(255, 224, 150),
+			Material = Enum.Material.Neon,
+			CanCollide = false,
+			CanQuery = false,
+			Parent = parent,
+		})
+		local light = Instance.new("PointLight")
+		light.Color = Color3.fromRGB(255, 220, 155)
+		light.Brightness = 4
+		light.Range = 60
+		light.Shadows = true
+		light.Parent = lamp
+
+		-- Summit timber A-frame lodge shelter.
+		if idx == 2 then
+			local lodgePos = at + right * 34
+			Util.Part({
+				Name = "SummitLodge",
+				Size = Vector3.new(24, 14, 28),
+				CFrame = CFrame.lookAt(lodgePos + Vector3.new(0, 7, 0), lodgePos + Vector3.new(0, 7, 0) + dir),
+				Color = Color3.fromRGB(112, 74, 46),
+				Material = Enum.Material.WoodPlanks,
+				Parent = parent,
+			})
+			Util.Part({
+				Name = "LodgeWindow",
+				Size = Vector3.new(18, 6, 0.8),
+				CFrame = CFrame.lookAt(lodgePos + Vector3.new(0, 8, 0) - dir * 14.1, lodgePos + Vector3.new(0, 8, 0) - dir * 20),
+				Color = Color3.fromRGB(255, 206, 128),
+				Material = Enum.Material.Neon,
+				CanCollide = false,
+				Parent = parent,
+			})
+		end
+
 		table.insert(stations, at + Vector3.new(0, 4, 0))
 	end
 
+	local liftSystem: LiftSystem = {
+		bottomDeck = bottom + Vector3.new(0, 3.9, 0),
+		topDeck = top + Vector3.new(0, 3.9, 0),
+		cableBottom = bottom + Vector3.new(0, cableOffset + 3, 0),
+		cableTop = top + Vector3.new(0, cableOffset + 3, 0),
+		dir = dir,
+		right = right,
+		laneOffset = laneOffset,
+		carriers = {},
+		bullwheels = bullwheels,
+	}
+
+	for i = 1, CARRIER_COUNT do
+		table.insert(liftSystem.carriers, buildCarrier(liftSystem, i, parent))
+	end
+	activeLift = liftSystem
+
 	return stations
+end
+
+function ResortService.Clear()
+	if activeLift then
+		for _, carrier in activeLift.carriers do
+			unlockCarrierVehicle(carrier)
+		end
+		activeLift = nil
+	end
+end
+
+function ResortService.Start()
+	if liftStarted then
+		return
+	end
+	liftStarted = true
+
+	RunService.Heartbeat:Connect(function(deltaTime: number)
+		local lift = activeLift
+		if not lift then
+			return
+		end
+		local dt = math.min(deltaTime, 0.1)
+		if dt <= 0 then
+			return
+		end
+
+		-- Spin the steel bullwheels at both stations.
+		for _, wheel in lift.bullwheels do
+			if wheel.Parent then
+				wheel.CFrame = wheel.CFrame * CFrame.Angles(dt * 0.9, 0, 0)
+			end
+		end
+
+		-- Advance every chairlift carrier smoothly along the closed loop.
+		for _, carrier in lift.carriers do
+			if not carrier.deck.Parent then
+				unlockCarrierVehicle(carrier)
+				continue
+			end
+
+			local _, _, currentlyAtStation = carrierPose(lift, carrier.phase)
+			local stepRate = if currentlyAtStation then CARRIER_SPEED * 0.42 else CARRIER_SPEED
+			carrier.phase = (carrier.phase + stepRate * dt) % 1
+
+			local newPos, newCf, nowAtStation = carrierPose(lift, carrier.phase)
+			local vel = (newPos - carrier.lastPos) / dt
+			carrier.lastPos = newPos
+
+			-- Auto-lock parked cars when leaving a station; auto-release when arriving.
+			if carrier.wasAtStation and not nowAtStation then
+				tryLockVehicleOnDeck(carrier)
+			elseif (not carrier.wasAtStation) and nowAtStation then
+				unlockCarrierVehicle(carrier)
+			end
+			carrier.wasAtStation = nowAtStation
+
+			-- Move the carrier and set AssemblyLinearVelocity so standing players ride smoothly.
+			carrier.deck.CFrame = newCf
+			carrier.deck.AssemblyLinearVelocity = vel
+		end
+	end)
 end
 
 -- ==================================================================== BUILD ==
@@ -542,6 +893,7 @@ end
 	reserves the carnival, so no building is ever put inside it.
 ]]
 function ResortService.Build(mapSize: number, parent: Instance): ResortBuild
+	ResortService.Clear()
 	local half = mapSize * 0.5
 	-- The river sits in the middle of the ring, clear of both the city and
 	-- the boundary wall.
@@ -569,6 +921,27 @@ function ResortService.Build(mapSize: number, parent: Instance): ResortBuild
 	-- One stretch runs through a cave: the only part of the loop that cannot
 	-- be seen into from above or shot at from the towers.
 	cave(loop[6], loop[7], parent)
+	-- Warm cave lanterns along the rock wall for Future lighting depth inside the tunnel.
+	for i = 1, 4 do
+		local lanternPos = loop[6]:Lerp(loop[7], i / 5) + Vector3.new(0, 18, 0)
+		local lantern = Util.Part({
+			Name = "CaveLantern",
+			Size = Vector3.new(1.5, 1.5, 1.5),
+			CFrame = CFrame.new(lanternPos),
+			Shape = Enum.PartType.Ball,
+			Color = Color3.fromRGB(255, 188, 98),
+			Material = Enum.Material.Neon,
+			CanCollide = false,
+			CanQuery = false,
+			Parent = parent,
+		})
+		local glow = Instance.new("PointLight")
+		glow.Color = Color3.fromRGB(255, 182, 92)
+		glow.Brightness = 3.5
+		glow.Range = 46
+		glow.Shadows = true
+		glow.Parent = lantern
+	end
 
 	-- Sniper towers overlooking the water, pulled in off the bank so they
 	-- cover the river rather than stand in it.
@@ -587,6 +960,34 @@ function ResortService.Build(mapSize: number, parent: Instance): ResortBuild
 	local mountainHeight = 170
 	local summit = mountain(mountainCentre, mountainRadius, mountainHeight, parent)
 	offRoadTrail(mountainCentre, mountainRadius, mountainHeight, parent)
+
+	-- Alpine pine trees around the lower timberline for realistic scale and silhouettes.
+	for treeIdx = 1, 14 do
+		local ang = (treeIdx / 14) * math.pi * 2 + 0.25
+		local dist = mountainRadius * (0.98 + (treeIdx % 3) * 0.08)
+		local base = mountainCentre + Vector3.new(math.cos(ang) * dist, 0, math.sin(ang) * dist)
+		Util.Part({
+			Name = "PineTrunk",
+			Size = Vector3.new(2.6, 14, 2.6),
+			CFrame = CFrame.new(base + Vector3.new(0, 7, 0)),
+			Color = Color3.fromRGB(82, 56, 38),
+			Material = Enum.Material.Wood,
+			Parent = parent,
+		})
+		for tier = 1, 3 do
+			local w = 13 - tier * 3
+			Util.Part({
+				Name = "PineFoliage",
+				Size = Vector3.new(w, 6, w),
+				CFrame = CFrame.new(base + Vector3.new(0, 11 + tier * 4.5, 0))
+					* CFrame.Angles(0, math.rad(tier * 30), 0),
+				Color = Color3.fromRGB(36 + tier * 6, 74 + tier * 8, 44 + tier * 4),
+				Material = Enum.Material.Grass,
+				CanCollide = false,
+				Parent = parent,
+			})
+		end
+	end
 
 	-- The ski run comes off the summit and finishes in the water, so you can
 	-- ride a tube off the mountain and straight into the river.

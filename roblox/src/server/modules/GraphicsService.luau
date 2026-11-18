@@ -2,119 +2,150 @@
 --[[
 	GraphicsService — makes it stop looking like a bin of bricks.
 
-	Roblox's default lighting is flat, shadowless and grey, which is most of
-	why a procedurally built map reads as "some blocks". None of this changes
-	a single part: it is all lighting, atmosphere and post-processing, so it
-	costs nothing to build and can be tuned without touching the game.
-
-	No asset IDs are used anywhere — a wrong one throws at runtime — so this
-	works in a place that has never been published.
+	Configures Future PBR lighting, 2022 surface materials, volumetric clouds,
+	realistic river water, atmospheric depth, and balanced filmic post-processing.
+	No external asset IDs are used anywhere, so everything works offline or in
+	an unpublished Studio place without throwing.
 ]]
 
 local Lighting = game:GetService("Lighting")
+local MaterialService = game:GetService("MaterialService")
 
 local GraphicsService = {}
 
---[[ Remove anything we added last time, so this can be re-run safely. ]]
+--[[ Remove previous arena graphics and any default lighting clutter that would stack. ]]
 local function clearPrevious()
 	for _, child in Lighting:GetChildren() do
-		if child:GetAttribute("ArenaGraphics") then
+		if
+			child:GetAttribute("ArenaGraphics")
+			or child:IsA("Sky")
+			or child:IsA("Atmosphere")
+			or child:IsA("PostEffect")
+		then
 			child:Destroy()
+		end
+	end
+
+	local terrain = workspace.Terrain
+	if terrain then
+		for _, child in terrain:GetChildren() do
+			if child:GetAttribute("ArenaGraphics") or child:IsA("Clouds") then
+				child:Destroy()
+			end
 		end
 	end
 end
 
-local function tag(instance: Instance): Instance
+local function tag(instance: Instance, parent: Instance?): Instance
 	instance:SetAttribute("ArenaGraphics", true)
-	instance.Parent = Lighting
+	instance.Parent = parent or Lighting
 	return instance
 end
 
 function GraphicsService.Start()
 	clearPrevious()
 
-	-- Future lighting gives real shadows and light that bounces off surfaces,
-	-- which is the single biggest difference between "blocks" and "a place".
+	-- Future lighting gives real per-pixel shadows, specular highlights, and
+	-- local light pools. Technology is [NotScriptable] in live servers, so both
+	-- assignments stay protected in pcall (and Future is also baked in the place).
 	local ok = pcall(function()
 		Lighting.Technology = Enum.Technology.Future
 	end)
 	if not ok then
-		Lighting.Technology = Enum.Technology.ShadowMap
+		pcall(function()
+			Lighting.Technology = Enum.Technology.ShadowMap
+		end)
 	end
 
-	Lighting.Brightness = 3.1
-	Lighting.ClockTime = 15.2
-	Lighting.GeographicLatitude = 24
-	Lighting.ExposureCompensation = 0.18
-	Lighting.EnvironmentDiffuseScale = 0.55
-	Lighting.EnvironmentSpecularScale = 0.7
+	-- Enable 2022 PBR material textures (normal, roughness, metalness maps) so
+	-- Concrete, Asphalt, Metal, Mud, Snow, Ice, and WoodPlanks catch real light.
+	pcall(function()
+		(MaterialService :: any).Use2022Materials = true
+	end)
+
+	-- Late-afternoon golden hour: lower sun angle casts long architectural
+	-- shadows across streets and gives buildings clear lit vs. shaded faces.
+	Lighting.Brightness = 2.85
+	Lighting.ClockTime = 16.2
+	Lighting.GeographicLatitude = 26
+	Lighting.ExposureCompensation = 0.0
+	Lighting.EnvironmentDiffuseScale = 0.85
+	Lighting.EnvironmentSpecularScale = 1.0
 	Lighting.GlobalShadows = true
-	--[[
-		Contrast is what makes it stop looking like a bin of bricks.
+	pcall(function()
+		Lighting.ShadowSoftness = 0.22
+	end)
 
-		These were set high enough that a sunlit wall and a shadowed alley
-		came out nearly the same grey, and once every surface is the same
-		brightness the shapes stop reading at all -- every building is a flat
-		rectangle again no matter how it is built. Lower ambient and a warmer
-		top shift give sunlit faces somewhere to be bright AGAINST.
-	]]
-	Lighting.Ambient = Color3.fromRGB(48, 52, 64)
-	Lighting.OutdoorAmbient = Color3.fromRGB(88, 96, 116)
-	Lighting.ColorShift_Top = Color3.fromRGB(255, 232, 186)
-	Lighting.ColorShift_Bottom = Color3.fromRGB(70, 78, 96)
-	Lighting.FogEnd = 2200
-	Lighting.FogStart = 400
-	Lighting.FogColor = Color3.fromRGB(150, 162, 178)
+	-- Cool shadowed ambient against warm sunlight gives natural sky-fill contrast.
+	Lighting.Ambient = Color3.fromRGB(38, 44, 58)
+	Lighting.OutdoorAmbient = Color3.fromRGB(76, 86, 108)
+	Lighting.ColorShift_Top = Color3.fromRGB(255, 224, 176)
+	Lighting.ColorShift_Bottom = Color3.fromRGB(58, 68, 88)
 
-	-- Haze and depth. Distant buildings fade instead of standing there in
-	-- full colour, which is most of what sells a big map as big.
+	-- Atmospheric scattering and distance perspective.
 	local atmosphere = Instance.new("Atmosphere")
-	-- Haze at 0.36 with Haze 1.6 was a grey sheet over everything past a
-	-- hundred studs: distant buildings did not fade into depth, they faded
-	-- into porridge. Enough to give depth, not enough to eat the skyline.
-	atmosphere.Density = 0.22
-	atmosphere.Offset = 0.15
-	atmosphere.Color = Color3.fromRGB(196, 200, 208)
-	atmosphere.Decay = Color3.fromRGB(104, 112, 128)
-	atmosphere.Glare = 0.28
-	atmosphere.Haze = 0.8
+	atmosphere.Density = 0.24
+	atmosphere.Offset = 0.2
+	atmosphere.Color = Color3.fromRGB(210, 206, 198)
+	atmosphere.Decay = Color3.fromRGB(96, 108, 130)
+	atmosphere.Glare = 0.34
+	atmosphere.Haze = 0.95
 	tag(atmosphere)
 
-	-- A proper sky rather than the flat blue void.
+	-- Clear physical sky dome with crisp celestial bodies.
 	local sky = Instance.new("Sky")
 	sky.CelestialBodiesShown = true
+	sky.SunAngularSize = 14
+	sky.MoonAngularSize = 9
 	sky.StarCount = 3000
 	tag(sky)
 
-	-- Neon tracers, muzzle flashes and the diamond gun all bloom, which is
-	-- what makes them read as light rather than as coloured plastic.
+	-- Volumetric overhead clouds break up the skyline and cast subtle sky variation.
+	local terrain = workspace.Terrain
+	if terrain then
+		local clouds = Instance.new("Clouds")
+		clouds.Cover = 0.56
+		clouds.Density = 0.68
+		clouds.Color = Color3.fromRGB(236, 230, 220)
+		tag(clouds, terrain)
+
+		-- Realistic water appearance for Terrain water.
+		terrain.WaterWaveSize = 0.18
+		terrain.WaterWaveSpeed = 12
+		terrain.WaterReflectance = 0.85
+		terrain.WaterTransparency = 0.32
+		terrain.WaterColor = Color3.fromRGB(36, 108, 128)
+	end
+
+	-- Selective bloom: high threshold prevents sunlit concrete from clipping to
+	-- flat white while Neon tracers, headlights, and explosions glow vividly.
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.55
-	bloom.Size = 26
-	bloom.Threshold = 1.1
+	bloom.Intensity = 0.38
+	bloom.Size = 24
+	bloom.Threshold = 1.45
 	tag(bloom)
 
 	local sunRays = Instance.new("SunRaysEffect")
-	sunRays.Intensity = 0.14
-	sunRays.Spread = 0.9
+	sunRays.Intensity = 0.16
+	sunRays.Spread = 0.85
 	tag(sunRays)
 
-	-- A gentle warm grade. Everything default-lit in Roblox looks washed out;
-	-- a touch of contrast and saturation does more than any amount of
-	-- rebuilding the parts would.
+	-- Balanced filmic color grade that keeps material grain and texture detail.
 	local grade = Instance.new("ColorCorrectionEffect")
-	grade.Brightness = 0.02
-	grade.Contrast = 0.16
-	grade.Saturation = 0.18
-	grade.TintColor = Color3.fromRGB(255, 248, 240)
+	grade.Brightness = 0.01
+	grade.Contrast = 0.12
+	grade.Saturation = 0.1
+	grade.TintColor = Color3.fromRGB(255, 250, 244)
 	tag(grade)
 
-	-- Very slight, only on the far distance, so aiming is unaffected.
+	-- Kept disabled by default to avoid wasting a full-screen GPU pass during
+	-- hipfire; can be toggled dynamically if a zoomed scope wants shallow DoF.
 	local depth = Instance.new("DepthOfFieldEffect")
-	depth.FarIntensity = 0.12
+	depth.Enabled = false
+	depth.FarIntensity = 0.14
 	depth.NearIntensity = 0
-	depth.FocusDistance = 90
-	depth.InFocusRadius = 900
+	depth.FocusDistance = 120
+	depth.InFocusRadius = 600
 	tag(depth)
 end
 

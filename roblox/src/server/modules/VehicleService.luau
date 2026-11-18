@@ -442,6 +442,7 @@ end
 	somebody else drives: the seat you are in decides which gun is yours.
 ]]
 local function bindSeat(seat: Seat | VehicleSeat, model: Model, role: string)
+	local lastOccupant: Player? = nil
 	seat:GetPropertyChangedSignal("Occupant"):Connect(function()
 		local occupant = seat.Occupant
 
@@ -449,14 +450,12 @@ local function bindSeat(seat: Seat | VehicleSeat, model: Model, role: string)
 			local character = occupant.Parent
 			local player = if character then Players:GetPlayerFromCharacter(character) else nil
 			if player then
+				lastOccupant = player
 				local state = PlayerState.Get(player)
 				state.vehicle = model
 				state.seatRole = role
 				PlayerState.Changed.Fire(player)
 
-				-- Remembered past the moment they get out, so an explosion
-				-- has somebody to credit. A blast with no attacker scores
-				-- nothing and appears in the kill feed as a nameless death.
 				local vehicleState = active[model]
 				if vehicleState and role == "Driver" then
 					vehicleState.lastDriver = player
@@ -465,13 +464,18 @@ local function bindSeat(seat: Seat | VehicleSeat, model: Model, role: string)
 			return
 		end
 
-		-- Somebody just got out. Clear whoever was pointing at this seat.
-		for _, player in Players:GetPlayers() do
-			local state = PlayerState.Get(player)
+		if role == "Driver" and model.Parent then
+			model:SetAttribute("Turbo", false)
+		end
+
+		local departed = lastOccupant
+		lastOccupant = nil
+		if departed and departed.Parent then
+			local state = PlayerState.Get(departed)
 			if state.vehicle == model and state.seatRole == role then
 				state.vehicle = nil
 				state.seatRole = nil
-				PlayerState.Changed.Fire(player)
+				PlayerState.Changed.Fire(departed)
 			end
 		end
 	end)
@@ -519,6 +523,63 @@ function VehicleService.SpawnCar(
 		14,
 		10
 	)
+	-- Realistic automotive details: tinted reflective windshield, headlights with SpotLights, tail lights.
+	local halfW = body.Size.X * 0.5
+	local halfH = body.Size.Y * 0.5
+	local halfL = body.Size.Z * 0.5
+
+	local windshield = Util.Part({
+		Name = "Windshield",
+		Size = Vector3.new(body.Size.X * 0.84, 2.2, 0.35),
+		CFrame = chassis.CFrame * CFrame.new(0, halfH + 1.0, -halfL * 0.36) * CFrame.Angles(math.rad(-26), 0, 0),
+		Color = Color3.fromRGB(36, 52, 68),
+		Material = Enum.Material.Glass,
+		Reflectance = 0.45,
+		Transparency = 0.25,
+		Anchored = false,
+		CanCollide = false,
+		Massless = true,
+		Parent = model,
+	})
+	Util.Weld(chassis, windshield)
+
+	for _, side in { -1, 1 } do
+		local headLight = Util.Part({
+			Name = "Headlight",
+			Size = Vector3.new(1.5, 0.8, 0.3),
+			CFrame = chassis.CFrame * CFrame.new(side * (halfW - 1.3), 0.1, -halfL - 0.1),
+			Color = Color3.fromRGB(255, 246, 214),
+			Material = Enum.Material.Neon,
+			Anchored = false,
+			CanCollide = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(chassis, headLight)
+
+		local beam = Instance.new("SpotLight")
+		beam.Face = Enum.NormalId.Front
+		beam.Color = Color3.fromRGB(255, 244, 210)
+		beam.Brightness = 3.2
+		beam.Range = 54
+		beam.Angle = 52
+		beam.Shadows = false
+		beam.Parent = headLight
+
+		local tailLight = Util.Part({
+			Name = "Taillight",
+			Size = Vector3.new(1.6, 0.7, 0.3),
+			CFrame = chassis.CFrame * CFrame.new(side * (halfW - 1.3), 0.2, halfL + 0.1),
+			Color = Color3.fromRGB(235, 36, 36),
+			Material = Enum.Material.Neon,
+			Anchored = false,
+			CanCollide = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(chassis, tailLight)
+	end
+
 	local seat = addDriverSeat(chassis, model, Vector3.new(0, body.Size.Y * 0.5 + 0.5, 1))
 	bindSeat(seat, model, "Driver")
 	addVehicleLabel(chassis, `{body.Name} · {tier.Name}`, Color3.fromRGB(230, 240, 250))
@@ -763,17 +824,27 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 		Name = "Chassis",
 		Size = Vector3.new(4, 4, 18),
 		CFrame = CFrame.new(position + Vector3.new(0, 8, 0)),
-		Shape = Enum.PartType.Cylinder,
-		Color = spec.Color,
-		Material = Enum.Material.Metal,
+		Transparency = 1,
 		Anchored = false,
 		CustomPhysicalProperties = PhysicalProperties.new(0.4, 0.3, 0.2, 1, 1),
 		Parent = model,
 	})
-	-- A cylinder points along its own X, but we want it pointing forwards,
-	-- so the visible shell is rotated a quarter turn onto Z.
-	body.CFrame = CFrame.new(position + Vector3.new(0, 8, 0)) * CFrame.Angles(0, math.rad(90), 0)
 	model.PrimaryPart = body
+
+	-- Visual cylindrical torpedo hull (Size.X = length 18, Y/Z = diameter 4) rotated onto Z.
+	local shell = Util.Part({
+		Name = "TorpedoShell",
+		Size = Vector3.new(18, 4, 4),
+		CFrame = body.CFrame * CFrame.Angles(0, math.rad(90), 0),
+		Shape = Enum.PartType.Cylinder,
+		Color = spec.Color,
+		Material = Enum.Material.Metal,
+		Anchored = false,
+		CanCollide = false,
+		Massless = true,
+		Parent = model,
+	})
+	Util.Weld(body, shell)
 
 	-- The saddle. This is the bit you actually sit on.
 	-- It is a VehicleSeat rather than a plain Seat specifically so that WASD
@@ -843,10 +914,9 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 		velocity = velocity,
 		orientation = orientation,
 		heading = body.CFrame.Rotation,
-		-- A second on the pad before it will go off, so it does not detonate
-		-- against the ground the instant it is built.
-		armedAt = os.clock() + 1.0,
-		expiresAt = os.clock() + (spec.Lifetime or 20),
+		-- Armed and timed from the moment someone actually climbs aboard.
+		armedAt = nil,
+		expiresAt = nil,
 	}
 	return model
 end
@@ -870,25 +940,21 @@ function VehicleService.SpawnTube(position: Vector3): Model
 
 	local hub = Util.Part({
 		Name = "Chassis",
-		Size = Vector3.new(11, 3, 11),
-		CFrame = CFrame.new(position),
+		Size = Vector3.new(3, 11, 11),
+		CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90)),
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(250, 150, 40),
-		Material = Enum.Material.Plastic,
+		Material = Enum.Material.Rubber,
 		Anchored = false,
-		-- Light and very slippery, so it skids down snow and bobs along the
-		-- river instead of gripping like a tyre.
 		CustomPhysicalProperties = PhysicalProperties.new(0.25, 0.08, 0.5, 1, 1),
 		Parent = model,
 	})
-	-- A cylinder's flat faces point along its own X, so stand it up.
-	hub.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
 	model.PrimaryPart = hub
 
 	-- The hole in the middle, which is what makes it read as a tube.
 	Util.Part({
 		Name = "TubeHole",
-		Size = Vector3.new(5.4, 3.4, 5.4),
+		Size = Vector3.new(3.4, 5.4, 5.4),
 		CFrame = hub.CFrame,
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(40, 40, 46),
@@ -1393,6 +1459,12 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		return
 	end
 
+	if model:GetAttribute("LiftLocked") == true then
+		drive.Enabled = false
+		turn.Enabled = false
+		return
+	end
+
 	-- The drive axis: the chassis's forward, flattened onto the horizontal.
 	-- Flattening is what guarantees the car drives along the ground instead
 	-- of nosing into the sky when it tips on a ramp.
@@ -1452,7 +1524,7 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		local radius = WHEEL_DIAMETER * 0.5
 		state.wheelSpin = (state.wheelSpin or 0) + (current / radius) * deltaTime
 		for _, wheel in state.wheels do
-			local spun = chassis.CFrame * wheel.offset * CFrame.Angles(state.wheelSpin, 0, 0)
+			local spun = chassis.CFrame * wheel.offset * CFrame.Angles(-state.wheelSpin, 0, 0)
 			wheel.part.CFrame = spun
 			if wheel.hub then
 				wheel.hub.CFrame = spun
@@ -1644,10 +1716,10 @@ local TRICK_AIR_POINTS = 26 -- per second airborne
 
 local TRICK_NAMES = {
 	{ spin = 1080, name = "TRIPLE CORK" },
-	{ spin = 720, name = "DOUBLE SPIN" },
-	{ spin = 480, name = "BIG SPIN" },
-	{ spin = 270, name = "SEVEN-TWENTY" },
-	{ spin = 160, name = "SPINNER" },
+	{ spin = 720, name = "SEVEN-TWENTY" },
+	{ spin = 480, name = "FIVE-FORTY" },
+	{ spin = 270, name = "THREE-SIXTY" },
+	{ spin = 160, name = "ONE-EIGHTY" },
 	{ spin = 0, name = "BIG AIR" },
 }
 
@@ -1820,22 +1892,37 @@ local function drivePlane(model: Model, state: any, deltaTime: number)
 	local pitchRate = spec.PitchRate or 1.4
 	local yawRate = spec.YawRate or 0.8
 
-	-- Throttle nudges the speed up and down between the stall and top speed.
-	local target = state.speed + seat.Throttle * 90 * deltaTime
+	-- Track takeoff grace period so planes sitting on the pad never explode on boarding.
+	local now = os.clock()
+	if not state.boardedAt then
+		state.boardedAt = now
+		state.airborne = false
+		state.speed = math.max(state.speed or 0, stallSpeed * 1.25)
+		-- Gentle climb attitude on takeoff.
+		state.heading = CFrame.new() * state.heading.Rotation * CFrame.Angles(math.rad(14), 0, 0)
+	end
+	if body.Position.Y > 18 then
+		state.airborne = true
+	end
+
+	-- Maintain smooth cruise speed; W climbs gently and S dives/slows rather than slamming into the ground.
+	local cruise = (stallSpeed + topSpeed) * 0.55
+	local target = if seat.Throttle ~= 0
+		then (state.speed or cruise) + seat.Throttle * 55 * deltaTime
+		else (state.speed or cruise) + (cruise - (state.speed or cruise)) * math.min(1, deltaTime * 1.5)
 	state.speed = math.clamp(target, stallSpeed, topSpeed)
 
-	-- Steering rolls the aircraft, and rolling is what turns it.
 	local roll = -seat.Steer * rollRate * deltaTime
-	local pitch = -seat.Throttle * pitchRate * deltaTime * 0.35
+	local pitch = seat.Throttle * pitchRate * deltaTime * 0.45
 	local yaw = -seat.Steer * yawRate * deltaTime
 
 	state.heading = state.heading * CFrame.Angles(pitch, yaw, roll)
 	state.orientation.CFrame = state.heading
 
-	state.velocity.VectorVelocity = state.heading.LookVector * state.speed
+	local liftBoost = if (not state.airborne) and (now - state.boardedAt < 2.2) then Vector3.new(0, 26, 0) else Vector3.zero
+	state.velocity.VectorVelocity = state.heading.LookVector * state.speed + liftBoost
 
-	-- If it belly-flops into the ground, that is a crash.
-	if body.Position.Y < 6 then
+	if state.airborne and body.Position.Y < 6 then
 		VehicleService.Damage(model, 9999, nil)
 	end
 end
@@ -1882,11 +1969,15 @@ local function driveTorpedo(model: Model, state: any, deltaTime: number)
 		fast are not something to rely on.
 	]]
 	local now = os.clock()
-	if now < (state.armedAt or 0) then
+	if not state.armedAt then
+		state.armedAt = now + 1.0
+		state.expiresAt = now + (spec.Lifetime or 20)
+	end
+	if now < state.armedAt then
 		return
 	end
 
-	if now >= (state.expiresAt or math.huge) then
+	if now >= state.expiresAt then
 		VehicleService.Explode(model)
 		return
 	end
@@ -2004,7 +2095,6 @@ function VehicleService.Eject(player: Player)
 		Name = "Canopy",
 		Size = Vector3.new(22, 9, 22),
 		CFrame = root.CFrame * CFrame.new(0, 13, 0),
-		Shape = Enum.PartType.Ball,
 		Color = Color3.fromRGB(240, 130, 60),
 		Material = Enum.Material.Fabric,
 		Anchored = false,
@@ -2012,6 +2102,9 @@ function VehicleService.Eject(player: Player)
 		Massless = true,
 		Parent = canopy,
 	})
+	local domeMesh = Instance.new("SpecialMesh")
+	domeMesh.MeshType = Enum.MeshType.Sphere
+	domeMesh.Parent = dome
 
 	-- Lines from the canopy down to the jumper.
 	for index = 1, 4 do
@@ -2088,13 +2181,21 @@ function VehicleService.Eject(player: Player)
 end
 
 --[[ Hurt a vehicle. At zero health it explodes and takes its riders with it. ]]
-function VehicleService.Damage(model: Model, amount: number, _attacker: Player?)
+function VehicleService.Damage(model: Model, amount: number, attacker: Player?)
 	if not model or not model.Parent then
+		return
+	end
+	if not (amount > 0) or amount == math.huge then
 		return
 	end
 	local health = model:GetAttribute("Health")
 	if typeof(health) ~= "number" then
 		return
+	end
+
+	local state = active[model]
+	if state and attacker then
+		state.lastAttacker = attacker
 	end
 
 	local resistance = model:GetAttribute("DamageResistance")
@@ -2156,7 +2257,11 @@ function VehicleService.Explode(model: Model)
 	-- Announced rather than applied directly. DamageService already requires
 	-- this module, so calling into it from here would be a dependency cycle;
 	-- it listens for this instead, and the dependency stays one-way.
-	VehicleService.Wrecked.Fire(position, blastRadius, blastDamage, state.lastDriver)
+	if state.rider then
+		VehicleService.DismountSkis(state.rider)
+	end
+
+	VehicleService.Wrecked.Fire(position, blastRadius, blastDamage, state.lastAttacker or state.lastDriver)
 
 	active[model] = nil
 	model:Destroy()
@@ -2224,9 +2329,20 @@ end
 
 --[[ Everything currently alive, so the round can clean up after itself. ]]
 function VehicleService.ClearAll()
-	for model in active do
+	for model, state in active do
+		if state.rider then
+			VehicleService.DismountSkis(state.rider)
+		end
 		if model.Parent then
 			model:Destroy()
+		end
+	end
+	for _, player in Players:GetPlayers() do
+		local pState = PlayerState.Get(player)
+		if pState.vehicle then
+			pState.vehicle = nil
+			pState.seatRole = nil
+			PlayerState.Changed.Fire(player)
 		end
 	end
 	table.clear(active)

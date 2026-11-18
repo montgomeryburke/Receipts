@@ -46,6 +46,9 @@ type Projectile = {
 	-- Drones only: who it is chasing.
 	target: BasePart?,
 	stuck: boolean,
+	stuckTo: BasePart?,
+	stuckOffset: CFrame?,
+	hitEntities: { [Instance]: boolean },
 	dead: boolean,
 	-- Everything this projectile is not allowed to hit (the shooter, their car).
 	ignore: { Instance },
@@ -55,35 +58,53 @@ local live: { Projectile } = {}
 
 --[[ A small glowing part so players can actually see what is flying at them. ]]
 local function makeVisual(spec: Config.WeaponSpec, position: Vector3, isDiamond: boolean): BasePart
+	local isBall = spec.Kind == "Arcing"
+	local isRocket = spec.Kind == "Rocket" or spec.Kind == "Homing"
+	local size = if isDiamond
+		then Vector3.new(1.5, 1.5, 2.8)
+		elseif isBall then Vector3.new(1.3, 1.3, 1.3)
+		elseif isRocket then Vector3.new(0.9, 0.9, 2.8)
+		else Vector3.new(0.45, 0.45, 1.8)
+	local material = if spec.Splat
+		then Enum.Material.Mud
+		elseif isBall and not spec.Sticky then Enum.Material.Metal
+		else Enum.Material.Neon
+
 	local part = Util.Part({
 		Name = "Projectile",
-		Size = if isDiamond then Vector3.new(1.4, 1.4, 2.6) else Vector3.new(0.5, 0.5, 1.8),
+		Size = size,
 		CFrame = CFrame.new(position),
+		Shape = if isBall then Enum.PartType.Ball else Enum.PartType.Block,
 		Color = spec.Color,
-		Material = if isDiamond then Enum.Material.Neon else Enum.Material.Neon,
+		Material = material,
 		CanCollide = false,
 		CanQuery = false,
 		CanTouch = false,
+		CastShadow = false,
 		Anchored = true,
 		Parent = workspace,
 	})
 
-	if isDiamond then
+	if isDiamond or isRocket or spec.Sticky then
 		local light = Instance.new("PointLight")
 		light.Color = spec.Color
-		light.Range = 18
-		light.Brightness = 3
+		light.Range = if isDiamond then 22 else 14
+		light.Brightness = if isDiamond then 4 else 2.5
+		light.Shadows = false
 		light.Parent = part
 	end
 
+	-- Attachments perpendicular to forward (-Z) travel so the Trail ribbon has real width.
+	local trailHalf = if isDiamond then 0.55 elseif isRocket then 0.35 else 0.22
 	local trail = Instance.new("Trail")
-	local a0 = Util.Attachment(part, Vector3.new(0, 0, 0.6), "TrailA")
-	local a1 = Util.Attachment(part, Vector3.new(0, 0, -0.6), "TrailB")
+	local a0 = Util.Attachment(part, Vector3.new(0, trailHalf, 0), "TrailA")
+	local a1 = Util.Attachment(part, Vector3.new(0, -trailHalf, 0), "TrailB")
 	trail.Attachment0 = a0
 	trail.Attachment1 = a1
-	trail.Lifetime = 0.35
+	trail.Lifetime = if isRocket then 0.5 else 0.35
 	trail.Color = ColorSequence.new(spec.Color)
 	trail.WidthScale = NumberSequence.new(1, 0)
+	trail.LightEmission = if spec.Splat then 0 else 0.85
 	trail.Parent = part
 
 	return part
@@ -114,13 +135,48 @@ local function detonate(projectile: Projectile, position: Vector3, scale: number
 		DamageService.Explode(
 			position, radius, damage,
 			projectile.owner, spec.VehicleDamageMultiplier,
-			-- Only a mega-detonation counts as one, and only that is big
-			-- enough to put a giant animal down.
-			scale > 1
+			scale > 1,
+			spec.DisplayName
 		)
-		-- A big enough blast leaves a mark in the mud.
 		if scale > 1 then
 			DamageService.Crater(position, radius * 0.5)
+		end
+	end
+
+	-- Cluster bombs burst into short-fuse bomblets fanning outward.
+	local clusterCount = (spec :: any).Cluster
+	if typeof(clusterCount) == "number" and clusterCount > 0 then
+		local subRadius = (spec :: any).ClusterRadius or 30
+		local subDamage = (spec :: any).ClusterDamage or 65
+		local subSpec = table.clone(spec :: any)
+		subSpec.Cluster = nil
+		subSpec.BlastRadius = subRadius
+		subSpec.BlastDamage = subDamage
+		subSpec.FuseTime = 0.75
+		subSpec.Sticky = false
+
+		for i = 1, clusterCount do
+			local angle = (i / clusterCount) * math.pi * 2
+			local vel = Vector3.new(math.cos(angle) * 48, 34, math.sin(angle) * 48)
+			local sub: Projectile = {
+				owner = projectile.owner,
+				weaponName = projectile.weaponName,
+				spec = subSpec,
+				part = makeVisual(subSpec, position + Vector3.new(0, 1.5, 0), false),
+				position = position + Vector3.new(0, 1.5, 0),
+				velocity = vel,
+				piercesLeft = 0,
+				bornAt = os.clock(),
+				fuseAt = os.clock() + 0.75 + (i % 3) * 0.12,
+				target = nil,
+				stuck = false,
+				stuckTo = nil,
+				stuckOffset = nil,
+				hitEntities = {},
+				dead = false,
+				ignore = projectile.ignore,
+			}
+			table.insert(live, sub)
 		end
 	end
 end
@@ -141,17 +197,30 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 
 	local humanoid, character = Util.HumanoidFromHit(hitPart)
 	if humanoid and character then
+		if projectile.hitEntities[character] then
+			return
+		end
+		projectile.hitEntities[character] = true
 		local victim = Players:GetPlayerFromCharacter(character)
 		if victim and victim ~= projectile.owner then
-			DamageService.ApplyDamage(victim, spec.Damage, projectile.owner, spec.DisplayName)
+			local headshot = hitPart.Name == "Head" and not spec.Splat
+			local dmg = if headshot then spec.Damage * 1.8 else spec.Damage
+			local applied = DamageService.ApplyDamage(victim, dmg, projectile.owner, spec.DisplayName)
+			if applied and projectile.owner.Parent then
+				Remotes.Event("Hitmarker"):FireClient(projectile.owner, {
+					damage = math.floor(dmg + 0.5),
+					headshot = headshot,
+				})
+			end
 
-			-- Poop does barely any damage; the point is that they cannot see.
 			if spec.Splat then
 				Remotes.Event("PlayEffect"):FireClient(victim, {
 					effect = "Splat",
 					duration = Config.Wildlife.SplatDuration,
 				})
-				Remotes.Event("Notify"):FireClient(projectile.owner, "Direct hit. Disgusting.")
+				if projectile.owner.Parent then
+					Remotes.Event("Notify"):FireClient(projectile.owner, "Direct hit. Disgusting.")
+				end
 			end
 			return
 		end
@@ -159,6 +228,10 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 
 	local vehicle = VehicleService.FromPart(hitPart)
 	if vehicle then
+		if projectile.hitEntities[vehicle] then
+			return
+		end
+		projectile.hitEntities[vehicle] = true
 		VehicleService.Damage(
 			vehicle,
 			spec.Damage * (spec.VehicleDamageMultiplier or 1),
@@ -198,8 +271,10 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 				-- Turn toward the target at a limited rate, so it arcs round
 				-- rather than snapping onto them instantly.
 				local turnRate = (spec.HomingTurnRate or 3) * deltaTime
-				projectile.velocity = (projectile.velocity + (wanted - projectile.velocity) * math.min(1, turnRate)).Unit
-					* projectile.velocity.Magnitude
+				local blended = projectile.velocity + (wanted - projectile.velocity) * math.min(1, turnRate)
+				if blended.Magnitude > 0.001 then
+					projectile.velocity = blended.Unit * projectile.velocity.Magnitude
+				end
 			end
 		end
 	end
@@ -230,11 +305,19 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 		end
 
 		if kind == "Arcing" then
+			if spec.Splat or not projectile.fuseAt then
+				retire(projectile)
+				return
+			end
 			if spec.Sticky then
-				-- Sticky bombs stop dead where they land and wait for the fuse.
 				projectile.stuck = true
 				projectile.position = hitPoint + result.Normal * 0.5
-				projectile.part.CFrame = CFrame.new(projectile.position)
+				local hitCFrame = CFrame.new(projectile.position)
+				projectile.part.CFrame = hitCFrame
+				if result.Instance and result.Instance:IsA("BasePart") and not result.Instance.Anchored then
+					projectile.stuckTo = result.Instance
+					projectile.stuckOffset = result.Instance.CFrame:ToObjectSpace(hitCFrame)
+				end
 				return
 			end
 			-- Ordinary grenades bounce, losing most of their energy.
@@ -265,10 +348,32 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 
 	-- Point the visible part along the direction of travel.
 	if projectile.velocity.Magnitude > 0.01 then
-		projectile.part.CFrame = CFrame.lookAt(projectile.position, projectile.position + projectile.velocity)
+		projectile.part.CFrame = Util.LookAt(projectile.position, projectile.position + projectile.velocity)
 	else
 		projectile.part.CFrame = CFrame.new(projectile.position)
 	end
+end
+
+--[[ Check if an enemy player walked or drove over a planted LandMine. ]]
+local function checkMineProximity(projectile: Projectile): boolean
+	local owner = projectile.owner
+	for _, player in Players:GetPlayers() do
+		if player == owner then
+			continue
+		end
+		if owner.Team and player.Team and owner.Team == player.Team then
+			continue
+		end
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
+			if (root.Position - projectile.position).Magnitude <= 10 then
+				return true
+			end
+		end
+	end
+	return false
 end
 
 --[[ Every live projectile gets a frame. ]]
@@ -283,6 +388,29 @@ local function step(deltaTime: number)
 			continue
 		end
 
+		-- Keep sticky bombs attached to moving vehicles or characters.
+		if projectile.stuck and projectile.stuckTo then
+			if projectile.stuckTo.Parent and projectile.stuckOffset then
+				local worldCf = projectile.stuckTo.CFrame * projectile.stuckOffset
+				projectile.position = worldCf.Position
+				projectile.part.CFrame = worldCf
+			else
+				projectile.stuckTo = nil
+				projectile.stuckOffset = nil
+				projectile.stuck = false
+			end
+		end
+
+		-- Armed land mines detonate when an enemy approaches.
+		if projectile.stuck and projectile.weaponName == "LandMine" and now - projectile.bornAt > 0.8 then
+			if checkMineProximity(projectile) then
+				detonate(projectile, projectile.position, 1)
+				retire(projectile)
+				table.remove(live, index)
+				continue
+			end
+		end
+
 		-- Grenade fuses run whether the grenade is moving or wedged in a wall.
 		if projectile.fuseAt and now >= projectile.fuseAt then
 			detonate(projectile, projectile.position, 1)
@@ -291,7 +419,8 @@ local function step(deltaTime: number)
 			continue
 		end
 
-		if now - projectile.bornAt > MAX_LIFETIME then
+		-- Respect fuseAt so long-fuse LandMines (40s) and Drones (14s) are not deleted early.
+		if not projectile.fuseAt and now - projectile.bornAt > MAX_LIFETIME then
 			retire(projectile)
 			table.remove(live, index)
 			continue
@@ -372,6 +501,9 @@ function ProjectileService.Spawn(
 			else nil,
 		target = lockedTarget,
 		stuck = false,
+		stuckTo = nil,
+		stuckOffset = nil,
+		hitEntities = {},
 		dead = false,
 		ignore = ignore,
 	}

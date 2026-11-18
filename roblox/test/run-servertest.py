@@ -286,8 +286,20 @@ do
 	check("and not twice over", HockeyService.StartFight(killer, prey) == false, "")
 
 	-- The killer mashes harder.
-	for _ = 1, 9 do HockeyService.Swing(killer) end
-	for _ = 1, 3 do HockeyService.Swing(prey) end
+	--
+	-- Swings are rate limited to one every 0.08s, which is the right call
+	-- for a mash contest fed by a remote. So the clock has to move between
+	-- them: nine instant calls collapse to one, both players end up on a
+	-- single swing, and the fight settles as a DRAW -- which the draw branch
+	-- reports without firing FightOver at all.
+	for _ = 1, 9 do
+		ADVANCE(0.1)
+		HockeyService.Swing(killer)
+	end
+	for _ = 1, 3 do
+		ADVANCE(0.1)
+		HockeyService.Swing(prey)
+	end
 
 	-- A fight must still run while it is on, and settle when the clock is up.
 	check("the fight is still running", HockeyService.FightCount() == 1, "")

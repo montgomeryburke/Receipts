@@ -2,15 +2,10 @@
 --[[
 	Nuclear Mud Arena — how the camera reacts to what you do.
 
-	Shooting in Halo felt like shooting because the camera moved. The rifle
-	pushed the view up a little and it settled back; a rocket landing nearby
-	rattled everything; a hard landing jolted you. None of it changes where a
-	bullet goes, and that is the point — this module never touches aim, only
-	the camera, so the game stays as accurate as it was before and simply
-	stops feeling like a spreadsheet.
-
-	Everything decays on its own, so a dropped frame or a missed event can
-	never leave the camera stuck off-axis.
+	Applies framerate-independent Perlin-noise trauma shake and recoil kick to
+	the camera AFTER Roblox's camera update, and strips that offset back off
+	BEFORE the next frame's camera/aim calculations so visual rattle never
+	shifts where bullets go or compounds on Scriptable cameras.
 ]]
 
 local RunService = game:GetService("RunService")
@@ -18,52 +13,36 @@ local Workspace = game:GetService("Workspace")
 
 local Feel = {}
 
--- Degrees of accumulated kick, and how fast it is bleeding off.
 local kickPitch = 0
 local kickYaw = 0
-
--- Shake amplitude, in degrees, and its own decay.
 local shake = 0
+local elapsed = 0
+local lastOffset = CFrame.identity
 
--- How quickly a kick settles back. Smaller is snappier. 0.09 of a second is
--- about where a burst reads as a burst rather than a slow drift upward.
 local KICK_RECOVERY = 0.09
-local SHAKE_RECOVERY = 0.22
+local SHAKE_RECOVERY = 0.24
+local SHAKE_FREQUENCY = 22
 
--- Hard ceilings. A minigun held down, or three rockets at once, must never
--- spin the view somewhere a player cannot recover from.
 local MAX_KICK = 7
 local MAX_SHAKE = 4
 
 local started = false
 
---[[
-	Kick the view, once, for one shot.
-
-	`degrees` comes from the weapon's own Recoil value, so a sniper shoves and
-	a minigun buzzes. The sideways component is randomised, which is what
-	stops a long burst from walking the camera in a perfectly straight line.
-]]
 function Feel.Kick(degrees: number)
-	if degrees <= 0 then
+	if not (degrees > 0) or degrees == math.huge then
 		return
 	end
 	kickPitch = math.min(kickPitch + degrees, MAX_KICK)
 	kickYaw = math.clamp(kickYaw + (math.random() - 0.5) * degrees * 0.6, -MAX_KICK, MAX_KICK)
 end
 
---[[ Rattle the camera: explosions, taking a hit, a heavy landing. ]]
 function Feel.Shake(degrees: number)
+	if not (degrees > 0) or degrees == math.huge then
+		return
+	end
 	shake = math.min(math.max(shake, degrees), MAX_SHAKE)
 end
 
---[[
-	Shake scaled by how far away the bang was.
-
-	A rocket at your feet should be violent and the same rocket across the map
-	should do nothing at all, which a flat shake for every explosion gets
-	wrong in both directions.
-]]
 function Feel.ShakeFrom(position: Vector3, degrees: number, falloff: number)
 	local camera = Workspace.CurrentCamera
 	if not camera then
@@ -76,18 +55,25 @@ function Feel.ShakeFrom(position: Vector3, degrees: number, falloff: number)
 	end
 end
 
---[[
-	Start driving the camera.
-
-	This has to run AFTER Roblox's own camera update, or the engine would
-	overwrite the offset in the same frame and nothing would move. That is
-	what the priority is for.
-]]
 function Feel.Start()
 	if started then
 		return
 	end
 	started = true
+	lastOffset = CFrame.identity
+
+	-- Strip the previous frame's visual offset before Roblox's camera controller
+	-- and before any Heartbeat aim reads so visual shake never corrupts aim.
+	RunService:BindToRenderStep("FeelCameraReset", Enum.RenderPriority.Camera.Value - 1, function()
+		if lastOffset == CFrame.identity then
+			return
+		end
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera.CFrame = camera.CFrame * lastOffset:Inverse()
+		end
+		lastOffset = CFrame.identity
+	end)
 
 	RunService:BindToRenderStep("FeelCamera", Enum.RenderPriority.Camera.Value + 1, function(deltaTime: number)
 		local camera = Workspace.CurrentCamera
@@ -95,8 +81,8 @@ function Feel.Start()
 			return
 		end
 
-		-- Exponential decay, framerate-independent: at 30fps and at 240fps
-		-- a kick takes the same amount of time to settle.
+		elapsed += deltaTime
+
 		local kickFade = math.exp(-deltaTime / KICK_RECOVERY)
 		kickPitch *= kickFade
 		kickYaw *= kickFade
@@ -104,39 +90,57 @@ function Feel.Start()
 		local shakeFade = math.exp(-deltaTime / SHAKE_RECOVERY)
 		shake *= shakeFade
 
-		-- Below a twentieth of a degree nobody can see it, and leaving it to
-		-- decay forever means every frame pays for arithmetic on nothing.
-		if kickPitch < 0.05 then kickPitch = 0 end
-		if kickYaw > -0.05 and kickYaw < 0.05 then kickYaw = 0 end
-		if shake < 0.05 then shake = 0 end
+		if kickPitch < 0.04 then
+			kickPitch = 0
+		end
+		if kickYaw > -0.04 and kickYaw < 0.04 then
+			kickYaw = 0
+		end
+		if shake < 0.04 then
+			shake = 0
+		end
 
 		if kickPitch == 0 and kickYaw == 0 and shake == 0 then
+			lastOffset = CFrame.identity
 			return
 		end
 
-		local rattlePitch = (math.random() - 0.5) * shake
-		local rattleYaw = (math.random() - 0.5) * shake
-		local rattleRoll = (math.random() - 0.5) * shake * 0.5
+		-- Smooth framerate-independent Perlin noise scaled quadratically for
+		-- punchy initial trauma that settles organically.
+		local trauma = (shake / MAX_SHAKE)
+		local amp = MAX_SHAKE * trauma * trauma
+		local sample = elapsed * SHAKE_FREQUENCY
+		local rattlePitch = math.noise(sample, 1.37) * amp
+		local rattleYaw = math.noise(sample, 7.91) * amp
+		local rattleRoll = math.noise(sample, 14.53) * amp * 0.6
 
-		camera.CFrame = camera.CFrame * CFrame.Angles(
+		local offset = CFrame.Angles(
 			math.rad(kickPitch + rattlePitch),
 			math.rad(kickYaw + rattleYaw),
 			math.rad(rattleRoll)
 		)
+		camera.CFrame = camera.CFrame * offset
+		lastOffset = offset
 	end)
 end
 
---[[ Let go of the camera completely. Used by the tests. ]]
 function Feel.Stop()
 	if not started then
 		return
 	end
 	started = false
+	if lastOffset ~= CFrame.identity then
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera.CFrame = camera.CFrame * lastOffset:Inverse()
+		end
+		lastOffset = CFrame.identity
+	end
 	kickPitch, kickYaw, shake = 0, 0, 0
+	RunService:UnbindFromRenderStep("FeelCameraReset")
 	RunService:UnbindFromRenderStep("FeelCamera")
 end
 
---[[ What the camera is currently doing, for tests and for the HUD. ]]
 function Feel.Debug(): { kick: number, yaw: number, shake: number }
 	return { kick = kickPitch, yaw = kickYaw, shake = shake }
 end

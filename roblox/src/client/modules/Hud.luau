@@ -27,7 +27,7 @@ local lowHealthHolder: Frame? = nil
 local vignetteStrength = 0
 local vignettePulse = 0
 local scoreboard: Frame? = nil
-local scoreboardRows: Frame? = nil
+local scoreboardRows: ScrollingFrame? = nil
 local scoreboardTitle: TextLabel? = nil
 
 local screen: ScreenGui
@@ -133,7 +133,17 @@ local function makeBar(parent: Instance, position: UDim2, colour: Color3): (Fram
 	return track, fill
 end
 
+local hudBuilt = false
+local hitToken = 0
+local medalToken = 0
+local wienerToken = 0
+local killFeedOrder = 100000
+
 function Hud.Build()
+	if hudBuilt and screen and screen.Parent then
+		return
+	end
+	hudBuilt = true
 	screen = Instance.new("ScreenGui")
 	screen.Name = "NuclearMudHud"
 	screen.ResetOnSpawn = false
@@ -322,10 +332,20 @@ function Hud.Build()
 			Size = UDim2.new(0.5, -170, 1, 0),
 			Position = if side == -1 then UDim2.fromScale(0, 0) else UDim2.new(0.5, 170, 0, 0),
 			BackgroundColor3 = Color3.new(0, 0, 0),
-			BackgroundTransparency = 0.05,
+			BackgroundTransparency = 0.02,
 			ZIndex = 8,
 		})
 		bar.Name = "ScopeBlind"
+	end
+	for _, side in { -1, 1 } do
+		local vbar = makeFrame(scope, {
+			Size = UDim2.new(0, 340, 0.5, -170),
+			Position = if side == -1 then UDim2.new(0.5, -170, 0, 0) else UDim2.new(0.5, -170, 0.5, 170),
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BackgroundTransparency = 0.02,
+			ZIndex = 8,
+		})
+		vbar.Name = "ScopeBlindV"
 	end
 
 	local lens = makeFrame(scope, {
@@ -434,9 +454,10 @@ function Hud.Build()
 	-- This replaces a toast that fired on every weapon change. Cycling
 	-- through a slot popped four toasts that sat on screen together, which
 	-- read as four guns being selected at once.
+	local barWidth = SLOT_COUNT * 110
 	weaponBar = makeFrame(screen, {
-		Size = UDim2.fromOffset(660, 36),
-		Position = UDim2.new(0.5, -330, 1, -64),
+		Size = UDim2.fromOffset(barWidth, 36),
+		Position = UDim2.new(0.5, -math.floor(barWidth * 0.5), 1, -64),
 		BackgroundTransparency = 1,
 	})
 
@@ -574,17 +595,22 @@ function Hud.Build()
 	makeLabel(board, {
 		Size = UDim2.new(1, -24, 0, 18),
 		Position = UDim2.fromOffset(12, 48),
-		Text = "PLAYER                                 PTS    KILLS   DEATHS",
-		TextSize = 13,
+		Text = string.format("%-30s %6s %7s %8s", "PLAYER", "PTS", "KILLS", "DEATHS"),
+		TextSize = 15,
+		Font = Enum.Font.Code,
 		TextColor3 = Color3.fromRGB(150, 165, 180),
 		TextXAlignment = Enum.TextXAlignment.Left,
 	})
 
-	local rows = makeFrame(board, {
-		Size = UDim2.new(1, -24, 1, -84),
-		Position = UDim2.fromOffset(12, 72),
-		BackgroundTransparency = 1,
-	})
+	local rows = Instance.new("ScrollingFrame")
+	rows.Size = UDim2.new(1, -24, 1, -84)
+	rows.Position = UDim2.fromOffset(12, 72)
+	rows.BackgroundTransparency = 1
+	rows.BorderSizePixel = 0
+	rows.ScrollBarThickness = 4
+	rows.CanvasSize = UDim2.new(0, 0, 0, 0)
+	rows.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	rows.Parent = board
 	local rowLayout = Instance.new("UIListLayout")
 	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	rowLayout.Padding = UDim.new(0, 2)
@@ -838,10 +864,15 @@ function Hud.ShowDeath(duration: number, killerName: string?)
 	end)
 
 	task.delay(duration, function()
+		if respawnToken ~= token or not deathOverlay then
+			return
+		end
 		local fade = TweenService:Create(deathOverlay, TweenInfo.new(0.4), { BackgroundTransparency = 1 })
 		fade:Play()
 		fade.Completed:Wait()
-		deathOverlay.Visible = false
+		if respawnToken == token and deathOverlay then
+			deathOverlay.Visible = false
+		end
 	end)
 end
 
@@ -849,10 +880,14 @@ function Hud.ShowWiener(teamName: string, duration: number)
 	if not wienerOverlay then
 		return
 	end
+	wienerToken += 1
+	local token = wienerToken
 	wienerOverlay.Text = `{string.upper(teamName)}\nIS THE WIENER!`
 	wienerOverlay.Visible = true
 	task.delay(duration, function()
-		wienerOverlay.Visible = false
+		if wienerToken == token and wienerOverlay then
+			wienerOverlay.Visible = false
+		end
 	end)
 end
 
@@ -996,11 +1031,18 @@ function Hud.Hit(damage: number, headshot: boolean)
 		return
 	end
 
+	hitToken += 1
+	local myHitToken = hitToken
 	hitmarker.Visible = true
-	hitmarker.Size = if headshot then UDim2.fromOffset(56, 56) else UDim2.fromOffset(40, 40)
-	hitmarker.Position = if headshot
-		then UDim2.new(0.5, -28, 0.5, -28)
-		else UDim2.new(0.5, -20, 0.5, -20)
+	local existingScale = hitmarker:FindFirstChildOfClass("UIScale")
+	local scale: UIScale
+	if existingScale then
+		scale = existingScale
+	else
+		scale = Instance.new("UIScale")
+		scale.Parent = hitmarker
+	end
+	scale.Scale = if headshot then 1.4 else 1.0
 	for _, stroke in hitmarker:GetChildren() do
 		if stroke:IsA("Frame") then
 			stroke.BackgroundColor3 = if headshot
@@ -1010,7 +1052,7 @@ function Hud.Hit(damage: number, headshot: boolean)
 	end
 
 	task.delay(0.12, function()
-		if hitmarker then
+		if hitToken == myHitToken and hitmarker then
 			hitmarker.Visible = false
 		end
 	end)
@@ -1054,18 +1096,21 @@ function Hud.KillFeed(text: string, mine: boolean)
 		end
 	end
 	if #lines >= 5 then
+		table.sort(lines, function(a, b)
+			return a.LayoutOrder > b.LayoutOrder
+		end)
 		lines[1]:Destroy()
 	end
 
+	killFeedOrder -= 1
 	local entry = makeLabel(killFeed, {
 		Size = UDim2.new(1, 0, 0, 24),
 		Text = text,
 		TextSize = 17,
 		TextXAlignment = Enum.TextXAlignment.Right,
-		-- Your own kills stand out from everybody else's.
 		TextColor3 = if mine then Color3.fromRGB(255, 220, 120) else Color3.fromRGB(205, 215, 225),
 	})
-	entry.LayoutOrder = math.floor(os.clock() * 100)
+	entry.LayoutOrder = killFeedOrder
 
 	task.delay(6, function()
 		if entry.Parent then
@@ -1085,12 +1130,14 @@ function Hud.Medal(text: string)
 	if not medalLabel then
 		return
 	end
+	medalToken += 1
+	local myMedalToken = medalToken
 	medalLabel.Text = text
 	medalLabel.TextTransparency = 0
 	medalLabel.TextStrokeTransparency = 0.3
 
 	task.delay(1.6, function()
-		if not medalLabel then
+		if medalToken ~= myMedalToken or not medalLabel then
 			return
 		end
 		TweenService:Create(medalLabel, TweenInfo.new(0.6), {
@@ -1163,10 +1210,10 @@ function Hud.SetScoreboard(
 			Size = UDim2.new(1, 0, 0, 20),
 			Text = string.format(
 				"%-30s %6d %7d %8d",
-				string.sub(row.name, 1, 30),
-				row.points,
-				row.kills,
-				row.deaths
+				string.sub(tostring(row.name or "Player"), 1, 30),
+				tonumber(row.points) or 0,
+				tonumber(row.kills) or 0,
+				tonumber(row.deaths) or 0
 			),
 			TextSize = 15,
 			Font = Enum.Font.Code, -- monospaced, or the columns do not line up
@@ -1212,11 +1259,21 @@ function Hud.FightResult(won: boolean, draw: boolean, brokeStick: boolean)
 	if not fightLabel or not fightCount then
 		return
 	end
+	fightLabel.Visible = true
+	fightCount.Visible = true
 	fightLabel.Text = if draw
 		then "A DRAW"
 		elseif won then "YOU WON THE FIGHT"
 		else "YOU LOST THE FIGHT"
 	fightCount.Text = if brokeStick then "YOUR STICK BROKE — USE IT" else ""
+	task.delay(2.0, function()
+		if fightLabel then
+			fightLabel.Visible = false
+		end
+		if fightCount then
+			fightCount.Visible = false
+		end
+	end)
 end
 
 --[[ Count the mashes back, so mashing feels like it is doing something. ]]

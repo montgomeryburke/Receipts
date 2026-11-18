@@ -132,6 +132,16 @@ local function buildDunkTank(at: Vector3, parent: Instance)
 		Parent = parent,
 	})
 
+	-- Interior exit ladder so dunked players can climb right back out.
+	local ladder = Instance.new("TrussPart")
+	ladder.Name = "TankLadder"
+	ladder.Size = Vector3.new(2, 15, 2)
+	ladder.CFrame = CFrame.new(at + Vector3.new(0, 7.5, -11.2))
+	ladder.Anchored = true
+	ladder.Color = Color3.fromRGB(220, 185, 60)
+	ladder.Material = Enum.Material.Metal
+	ladder.Parent = parent
+
 	-- The water. Non-solid, so you fall in rather than onto.
 	Util.Part({
 		Name = "DunkWater",
@@ -175,7 +185,7 @@ local function buildDunkTank(at: Vector3, parent: Instance)
 	prompt.Triggered:Connect(function(player)
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid and humanoid.Health > 0 and not humanoid.SeatPart then
+		if humanoid and humanoid.Health > 0 and not humanoid.SeatPart and not seat.Occupant then
 			seat:Sit(humanoid)
 		end
 	end)
@@ -207,7 +217,7 @@ local function buildDunkTank(at: Vector3, parent: Instance)
 
 	local ring = Util.Part({
 		Name = "DunkRing",
-		Size = Vector3.new(4.6, 4.6, 0.3),
+		Size = Vector3.new(0.3, 4.6, 4.6),
 		CFrame = target.CFrame * CFrame.new(0, 0, -0.6) * CFrame.Angles(0, math.rad(90), 0),
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(220, 40, 40),
@@ -236,12 +246,21 @@ local function dunk(shooter: Player?)
 	if occupant then
 		local character = occupant.Parent
 		local dunked = if character then Players:GetPlayerFromCharacter(character) else nil
+		local weld = seat:FindFirstChild("SeatWeld")
+		if weld then
+			weld:Destroy()
+		end
 		occupant.Sit = false
 
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") then
-			root.CFrame = CFrame.new(seat.Position - Vector3.new(0, 14, 0))
-			root.AssemblyLinearVelocity = Vector3.zero
+			local targetPos = seat.Position - Vector3.new(0, 14, 0)
+			task.defer(function()
+				if root.Parent then
+					root.CFrame = CFrame.new(targetPos)
+					root.AssemblyLinearVelocity = Vector3.zero
+				end
+			end)
 		end
 
 		if dunked then
@@ -315,6 +334,9 @@ local function buildGallery(at: Vector3, parent: Instance)
 			CFrame = duck.CFrame * CFrame.new(1.4, 2.6, 0),
 			Color = duck.Color,
 			Material = Enum.Material.SmoothPlastic,
+			Anchored = false,
+			CanCollide = false,
+			Massless = true,
 			Parent = parent,
 		})
 		head:SetAttribute("Carnival", "Duck")
@@ -461,6 +483,31 @@ function CarnivalService.Build(mapSize: number)
 	buildDunkTank(origin + Vector3.new(-45, 1, 0), folder)
 	buildGallery(origin + Vector3.new(30, 1, -30), folder)
 	buildStriker(origin + Vector3.new(35, 1, 35), folder)
+
+	-- Overhead warm fairground festoon string lights for Future-lighting ambience.
+	for idx, lightPos in {
+		origin + Vector3.new(-20, 26, -15),
+		origin + Vector3.new(10, 26, 0),
+		origin + Vector3.new(32, 26, 15),
+	} do
+		local bulb = Util.Part({
+			Name = "FairgroundBulb",
+			Size = Vector3.new(1.8, 1.8, 1.8),
+			CFrame = CFrame.new(lightPos),
+			Shape = Enum.PartType.Ball,
+			Color = if idx % 2 == 1 then Color3.fromRGB(255, 220, 130) else Color3.fromRGB(255, 160, 110),
+			Material = Enum.Material.Neon,
+			CanCollide = false,
+			CanQuery = false,
+			Parent = folder,
+		})
+		local glow = Instance.new("PointLight")
+		glow.Color = bulb.Color
+		glow.Brightness = 3.2
+		glow.Range = 55
+		glow.Shadows = true
+		glow.Parent = bulb
+	end
 end
 
 function CarnivalService.Clear()
@@ -471,6 +518,8 @@ function CarnivalService.Clear()
 	table.clear(ducks)
 	dunkSeat = nil
 	strikerPuck = nil
+	dunkWetUntil = 0
+	strikerUntil = 0
 end
 
 --[[ Ducks slide back and forth; a shot one lies down for a moment. ]]
@@ -498,8 +547,18 @@ local function step()
 	local puck = strikerPuck
 	if puck and puck.Parent then
 		local remaining = strikerUntil - now
-		local climbed = if remaining > 0 then (1 - remaining / 2.5) * 56 else 0
-		puck.CFrame = CFrame.new(puck.Position.X, origin.Y + 4 + climbed, puck.Position.Z)
+		local climbed = 0
+		if remaining > 0 then
+			local elapsed = 2.5 - remaining
+			if elapsed < 0.45 then
+				local t = elapsed / 0.45
+				climbed = (1 - (1 - t) * (1 - t)) * 56
+			else
+				local t = (elapsed - 0.45) / 2.05
+				climbed = (1 - t * t) * 56
+			end
+		end
+		puck.CFrame = CFrame.new(puck.Position.X, origin.Y + 5 + climbed, puck.Position.Z)
 	end
 end
 

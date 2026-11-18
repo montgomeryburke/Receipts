@@ -208,6 +208,9 @@ function EffectService.PlayDeathGag(position: Vector3)
 		return
 	end
 
+	if #Config.Effects.Gags == 0 then
+		return
+	end
 	local gag = Config.Effects.Gags[rng:NextInteger(1, #Config.Effects.Gags)]
 	if gag == "Donkey" then
 		spawnDonkey(position)
@@ -232,7 +235,30 @@ end
 	WIENER. The winning team gets hot dogs raining out of the sky and a very
 	large word across everybody's screen.
 ]]
+local celebrationGen = 0
+
+function EffectService.Clear()
+	celebrationGen += 1
+	local folder = workspace:FindFirstChild("ArenaEffects")
+	if folder then
+		folder:Destroy()
+	end
+end
+
+local function effectsContainer(): Folder
+	local existing = workspace:FindFirstChild("ArenaEffects")
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = "ArenaEffects"
+	folder.Parent = workspace
+	return folder
+end
+
 function EffectService.CelebrateWinner(teamName: string)
+	celebrationGen += 1
+	local myGen = celebrationGen
 	for _, player in Players:GetPlayers() do
 		Remotes.Event("PlayEffect"):FireClient(player, {
 			effect = "Wiener",
@@ -241,31 +267,34 @@ function EffectService.CelebrateWinner(teamName: string)
 		})
 	end
 
-	-- Actual hot dogs, falling on the arena.
 	task.spawn(function()
 		local deadline = os.clock() + Config.Effects.WienerDuration
-		while os.clock() < deadline do
+		local parent = effectsContainer()
+		while os.clock() < deadline and myGen == celebrationGen and parent.Parent do
 			local drop = Util.Part({
 				Name = "HotDog",
-				Size = Vector3.new(2, 2, 7),
+				Size = Vector3.new(7, 2, 2),
 				CFrame = CFrame.new(rng:NextNumber(-260, 260), 220, rng:NextNumber(-260, 260))
 					* CFrame.Angles(rng:NextNumber(0, 6), rng:NextNumber(0, 6), rng:NextNumber(0, 6)),
-				Color = Color3.fromRGB(220, 150, 90),
+				Shape = Enum.PartType.Cylinder,
+				Color = Color3.fromRGB(196, 98, 62),
 				Material = Enum.Material.SmoothPlastic,
 				Anchored = false,
 				CanCollide = false,
-				Parent = workspace,
+				CanQuery = false,
+				Parent = parent,
 			})
 
 			local bun = Util.Part({
 				Name = "Bun",
-				Size = Vector3.new(2.6, 1.2, 7.4),
-				CFrame = drop.CFrame * CFrame.new(0, -0.9, 0),
-				Color = Color3.fromRGB(240, 205, 140),
+				Size = Vector3.new(7.4, 1.3, 2.6),
+				CFrame = drop.CFrame * CFrame.new(0, -0.8, 0),
+				Color = Color3.fromRGB(238, 198, 132),
 				Anchored = false,
 				CanCollide = false,
+				CanQuery = false,
 				Massless = true,
-				Parent = workspace,
+				Parent = parent,
 			})
 			Util.Weld(drop, bun)
 

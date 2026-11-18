@@ -56,15 +56,32 @@ function Util.RayParams(ignore: { Instance }): RaycastParams
 	return params
 end
 
---[[ Nudge a direction off-course by up to `degrees`, for gun spread. ]]
-function Util.ApplySpread(direction: Vector3, degrees: number, rng: Random): Vector3
-	if degrees <= 0 then
-		return direction.Unit
+--[[ Safe CFrame.lookAt that avoids collinearity NaN when aiming straight up or down. ]]
+function Util.LookAt(position: Vector3, target: Vector3): CFrame
+	local delta = target - position
+	if delta.Magnitude < 1e-4 then
+		return CFrame.new(position)
 	end
-	local radians = math.rad(degrees)
-	local yaw = rng:NextNumber(-radians, radians)
-	local pitch = rng:NextNumber(-radians, radians)
-	return (CFrame.new(Vector3.zero, direction) * CFrame.Angles(pitch, yaw, 0)).LookVector
+	local unit = delta.Unit
+	local up = if math.abs(unit.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
+	return CFrame.lookAt(position, target, up)
+end
+
+--[[ Nudge a direction off-course by up to `degrees` in a circular cone. ]]
+function Util.ApplySpread(direction: Vector3, degrees: number, rng: Random): Vector3
+	if direction.Magnitude < 1e-4 then
+		return Vector3.new(0, 0, -1)
+	end
+	local unit = direction.Unit
+	if degrees <= 0 then
+		return unit
+	end
+	local maxRad = math.rad(degrees)
+	local angle = rng:NextNumber(0, math.pi * 2)
+	local radius = math.sqrt(rng:NextNumber()) * maxRad
+	local pitch = math.sin(angle) * radius
+	local yaw = math.cos(angle) * radius
+	return (Util.LookAt(Vector3.zero, unit) * CFrame.Angles(pitch, yaw, 0)).LookVector
 end
 
 --[[ The angle between two directions, in degrees. Used by auto-aim. ]]
@@ -117,8 +134,11 @@ function Util.SaneDirection(value: any): Vector3?
 end
 
 function Util.AngleBetween(a: Vector3, b: Vector3): number
+	if not Util.IsSaneVector(a) or not Util.IsSaneVector(b) then
+		return 180
+	end
 	local aMag, bMag = a.Magnitude, b.Magnitude
-	if aMag == 0 or bMag == 0 then
+	if not (aMag > 0 and bMag > 0) then
 		return 180
 	end
 	local dot = math.clamp(a.Unit:Dot(b.Unit), -1, 1)

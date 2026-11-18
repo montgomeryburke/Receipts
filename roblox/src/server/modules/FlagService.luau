@@ -296,7 +296,12 @@ local function onStandTouched(teamIndex: number, player: Player)
 	-- Halo's rule: your own flag has to be home for a capture to count.
 	local ownFlag = flags[teamIndex]
 	if Config.CTF.RequireOwnFlagHome and ownFlag and ownFlag.state ~= "Home" then
-		Remotes.Event("Notify"):FireClient(player, "Your own flag is not home — you cannot score yet!")
+		local now = os.clock()
+		local lastNotified = (player:GetAttribute("LastFlagNotify") :: number?) or 0
+		if now - lastNotified >= 2 then
+			player:SetAttribute("LastFlagNotify", now)
+			Remotes.Event("Notify"):FireClient(player, "Your own flag is not home — you cannot score yet!")
+		end
 		return
 	end
 
@@ -307,6 +312,10 @@ local function bindTouch(part: BasePart, handler: (Player) -> ())
 	part.Touched:Connect(function(hit)
 		local character = hit:FindFirstAncestorOfClass("Model")
 		if not character then
+			return
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if not humanoid or humanoid.Health <= 0 then
 			return
 		end
 		local player = Players:GetPlayerFromCharacter(character)
@@ -333,9 +342,10 @@ function FlagService.Setup(build: any, teamColours: { BrickColor })
 			continue
 		end
 
-		-- Behind the middle of that team's spawn line.
+		-- Just in front of that team's spawn line, safely inside the boundary walls.
 		local middle = spawns[math.max(1, math.floor(#spawns / 2))]
-		local home = Vector3.new(middle.X, 1, middle.Z * 1.04)
+		local inward = if middle.Z ~= 0 then -math.sign(middle.Z) * 20 else 0
+		local home = Vector3.new(middle.X, 1, middle.Z + inward)
 		local colour = teamColours[teamIndex] or BrickColor.new("Medium stone grey")
 
 		local stand = buildStand(home, colour, folder)
@@ -354,8 +364,22 @@ function FlagService.Setup(build: any, teamColours: { BrickColor })
 	active = true
 end
 
+function FlagService.IsCarrier(player: Player): boolean
+	for _, flag in flags do
+		if flag.carrier == player then
+			return true
+		end
+	end
+	return false
+end
+
 function FlagService.Clear()
 	active = false
+	for _, flag in flags do
+		if flag.carrier then
+			setCarrierSpeed(flag.carrier, false)
+		end
+	end
 	if container then
 		container:Destroy()
 		container = nil
@@ -402,7 +426,13 @@ local function step()
 	end
 end
 
+local started = false
+
 function FlagService.Start()
+	if started then
+		return
+	end
+	started = true
 	-- Dying drops whatever you were carrying, right where you fell.
 	DamageService.Killed.Connect(function(victim: Player, _killer: Player?, _cause: string)
 		for _, flag in flags do

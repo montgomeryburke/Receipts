@@ -28,6 +28,7 @@ local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
 local WildlifeService = {}
+local populationGeneration = 0
 
 type Dweller = {
 	kind: string,
@@ -290,7 +291,7 @@ local function spawnTarget(position: Vector3)
 		for ring = 1, 4 do
 			Util.Part({
 				Name = "Ring",
-				Size = Vector3.new(radius * 2, radius * 2, 0.2),
+				Size = Vector3.new(0.2, radius * 2, radius * 2),
 				CFrame = board.CFrame * CFrame.new(0, 0, facing * (0.45 + ring * 0.01)),
 				Shape = Enum.PartType.Cylinder,
 				Color = if ring % 2 == 1 then Color3.fromRGB(220, 40, 40) else Color3.fromRGB(250, 250, 250),
@@ -369,15 +370,13 @@ local function raisePoopColumn(pile: BasePart)
 
 	local column = Util.Part({
 		Name = "Column",
-		Size = Vector3.new(radius * 2, height, radius * 2),
-		CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)),
+		Size = Vector3.new(height, radius * 2, radius * 2),
+		CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(92, 64, 38),
-		Material = Enum.Material.Sand,
+		Material = Enum.Material.Mud,
 		Parent = model,
 	})
-	-- Stand the cylinder upright.
-	column.CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
 
 	-- The platform on top.
 	Util.Part({
@@ -473,7 +472,8 @@ local function dropPoop(position: Vector3)
 			return
 		end
 		local character = hit:FindFirstAncestorOfClass("Model")
-		local player = if character then Players:GetPlayerFromCharacter(character) else nil
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local player = if character and humanoid and humanoid.Health > 0 then Players:GetPlayerFromCharacter(character) else nil
 		if player then
 			collectPoop(player, pile)
 		end
@@ -549,9 +549,12 @@ local function kill(dweller: Dweller, attacker: Player?)
 	Debris:AddItem(anchor, 2.5)
 
 	local kind = dweller.kind
+	local gen = populationGeneration
 	dweller.model:Destroy()
 	task.delay(Config.Population.RespawnDelay, function()
-		respawnOne(kind)
+		if gen == populationGeneration then
+			respawnOne(kind)
+		end
 	end)
 end
 
@@ -637,12 +640,13 @@ local function nearestLiving(from: Vector3): (Player?, Vector3?, number)
 	return best, bestPosition, bestDistance
 end
 
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+
 local function groundHeight(position: Vector3, ignore: Instance): number
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { ignore }
-	local hit = workspace:Raycast(position + Vector3.new(0, 200, 0), Vector3.new(0, -600, 0), params)
-	return if hit then hit.Position.Y else 0
+	groundParams.FilterDescendantsInstances = { ignore }
+	local hit = workspace:Raycast(position + Vector3.new(0, 6, 0), Vector3.new(0, -24, 0), groundParams)
+	return if hit then hit.Position.Y else position.Y
 end
 
 local function stepDweller(dweller: Dweller, deltaTime: number)
@@ -690,7 +694,10 @@ local function stepDweller(dweller: Dweller, deltaTime: number)
 	end
 
 	local direction = toGoal.Unit
-	dweller.facing = (dweller.facing + (direction - dweller.facing) * math.min(1, deltaTime * 3)).Unit
+	local blended = dweller.facing + (direction - dweller.facing) * math.min(1, deltaTime * 3)
+	if blended.Magnitude > 1e-4 then
+		dweller.facing = blended.Unit
+	end
 	dweller.position += dweller.facing * speed * deltaTime
 	dweller.position = Vector3.new(
 		dweller.position.X,
@@ -746,6 +753,7 @@ function WildlifeService.Populate(mapSize: number)
 end
 
 function WildlifeService.Clear()
+	populationGeneration += 1
 	for _, dweller in dwellers do
 		if dweller.model.Parent then
 			dweller.model:Destroy()

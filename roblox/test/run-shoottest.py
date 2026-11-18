@@ -84,6 +84,11 @@ shooter._props.UserId = 1
 shooter._props.Character = shooterChar
 shooter._props.CharacterAdded = SIGNAL()
 shooter._props.LoadCharacterAsync = function() end
+-- Parented, because PlayerState now drops the state of any player whose
+-- Parent is nil -- which is the right fix for a real leak, and which wiped
+-- this player's points and equipped weapon between setting them and reading
+-- them back.
+shooter.Parent = Players
 
 -- A witness standing nearby. Shot visuals are broadcast to everyone close
 -- enough to see them -- and NOT to the shooter, whose own client already drew
@@ -96,6 +101,7 @@ witness._props.UserId = 2
 witness._props.Character = witnessChar
 witness._props.CharacterAdded = SIGNAL()
 witness._props.LoadCharacterAsync = function() end
+witness.Parent = Players
 
 rawget(Players, "_props").GetPlayers = function() return { shooter, witness } end
 rawget(Players, "_props").GetPlayerFromCharacter = function(_, c)

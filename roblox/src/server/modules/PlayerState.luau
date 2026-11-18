@@ -55,7 +55,7 @@ local function freshWeapons(): { [string]: WeaponSlotState }
 	local weapons = {}
 	for name, spec in Config.Weapons do
 		weapons[name] = {
-			ammo = spec.MagSize,
+			ammo = if spec.AmmoFromPickupsOnly then 0 else spec.MagSize,
 			reloadingUntil = 0,
 			nextFireAt = 0,
 		}
@@ -79,7 +79,9 @@ function PlayerState.Reset(player: Player, keepProgress: boolean)
 		lastDamagedAt = 0,
 		keys = if keepProgress and previous then previous.keys else 0,
 		carTier = if keepProgress and previous then previous.carTier else 1,
-		megaCharges = Config.Mega.FreeChargesPerLife,
+		megaCharges = if keepProgress and previous
+			then math.max(Config.Mega.FreeChargesPerLife, previous.megaCharges)
+			else Config.Mega.FreeChargesPerLife,
 		equipped = Config.StartingLoadout[1],
 		weapons = freshWeapons(),
 		burgerUntil = 0,
@@ -102,9 +104,35 @@ end
 
 --[[ The live state for a player, creating it if this is the first ask. ]]
 function PlayerState.Get(player: Player): State
-	if not states[player] then
-		PlayerState.Reset(player, false)
+	local existing = states[player]
+	if existing then
+		return existing
 	end
+	if not player.Parent then
+		-- Return an untracked dummy state so departed players never leak into `states`.
+		return {
+			shield = 0,
+			maxShield = 0,
+			lastDamagedAt = 0,
+			keys = 0,
+			carTier = 1,
+			megaCharges = 0,
+			equipped = Config.StartingLoadout[1],
+			weapons = freshWeapons(),
+			burgerUntil = 0,
+			friesUntil = 0,
+			spawnProtectedUntil = 0,
+			nextMeleeAt = 0,
+			points = 0,
+			multiplierUntil = 0,
+			multiplierAmount = 1,
+			kills = 0,
+			deaths = 0,
+			vehicle = nil,
+			seatRole = nil,
+		}
+	end
+	PlayerState.Reset(player, false)
 	return states[player]
 end
 
@@ -150,15 +178,27 @@ end
 function PlayerState.RegenerateShields(deltaTime: number)
 	local now = os.clock()
 	for player, state in states do
+		if not player.Parent then
+			states[player] = nil
+			continue
+		end
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not humanoid or humanoid.Health <= 0 then
+			continue
+		end
 		if state.maxShield > 0
 			and state.shield < state.maxShield
 			and now - state.lastDamagedAt > Config.Combat.ShieldRegenDelay
 		then
+			local prevFloor = math.floor(state.shield)
 			state.shield = math.min(
 				state.maxShield,
 				state.shield + Config.Combat.ShieldRegenPerSecond * deltaTime
 			)
-			PlayerState.Changed.Fire(player)
+			if math.floor(state.shield) ~= prevFloor or state.shield >= state.maxShield then
+				PlayerState.Changed.Fire(player)
+			end
 		end
 	end
 end

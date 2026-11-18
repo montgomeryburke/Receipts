@@ -59,6 +59,12 @@ local function getReceiptStore(): GlobalDataStore?
 end
 
 --[[ Does this player own a pass? In free mode, everybody owns everything. ]]
+local passCache: { [number]: { [string]: boolean } } = {}
+
+Players.PlayerRemoving:Connect(function(player)
+	passCache[player.UserId] = nil
+end)
+
 function MonetizationService.OwnsPass(player: Player, passKey: string): boolean
 	if Config.FreeMode then
 		return true
@@ -66,13 +72,27 @@ function MonetizationService.OwnsPass(player: Player, passKey: string): boolean
 
 	local passId = Config.GamePasses[passKey]
 	if not passId or passId == 0 then
-		return true
+		return false
+	end
+
+	local userCache = passCache[player.UserId]
+	if userCache and userCache[passKey] ~= nil then
+		return userCache[passKey]
 	end
 
 	local success, owns = pcall(function()
 		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passId)
 	end)
-	return success and owns == true
+	local result = success and owns == true
+	if success then
+		-- `or {}` rather than an if: reassigning an existing cache to itself
+		-- is harmless, and this is the only shape strict mode can see as
+		-- definitely-a-table.
+		local cache: { [string]: boolean } = userCache or {}
+		passCache[player.UserId] = cache
+		cache[passKey] = result
+	end
+	return result
 end
 
 --[[ Give out whatever a product was bought for. Returns false if it could not. ]]
@@ -130,38 +150,34 @@ function MonetizationService.Start()
 			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
 
-		-- Already paid out? Say yes and stop.
-		local readSuccess, alreadyGranted = pcall(function()
-			return store:GetAsync(receiptKey)
-		end)
-		if readSuccess and alreadyGranted then
-			return Enum.ProductPurchaseDecision.PurchaseGranted
-		end
-		if not readSuccess then
-			-- We cannot tell whether they were already paid. Refusing to guess
-			-- is the safe move; Roblox retries.
-			return Enum.ProductPurchaseDecision.NotProcessedYet
-		end
-
 		local productKey = productKeyFromId(receiptInfo.ProductId)
 		if not productKey then
 			warn(`MonetizationService: unknown product {receiptInfo.ProductId}`)
 			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
 
-		if not grantProduct(player, productKey) then
-			return Enum.ProductPurchaseDecision.NotProcessedYet
-		end
-
-		-- Record the receipt BEFORE telling Roblox it is done. If this write
-		-- fails we must not confirm, or a retry would pay out twice.
-		local writeSuccess = pcall(function()
-			store:SetAsync(receiptKey, true)
+		-- Atomically claim the receipt before granting so retries can never double-grant.
+		local alreadyClaimed = false
+		local claimOk = pcall(function()
+			store:UpdateAsync(receiptKey, function(old)
+				if old then
+					alreadyClaimed = true
+					return old
+				end
+				return true
+			end)
 		end)
-		if not writeSuccess then
+		if not claimOk then
 			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
+		if alreadyClaimed then
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+		if not player.Parent then
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
 
+		grantProduct(player, productKey)
 		Remotes.Event("Notify"):FireClient(player, "Purchase complete. Thank you!")
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end

@@ -30,9 +30,16 @@ local Hud = require(script.Parent:WaitForChild("Hud"))
 local Feel = require(script.Parent:WaitForChild("Feel"))
 
 local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
+
+local function getCamera(): Camera?
+	return workspace.CurrentCamera
+end
 
 local Controls = {}
+local controlsStarted = false
+local inFight = false
+local lastAimSentAt = 0
+local lastLockCheckAt = 0
 
 type ArsenalEntry = {
 	Slot: number,
@@ -173,7 +180,15 @@ local function findAutoAimTarget(origin: Vector3, aimDirection: Vector3): BasePa
 		local angle = Util.AngleBetween(aimDirection, toTarget)
 		if angle < bestAngle then
 			-- Only lock on if we can actually see them.
-			local params = Util.RayParams({ player.Character :: Instance, character })
+			local ignoreList: { Instance } = { player.Character :: Instance, character }
+			local myHum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			if myHum and myHum.SeatPart then
+				local veh = myHum.SeatPart:FindFirstAncestorOfClass("Model")
+				if veh then
+					table.insert(ignoreList, veh)
+				end
+			end
+			local params = Util.RayParams(ignoreList)
 			local blocked = workspace:Raycast(origin, toTarget, params)
 			if not blocked then
 				best = torso
@@ -192,16 +207,21 @@ local function currentAimDirection(): (Vector3?, Vector3?)
 		return nil, nil
 	end
 
-	local rawDirection = camera.CFrame.LookVector
+	local cam = getCamera()
+	if not cam then
+		return nil, nil
+	end
+	local rawDirection = cam.CFrame.LookVector
 	local spec = arsenal[effectiveWeaponName()]
 
-	-- Auto-aim is always on for touch players. Aiming precisely with a thumb
-	-- on glass is not a fair fight against a mouse.
-	if spec and (spec.AutoAim or UserInputService.TouchEnabled) then
+	if spec and (spec.AutoAim or (UserInputService.TouchEnabled and not UserInputService.MouseEnabled)) then
 		local target = findAutoAimTarget(origin, rawDirection)
 		lockedTarget = target
 		if target then
-			return origin, (target.Position - origin).Unit
+			local delta = target.Position - origin
+			if delta.Magnitude > 0.001 then
+				return origin, delta.Unit
+			end
 		end
 	else
 		lockedTarget = nil
@@ -211,6 +231,12 @@ local function currentAimDirection(): (Vector3?, Vector3?)
 end
 
 -- ==================================================================== FIRING ==
+
+-- Declared up here because onInputBegan reads it, and onInputBegan is
+-- defined well above where this used to sit -- which made it a nil global
+-- rather than this local, so the "ignore clicks while the cursor is free"
+-- guard silently did nothing.
+local mouseFree = false
 
 local nextShotFeedback = 0
 
@@ -268,6 +294,13 @@ local function tryFire()
 	local character = player.Character
 	if character then
 		table.insert(ignore, character)
+		local hum = character:FindFirstChildOfClass("Humanoid")
+		if hum and hum.SeatPart then
+			local veh = hum.SeatPart:FindFirstAncestorOfClass("Model")
+			if veh then
+				table.insert(ignore, veh)
+			end
+		end
 	end
 	local look = workspace:Raycast(origin, direction * spec.Range, Util.RayParams(ignore))
 	local endPoint = if look then look.Position else origin + direction * spec.Range
@@ -285,25 +318,33 @@ end
 	a room without losing track of where you are.
 ]]
 local function applyZoom()
+	local cam = getCamera()
 	local spec = arsenal[effectiveWeaponName()]
 	local levels = spec and spec.ZoomLevels
 
-	if not levels or zoomStage < 1 then
+	if zoomStage < 1 or (not levels and not (spec and spec.ZoomFov)) then
 		zoomStage = 0
-		TweenService:Create(camera, TweenInfo.new(0.12), { FieldOfView = defaultFov }):Play()
-		-- Back over the shoulder.
+		if cam then
+			TweenService:Create(cam, TweenInfo.new(0.12), { FieldOfView = defaultFov }):Play()
+		end
 		player.CameraMode = Enum.CameraMode.Classic
 		Hud.SetZoom(0)
 		return
 	end
 
-	local magnification = levels[math.clamp(zoomStage, 1, #levels)]
-	TweenService:Create(camera, TweenInfo.new(0.12), {
-		FieldOfView = defaultFov / magnification,
-	}):Play()
-	-- Down the sight properly. Zoomed out over the shoulder, the character's
-	-- own head sits in the middle of the scope and hides what you are
-	-- aiming at; first person puts the camera where his eye is.
+	local targetFov: number
+	local magnification: number
+	if levels and #levels > 0 then
+		magnification = levels[math.clamp(zoomStage, 1, #levels)]
+		targetFov = defaultFov / magnification
+	else
+		targetFov = (spec and spec.ZoomFov) or defaultFov
+		magnification = math.floor(defaultFov / math.max(targetFov, 1) + 0.5)
+	end
+
+	if cam then
+		TweenService:Create(cam, TweenInfo.new(0.12), { FieldOfView = targetFov }):Play()
+	end
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
 	Hud.SetZoom(magnification)
 end
@@ -313,15 +354,9 @@ local function cycleZoom()
 	local spec = arsenal[effectiveWeaponName()]
 	local levels = spec and spec.ZoomLevels
 	if not levels or #levels == 0 then
-		-- A gun with a single fixed scope still toggles.
 		if spec and spec.ZoomFov then
 			zoomStage = if zoomStage == 0 then 1 else 0
-			if zoomStage == 1 then
-				TweenService:Create(camera, TweenInfo.new(0.12), { FieldOfView = spec.ZoomFov }):Play()
-				Hud.SetZoom(math.floor(defaultFov / spec.ZoomFov + 0.5))
-			else
-				applyZoom()
-			end
+			applyZoom()
 		end
 		return
 	end
@@ -432,7 +467,7 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	local isMouseButton = input.UserInputType == Enum.UserInputType.MouseButton1
 		or input.UserInputType == Enum.UserInputType.MouseButton2
 
-	if processed and not isMouseButton then
+	if (processed and not isMouseButton) or (isMouseButton and mouseFree) then
 		return
 	end
 
@@ -546,18 +581,39 @@ local function onHeartbeat()
 		tryFire()
 	end
 
+	local now = os.clock()
+	if now - lastLockCheckAt >= 0.06 then
+		lastLockCheckAt = now
+		local spec = arsenal[effectiveWeaponName()]
+		local cam = getCamera()
+		local origin = shotOrigin()
+		if spec and cam and origin and (spec.AutoAim or (UserInputService.TouchEnabled and not UserInputService.MouseEnabled)) then
+			lockedTarget = findAutoAimTarget(origin, cam.CFrame.LookVector)
+		else
+			lockedTarget = nil
+		end
+	end
+
 	Hud.SetLocked(lockedTarget ~= nil)
 	updateLook()
 
-	-- If we are working a mounted gun, tell the server where to point it.
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if humanoid and humanoid.SeatPart and humanoid.SeatPart.Name == "GunnerSeat" then
+	if (not humanoid or humanoid.Health <= 0) and zoomStage > 0 then
+		clearZoom()
+	end
+
+	if humanoid and humanoid.SeatPart and humanoid.SeatPart.Name == "GunnerSeat" and now - lastAimSentAt >= 0.05 then
+		lastAimSentAt = now
+		local cam = getCamera()
 		local origin = shotOrigin()
-		if origin then
-			local aim = camera.CFrame.LookVector
-			if lockedTarget then
-				aim = (lockedTarget.Position - origin).Unit
+		if origin and cam then
+			local aim = cam.CFrame.LookVector
+			if lockedTarget and lockedTarget.Parent then
+				local delta = lockedTarget.Position - origin
+				if delta.Magnitude > 0.001 then
+					aim = delta.Unit
+				end
 			end
 			Remotes.Event("SetAimDirection"):FireServer(origin + aim * 300)
 		end
@@ -567,7 +623,6 @@ end
 -- ============================================================== LOOK & AIM ==
 
 --[[ While the vote panel is up the cursor has to be free to click it. ]]
-local mouseFree = false
 
 function Controls.SetMouseFree(free: boolean)
 	mouseFree = free
@@ -582,7 +637,7 @@ end
 	there is no loose cursor to drift over a HUD element and eat your clicks.
 ]]
 function updateLook()
-	if UserInputService.TouchEnabled then
+	if UserInputService.TouchEnabled and not UserInputService.MouseEnabled then
 		return
 	end
 
@@ -594,7 +649,6 @@ function updateLook()
 		return
 	end
 
-	-- Roblox resets this, so it is re-asserted every frame.
 	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 	UserInputService.MouseIconEnabled = false
 
@@ -607,21 +661,20 @@ function updateLook()
 	if humanoid.Health <= 0 then
 		return
 	end
-	-- In a vehicle the seat decides which way you face; do not fight it.
 	if humanoid.SeatPart then
 		humanoid.AutoRotate = true
+		humanoid.CameraOffset = Vector3.zero
 		return
 	end
 
 	humanoid.AutoRotate = false
+	humanoid.CameraOffset = if zoomStage > 0 then Vector3.zero else Vector3.new(1.8, 3.2, 0)
 
-	-- Lift the camera above his head and out to the side. The crosshair sits
-	-- in the middle of the screen, and from directly behind that put it
-	-- squarely on the back of his skull — you could not see what you were
-	-- shooting at.
-	humanoid.CameraOffset = Vector3.new(1.8, 3.2, 0)
-
-	local look = camera.CFrame.LookVector
+	local cam = getCamera()
+	if not cam then
+		return
+	end
+	local look = cam.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
 	if flat.Magnitude < 0.01 then
 		return
@@ -797,7 +850,12 @@ end
 -- ===================================================================== START ==
 
 function Controls.Start()
-	defaultFov = camera.FieldOfView
+	if controlsStarted then
+		return
+	end
+	controlsStarted = true
+	local cam = getCamera()
+	defaultFov = if cam then cam.FieldOfView else 70
 
 	-- Built straight from Config rather than asked for over the network.
 	--
@@ -832,6 +890,7 @@ function Controls.Start()
 	for _, name in Config.StartingLoadout do
 		if arsenal[name] then
 			equipped = name
+			slotChoice[arsenal[name].Slot] = name
 			break
 		end
 	end
@@ -840,6 +899,11 @@ function Controls.Start()
 
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UserInputService.InputEnded:Connect(onInputEnded)
+	UserInputService.WindowFocusReleased:Connect(function()
+		firing = false
+		Remotes.Event("SetTurbo"):FireServer(false)
+		Hud.SetTurbo(false)
+	end)
 	RunService.Heartbeat:Connect(onHeartbeat)
 
 	buildTouchButton()
@@ -851,6 +915,19 @@ function Controls.EquippedName(): string
 end
 
 --[[ Whether the scoreboard is up, for tests. ]]
+--[[
+	Allow Start() to run again, for tests.
+
+	Start() is idempotent in production on purpose -- it used to be able to
+	double-connect every input handler when the retry loop fired. A test that
+	needs to bring the controls up as a different kind of device has to be
+	able to clear that latch, and doing it through a named function is
+	honester than reaching into the module.
+]]
+function Controls.ResetForTests()
+	controlsStarted = false
+end
+
 --[[ A fight started or finished; F throws punches while one is running. ]]
 function Controls.SetFighting(fighting: boolean)
 	fightSwings = if fighting then 1 else 0

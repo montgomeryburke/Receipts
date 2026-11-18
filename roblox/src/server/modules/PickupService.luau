@@ -17,6 +17,7 @@ local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 
 local PickupService = {}
 
@@ -95,7 +96,7 @@ local function grant(player: Player, kind: string, weapon: string?)
 	local now = os.clock()
 
 	if kind == "Burger" then
-		state.burgerUntil = now + Config.Pickups.Burger.Duration
+		state.burgerUntil = math.max(state.burgerUntil, now + Config.Pickups.Burger.Duration)
 	elseif kind == "Fries" then
 		state.friesUntil = now + Config.Pickups.Fries.Duration
 	elseif kind == "Shield" then
@@ -119,7 +120,7 @@ local function grant(player: Player, kind: string, weapon: string?)
 		end
 	elseif kind == "Invincibility" then
 		-- Twenty seconds of nothing being able to touch you.
-		state.burgerUntil = now + Config.Pickups.Invincibility.Duration
+		state.burgerUntil = math.max(state.burgerUntil, now + Config.Pickups.Invincibility.Duration)
 	elseif kind == "PoopAmmo" then
 		local slot = state.weapons.Poop
 		local spec = Config.Weapons.Poop
@@ -142,7 +143,10 @@ local function grant(player: Player, kind: string, weapon: string?)
 		if spec and not spec.MountedOnly then
 			state.equipped = weapon
 			local slot = state.weapons[weapon]
-			if slot then
+			if not slot then
+				slot = { ammo = spec.MagSize, reloadingUntil = 0, nextFireAt = 0 }
+				state.weapons[weapon] = slot
+			else
 				slot.ammo = spec.MagSize
 				slot.reloadingUntil = 0
 			end
@@ -202,12 +206,26 @@ local function createPickup(kind: string, position: Vector3, parent: Folder, wea
 		if not pickup.available then
 			return
 		end
+		local player: Player? = nil
 		local character = hit:FindFirstAncestorOfClass("Model")
-		if not character then
+		if character then
+			player = Players:GetPlayerFromCharacter(character)
+		end
+		if not player then
+			local vehicle = VehicleService.FromPart(hit)
+			if vehicle then
+				local seat = vehicle:FindFirstChild("DriverSeat")
+				if seat and seat:IsA("Seat") and seat.Occupant and seat.Occupant.Parent then
+					player = Players:GetPlayerFromCharacter(seat.Occupant.Parent :: Model)
+				end
+			end
+		end
+		if not player then
 			return
 		end
-		local player = Players:GetPlayerFromCharacter(character)
-		if not player then
+		local pChar = player.Character
+		local pHum = pChar and pChar:FindFirstChildOfClass("Humanoid")
+		if not pHum or pHum.Health <= 0 then
 			return
 		end
 

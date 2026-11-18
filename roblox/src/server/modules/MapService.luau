@@ -71,7 +71,7 @@ local function staircase(bottom: Vector3, direction: Vector3, rise: number, widt
 	flat = if flat.Magnitude < 0.01 then Vector3.new(0, 0, 1) else flat.Unit
 
 	local stepRise = rise / STAIR_STEPS
-	local stepRun = 3.2
+	local stepRun = 1.55
 
 	for index = 1, STAIR_STEPS do
 		local centre = bottom
@@ -259,9 +259,35 @@ local function building(
 		)
 	end
 
-	-- Roof lip, so the roof is cover rather than a slide.
+	-- Architectural glazing bands on upper floors so buildings catch sky reflections under Future lighting.
+	for floor = 2, floors do
+		local wy = (floor - 1) * FLOOR_HEIGHT + FLOOR_HEIGHT * 0.56
+		local bandW = math.max(12, footprint - 14)
+		for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
+			Util.Part({
+				Name = "WindowBand",
+				Size = Vector3.new(
+					if side.X ~= 0 then 0.6 else bandW,
+					5.5,
+					if side.Z ~= 0 then 0.6 else bandW
+				),
+				CFrame = CFrame.new(origin + side * (half + 0.15) + Vector3.new(0, wy, 0)),
+				Color = Color3.fromRGB(48, 68, 86),
+				Material = Enum.Material.Glass,
+				Reflectance = 0.42,
+				Transparency = 0.18,
+				CanCollide = false,
+				Parent = parent,
+			})
+		end
+	end
+
+	-- Roof lip with a gap on the vehicle ramp entry side so cars drive cleanly onto the roof.
 	local roofY = floors * FLOOR_HEIGHT + SLAB
 	for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
+		if vehicleRamp ~= false and side.Z == -1 then
+			continue
+		end
 		Util.Part({
 			Name = "RoofLip",
 			Size = Vector3.new(
@@ -271,10 +297,20 @@ local function building(
 			),
 			CFrame = CFrame.new(origin + side * half + Vector3.new(0, roofY + 2, 0)),
 			Color = color:Lerp(Color3.new(0, 0, 0), 0.25),
-			Material = Enum.Material.Brick,
+			Material = Enum.Material.Concrete,
 			Parent = parent,
 		})
 	end
+
+	-- Rooftop HVAC unit for realistic skyline silhouette.
+	Util.Part({
+		Name = "RoofHVAC",
+		Size = Vector3.new(8, 4.5, 6),
+		CFrame = CFrame.new(origin + Vector3.new(-half * 0.45, roofY + 2.25, -half * 0.45)),
+		Color = Color3.fromRGB(132, 138, 144),
+		Material = Enum.Material.Metal,
+		Parent = parent,
+	})
 
 	if vehicleRamp == false then
 		return roofY
@@ -384,7 +420,7 @@ local function boostArrows(origin: Vector3, direction: Vector3, parent: Instance
 			local bar = Util.Part({
 				Name = "BoostPad",
 				Size = Vector3.new(3, 0.6, 9),
-				CFrame = CFrame.lookAt(centre + Vector3.new(0, 1.1, 0), centre + flat)
+				CFrame = CFrame.lookAt(centre + Vector3.new(0, 1.1, 0), centre + Vector3.new(0, 1.1, 0) + flat)
 					* CFrame.new(side * 4, 0, 0)
 					* CFrame.Angles(0, side * math.rad(28), 0),
 				Color = Color3.fromRGB(255, 190, 40),
@@ -444,18 +480,21 @@ end
 local ROAD_WIDTH = 40
 
 local function streets(size: number, pitch: number, offsets: { number }, parent: Instance)
-	local roadColor = Color3.fromRGB(56, 56, 60)
-	local kerbColor = Color3.fromRGB(150, 148, 142)
+	local roadColor = Color3.fromRGB(52, 54, 58)
+	local kerbColor = Color3.fromRGB(148, 146, 140)
+	local span = if #offsets >= 2 then (offsets[#offsets] - offsets[1]) + ROAD_WIDTH else size
 
 	for _, offset in offsets do
-		-- The carriageway, both ways.
+		-- The carriageway, both ways; slight 0.02 Y offset eliminates Z-fighting at junctions.
 		for _, alongZ in { true, false } do
+			local yRoad = if alongZ then 0.6 else 0.62
+			local yLine = if alongZ then 1.13 else 1.15
 			Util.Part({
 				Name = "Street",
 				Size = if alongZ
-					then Vector3.new(ROAD_WIDTH, 1, size)
-					else Vector3.new(size, 1, ROAD_WIDTH),
-				CFrame = if alongZ then CFrame.new(offset, 0.6, 0) else CFrame.new(0, 0.6, offset),
+					then Vector3.new(ROAD_WIDTH, 1, span)
+					else Vector3.new(span, 1, ROAD_WIDTH),
+				CFrame = if alongZ then CFrame.new(offset, yRoad, 0) else CFrame.new(0, yRoad, offset),
 				Color = roadColor,
 				Material = Enum.Material.Asphalt,
 				Parent = parent,
@@ -464,26 +503,33 @@ local function streets(size: number, pitch: number, offsets: { number }, parent:
 			-- Centre line, so the road reads as a road at speed.
 			Util.Part({
 				Name = "Line",
-				Size = if alongZ then Vector3.new(1.6, 1, size) else Vector3.new(size, 1, 1.6),
-				CFrame = if alongZ then CFrame.new(offset, 1.15, 0) else CFrame.new(0, 1.15, offset),
-				Color = Color3.fromRGB(214, 194, 92),
+				Size = if alongZ then Vector3.new(1.4, 0.1, span) else Vector3.new(span, 0.1, 1.4),
+				CFrame = if alongZ then CFrame.new(offset, yLine, 0) else CFrame.new(0, yLine, offset),
+				Color = Color3.fromRGB(220, 196, 86),
 				Material = Enum.Material.SmoothPlastic,
 				CanCollide = false,
 				Parent = parent,
 			})
 
-			-- Kerbs down both sides. Low enough to drive over, high enough
-			-- to see, which is what makes the road feel like a road.
+			-- Segmented kerbs between intersections so kerbs never block cross-streets.
 			for _, side in { -1, 1 } do
 				local edge = offset + side * (ROAD_WIDTH * 0.5 + 2)
-				Util.Part({
-					Name = "Kerb",
-					Size = if alongZ then Vector3.new(4, 1.6, size) else Vector3.new(size, 1.6, 4),
-					CFrame = if alongZ then CFrame.new(edge, 1, 0) else CFrame.new(0, 1, edge),
-					Color = kerbColor,
-					Material = Enum.Material.Concrete,
-					Parent = parent,
-				})
+				for seg = 1, #offsets - 1 do
+					local segStart = offsets[seg] + ROAD_WIDTH * 0.5 + 4
+					local segEnd = offsets[seg + 1] - ROAD_WIDTH * 0.5 - 4
+					local segLen = segEnd - segStart
+					if segLen > 4 then
+						local mid = (segStart + segEnd) * 0.5
+						Util.Part({
+							Name = "Kerb",
+							Size = if alongZ then Vector3.new(4, 1.4, segLen) else Vector3.new(segLen, 1.4, 4),
+							CFrame = if alongZ then CFrame.new(edge, 0.9, mid) else CFrame.new(mid, 0.9, edge),
+							Color = kerbColor,
+							Material = Enum.Material.Concrete,
+							Parent = parent,
+						})
+					end
+				end
 			end
 		end
 	end
@@ -618,8 +664,12 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 
 	local size = mapConfig.Size
 	local half = size * 0.5
-	-- The same seed every time, so a map looks the way players remember it.
-	local rng = Random.new(#mapConfig.Id * 7919)
+	-- Deterministic polynomial hash of mapConfig.Id so every map gets a unique layout.
+	local seed = 5381
+	for i = 1, #mapConfig.Id do
+		seed = (seed * 33 + string.byte(mapConfig.Id, i)) % 2147483647
+	end
+	local rng = Random.new(seed)
 
 	-- The floor. One flat slab, so nothing snags a wheel.
 	Util.Part({
@@ -793,8 +843,8 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 			local alongX = rng:NextNumber() < 0.5
 			for _, side in { -1, 1 } do
 				local spot = block.center + if alongX
-					then Vector3.new(side * shift * 0.5, 0, 0)
-					else Vector3.new(0, 0, side * shift * 0.5)
+					then Vector3.new(side * shift, 0, 0)
+					else Vector3.new(0, 0, side * shift)
 				local roof = building(spot, footprint, rng:NextInteger(2, 3), mapConfig.Theme, model, false)
 				table.insert(towers, {
 					center = spot,
@@ -1060,12 +1110,15 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		table.insert(vehiclePads, { position = at, kind = "Tube" })
 	end
 	for index, at in resort.skiPads do
-		-- Skis at the summit, and a glider beside them. The lower lift
-		-- station gets a glider too, so being shot down is not the end of
-		-- flying for the whole round.
 		table.insert(vehiclePads, {
 			position = at + Vector3.new(0, 2, 0),
 			kind = if index == 2 then "Glider" else "Skis",
+		})
+	end
+	if resort.liftStations[1] then
+		table.insert(vehiclePads, {
+			position = resort.liftStations[1] + Vector3.new(0, 2, -24),
+			kind = "Glider",
 		})
 	end
 

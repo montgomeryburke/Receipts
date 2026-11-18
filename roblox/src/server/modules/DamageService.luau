@@ -47,7 +47,7 @@ function DamageService.ApplyDamage(
 	attacker: Player?,
 	cause: string?
 ): boolean
-	if amount <= 0 then
+	if not (amount > 0) or amount == math.huge then
 		return false
 	end
 
@@ -60,8 +60,8 @@ function DamageService.ApplyDamage(
 		return false
 	end
 
-	-- Freshly spawned, or chewing an invincibility burger.
-	if PlayerState.IsInvincible(victim) then
+	-- Freshly spawned, ForceField protected, or chewing an invincibility burger.
+	if PlayerState.IsInvincible(victim) or character:FindFirstChildOfClass("ForceField") then
 		return false
 	end
 
@@ -109,10 +109,12 @@ end
 
 --[[ Book-keeping for a death: keys to the killer, a tally for both. ]]
 function DamageService.HandleDeath(victim: Player, killer: Player?, cause: string)
-	local victimState = PlayerState.Get(victim)
-	victimState.deaths += 1
+	if victim.Parent then
+		local victimState = PlayerState.Get(victim)
+		victimState.deaths += 1
+	end
 
-	if killer and killer ~= victim then
+	if killer and killer ~= victim and killer.Parent then
 		local killerState = PlayerState.Get(killer)
 		killerState.kills += 1
 		-- Keys are the progression: every kill moves you toward a faster car.
@@ -133,8 +135,13 @@ function DamageService.Explode(
 	maxDamage: number,
 	attacker: Player?,
 	vehicleMultiplier: number?,
-	isMega: boolean?
+	isMega: boolean?,
+	cause: string?
 )
+	if not (radius > 0) or radius == math.huge then
+		return
+	end
+	local damageCause = cause or "Explosion"
 	if isMega then
 		DamageService.MegaBlast.Fire(position, radius, attacker)
 	end
@@ -160,7 +167,7 @@ function DamageService.Explode(
 			local distance = (root.Position - position).Magnitude
 			if distance <= radius then
 				local falloff = 1 - (distance / radius)
-				DamageService.ApplyDamage(player, maxDamage * falloff, attacker, "Explosion")
+				DamageService.ApplyDamage(player, maxDamage * falloff, attacker, damageCause)
 			end
 		end
 	end
@@ -216,20 +223,18 @@ VehicleService.Wrecked.Connect(function(
 end)
 
 function DamageService.Crater(position: Vector3, radius: number)
+	-- Cylinder height is Size.X; diameter is Size.Y/Size.Z.
 	local crater = Util.Part({
 		Name = "Crater",
-		Size = Vector3.new(radius * 2, Config.Mega.CraterDepth, radius * 2),
-		CFrame = CFrame.new(position - Vector3.new(0, Config.Mega.CraterDepth * 0.4, 0)),
+		Size = Vector3.new(Config.Mega.CraterDepth, radius * 2, radius * 2),
+		CFrame = CFrame.new(position - Vector3.new(0, Config.Mega.CraterDepth * 0.4, 0))
+			* CFrame.Angles(0, 0, math.rad(90)),
 		Shape = Enum.PartType.Cylinder,
-		Color = Color3.fromRGB(52, 38, 24),
+		Color = Color3.fromRGB(48, 34, 22),
 		Material = Enum.Material.Mud,
 		CanCollide = false,
 		Parent = workspace:FindFirstChild("Arena") or workspace,
 	})
-	-- A cylinder lies on its own X axis, so stand it upright to be a hole.
-	crater.CFrame = CFrame.new(position - Vector3.new(0, Config.Mega.CraterDepth * 0.4, 0))
-		* CFrame.Angles(0, 0, math.rad(90))
-	-- Craters fade rather than piling up forever and eating the frame rate.
 	Util.DestroyAfter(crater, 45)
 end
 

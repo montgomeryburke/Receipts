@@ -70,7 +70,7 @@ so do not report things the typechecker would already catch.
   made vehicles immobile for six iterations.
 
 ---
-Reviewing commit `a5853bc`.
+Reviewing commit `3e1b4ef`.
 
 ---
 
@@ -1334,15 +1334,32 @@ function Util.RayParams(ignore: { Instance }): RaycastParams
 	return params
 end
 
---[[ Nudge a direction off-course by up to `degrees`, for gun spread. ]]
-function Util.ApplySpread(direction: Vector3, degrees: number, rng: Random): Vector3
-	if degrees <= 0 then
-		return direction.Unit
+--[[ Safe CFrame.lookAt that avoids collinearity NaN when aiming straight up or down. ]]
+function Util.LookAt(position: Vector3, target: Vector3): CFrame
+	local delta = target - position
+	if delta.Magnitude < 1e-4 then
+		return CFrame.new(position)
 	end
-	local radians = math.rad(degrees)
-	local yaw = rng:NextNumber(-radians, radians)
-	local pitch = rng:NextNumber(-radians, radians)
-	return (CFrame.new(Vector3.zero, direction) * CFrame.Angles(pitch, yaw, 0)).LookVector
+	local unit = delta.Unit
+	local up = if math.abs(unit.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
+	return CFrame.lookAt(position, target, up)
+end
+
+--[[ Nudge a direction off-course by up to `degrees` in a circular cone. ]]
+function Util.ApplySpread(direction: Vector3, degrees: number, rng: Random): Vector3
+	if direction.Magnitude < 1e-4 then
+		return Vector3.new(0, 0, -1)
+	end
+	local unit = direction.Unit
+	if degrees <= 0 then
+		return unit
+	end
+	local maxRad = math.rad(degrees)
+	local angle = rng:NextNumber(0, math.pi * 2)
+	local radius = math.sqrt(rng:NextNumber()) * maxRad
+	local pitch = math.sin(angle) * radius
+	local yaw = math.cos(angle) * radius
+	return (Util.LookAt(Vector3.zero, unit) * CFrame.Angles(pitch, yaw, 0)).LookVector
 end
 
 --[[ The angle between two directions, in degrees. Used by auto-aim. ]]
@@ -1395,8 +1412,11 @@ function Util.SaneDirection(value: any): Vector3?
 end
 
 function Util.AngleBetween(a: Vector3, b: Vector3): number
+	if not Util.IsSaneVector(a) or not Util.IsSaneVector(b) then
+		return 180
+	end
 	local aMag, bMag = a.Magnitude, b.Magnitude
-	if aMag == 0 or bMag == 0 then
+	if not (aMag > 0 and bMag > 0) then
 		return 180
 	end
 	local dot = math.clamp(a.Unit:Dot(b.Unit), -1, 1)
@@ -1931,7 +1951,7 @@ local function freshWeapons(): { [string]: WeaponSlotState }
 	local weapons = {}
 	for name, spec in Config.Weapons do
 		weapons[name] = {
-			ammo = spec.MagSize,
+			ammo = if spec.AmmoFromPickupsOnly then 0 else spec.MagSize,
 			reloadingUntil = 0,
 			nextFireAt = 0,
 		}
@@ -1955,7 +1975,9 @@ function PlayerState.Reset(player: Player, keepProgress: boolean)
 		lastDamagedAt = 0,
 		keys = if keepProgress and previous then previous.keys else 0,
 		carTier = if keepProgress and previous then previous.carTier else 1,
-		megaCharges = Config.Mega.FreeChargesPerLife,
+		megaCharges = if keepProgress and previous
+			then math.max(Config.Mega.FreeChargesPerLife, previous.megaCharges)
+			else Config.Mega.FreeChargesPerLife,
 		equipped = Config.StartingLoadout[1],
 		weapons = freshWeapons(),
 		burgerUntil = 0,
@@ -1978,9 +2000,35 @@ end
 
 --[[ The live state for a player, creating it if this is the first ask. ]]
 function PlayerState.Get(player: Player): State
-	if not states[player] then
-		PlayerState.Reset(player, false)
+	local existing = states[player]
+	if existing then
+		return existing
 	end
+	if not player.Parent then
+		-- Return an untracked dummy state so departed players never leak into `states`.
+		return {
+			shield = 0,
+			maxShield = 0,
+			lastDamagedAt = 0,
+			keys = 0,
+			carTier = 1,
+			megaCharges = 0,
+			equipped = Config.StartingLoadout[1],
+			weapons = freshWeapons(),
+			burgerUntil = 0,
+			friesUntil = 0,
+			spawnProtectedUntil = 0,
+			nextMeleeAt = 0,
+			points = 0,
+			multiplierUntil = 0,
+			multiplierAmount = 1,
+			kills = 0,
+			deaths = 0,
+			vehicle = nil,
+			seatRole = nil,
+		}
+	end
+	PlayerState.Reset(player, false)
 	return states[player]
 end
 
@@ -2026,15 +2074,27 @@ end
 function PlayerState.RegenerateShields(deltaTime: number)
 	local now = os.clock()
 	for player, state in states do
+		if not player.Parent then
+			states[player] = nil
+			continue
+		end
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not humanoid or humanoid.Health <= 0 then
+			continue
+		end
 		if state.maxShield > 0
 			and state.shield < state.maxShield
 			and now - state.lastDamagedAt > Config.Combat.ShieldRegenDelay
 		then
+			local prevFloor = math.floor(state.shield)
 			state.shield = math.min(
 				state.maxShield,
 				state.shield + Config.Combat.ShieldRegenPerSecond * deltaTime
 			)
-			PlayerState.Changed.Fire(player)
+			if math.floor(state.shield) ~= prevFloor or state.shield >= state.maxShield then
+				PlayerState.Changed.Fire(player)
+			end
 		end
 	end
 end
@@ -2075,7 +2135,6 @@ return PlayerState
 	without anybody having to think about it.
 ]]
 
-local Players = game:GetService("Players")
 local Teams = game:GetService("Teams")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -2085,8 +2144,10 @@ local Config = require(Shared:WaitForChild("Config"))
 local TeamService = {}
 
 local teams: { Team } = {}
+local nextTieIndex = 1
 
 function TeamService.Start()
+	table.clear(teams)
 	for _, spec in Config.Teams do
 		local existing = Teams:FindFirstChild(spec.Name)
 		local team: Team
@@ -2103,25 +2164,33 @@ function TeamService.Start()
 	end
 end
 
---[[ Put a player on the emptier side. ]]
+--[[ Put a player on the emptier side, alternating on ties. ]]
 function TeamService.Assign(player: Player)
 	if #teams == 0 then
 		return
 	end
 
 	local counts = {}
+	local minCount = math.huge
 	for index, team in teams do
-		counts[index] = #team:GetPlayers()
-	end
-
-	local smallest = 1
-	for index = 2, #teams do
-		if counts[index] < counts[smallest] then
-			smallest = index
+		local count = #team:GetPlayers()
+		counts[index] = count
+		if count < minCount then
+			minCount = count
 		end
 	end
 
-	player.Team = teams[smallest]
+	local tied: { number } = {}
+	for index, count in counts do
+		if count == minCount then
+			table.insert(tied, index)
+		end
+	end
+
+	local chosen = tied[((nextTieIndex - 1) % #tied) + 1]
+	nextTieIndex += 1
+
+	player.Team = teams[chosen]
 	player.Neutral = false
 end
 
@@ -2223,7 +2292,7 @@ local function staircase(bottom: Vector3, direction: Vector3, rise: number, widt
 	flat = if flat.Magnitude < 0.01 then Vector3.new(0, 0, 1) else flat.Unit
 
 	local stepRise = rise / STAIR_STEPS
-	local stepRun = 3.2
+	local stepRun = 1.55
 
 	for index = 1, STAIR_STEPS do
 		local centre = bottom
@@ -2411,9 +2480,35 @@ local function building(
 		)
 	end
 
-	-- Roof lip, so the roof is cover rather than a slide.
+	-- Architectural glazing bands on upper floors so buildings catch sky reflections under Future lighting.
+	for floor = 2, floors do
+		local wy = (floor - 1) * FLOOR_HEIGHT + FLOOR_HEIGHT * 0.56
+		local bandW = math.max(12, footprint - 14)
+		for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
+			Util.Part({
+				Name = "WindowBand",
+				Size = Vector3.new(
+					if side.X ~= 0 then 0.6 else bandW,
+					5.5,
+					if side.Z ~= 0 then 0.6 else bandW
+				),
+				CFrame = CFrame.new(origin + side * (half + 0.15) + Vector3.new(0, wy, 0)),
+				Color = Color3.fromRGB(48, 68, 86),
+				Material = Enum.Material.Glass,
+				Reflectance = 0.42,
+				Transparency = 0.18,
+				CanCollide = false,
+				Parent = parent,
+			})
+		end
+	end
+
+	-- Roof lip with a gap on the vehicle ramp entry side so cars drive cleanly onto the roof.
 	local roofY = floors * FLOOR_HEIGHT + SLAB
 	for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
+		if vehicleRamp ~= false and side.Z == -1 then
+			continue
+		end
 		Util.Part({
 			Name = "RoofLip",
 			Size = Vector3.new(
@@ -2423,10 +2518,20 @@ local function building(
 			),
 			CFrame = CFrame.new(origin + side * half + Vector3.new(0, roofY + 2, 0)),
 			Color = color:Lerp(Color3.new(0, 0, 0), 0.25),
-			Material = Enum.Material.Brick,
+			Material = Enum.Material.Concrete,
 			Parent = parent,
 		})
 	end
+
+	-- Rooftop HVAC unit for realistic skyline silhouette.
+	Util.Part({
+		Name = "RoofHVAC",
+		Size = Vector3.new(8, 4.5, 6),
+		CFrame = CFrame.new(origin + Vector3.new(-half * 0.45, roofY + 2.25, -half * 0.45)),
+		Color = Color3.fromRGB(132, 138, 144),
+		Material = Enum.Material.Metal,
+		Parent = parent,
+	})
 
 	if vehicleRamp == false then
 		return roofY
@@ -2536,7 +2641,7 @@ local function boostArrows(origin: Vector3, direction: Vector3, parent: Instance
 			local bar = Util.Part({
 				Name = "BoostPad",
 				Size = Vector3.new(3, 0.6, 9),
-				CFrame = CFrame.lookAt(centre + Vector3.new(0, 1.1, 0), centre + flat)
+				CFrame = CFrame.lookAt(centre + Vector3.new(0, 1.1, 0), centre + Vector3.new(0, 1.1, 0) + flat)
 					* CFrame.new(side * 4, 0, 0)
 					* CFrame.Angles(0, side * math.rad(28), 0),
 				Color = Color3.fromRGB(255, 190, 40),
@@ -2596,18 +2701,21 @@ end
 local ROAD_WIDTH = 40
 
 local function streets(size: number, pitch: number, offsets: { number }, parent: Instance)
-	local roadColor = Color3.fromRGB(56, 56, 60)
-	local kerbColor = Color3.fromRGB(150, 148, 142)
+	local roadColor = Color3.fromRGB(52, 54, 58)
+	local kerbColor = Color3.fromRGB(148, 146, 140)
+	local span = if #offsets >= 2 then (offsets[#offsets] - offsets[1]) + ROAD_WIDTH else size
 
 	for _, offset in offsets do
-		-- The carriageway, both ways.
+		-- The carriageway, both ways; slight 0.02 Y offset eliminates Z-fighting at junctions.
 		for _, alongZ in { true, false } do
+			local yRoad = if alongZ then 0.6 else 0.62
+			local yLine = if alongZ then 1.13 else 1.15
 			Util.Part({
 				Name = "Street",
 				Size = if alongZ
-					then Vector3.new(ROAD_WIDTH, 1, size)
-					else Vector3.new(size, 1, ROAD_WIDTH),
-				CFrame = if alongZ then CFrame.new(offset, 0.6, 0) else CFrame.new(0, 0.6, offset),
+					then Vector3.new(ROAD_WIDTH, 1, span)
+					else Vector3.new(span, 1, ROAD_WIDTH),
+				CFrame = if alongZ then CFrame.new(offset, yRoad, 0) else CFrame.new(0, yRoad, offset),
 				Color = roadColor,
 				Material = Enum.Material.Asphalt,
 				Parent = parent,
@@ -2616,26 +2724,33 @@ local function streets(size: number, pitch: number, offsets: { number }, parent:
 			-- Centre line, so the road reads as a road at speed.
 			Util.Part({
 				Name = "Line",
-				Size = if alongZ then Vector3.new(1.6, 1, size) else Vector3.new(size, 1, 1.6),
-				CFrame = if alongZ then CFrame.new(offset, 1.15, 0) else CFrame.new(0, 1.15, offset),
-				Color = Color3.fromRGB(214, 194, 92),
+				Size = if alongZ then Vector3.new(1.4, 0.1, span) else Vector3.new(span, 0.1, 1.4),
+				CFrame = if alongZ then CFrame.new(offset, yLine, 0) else CFrame.new(0, yLine, offset),
+				Color = Color3.fromRGB(220, 196, 86),
 				Material = Enum.Material.SmoothPlastic,
 				CanCollide = false,
 				Parent = parent,
 			})
 
-			-- Kerbs down both sides. Low enough to drive over, high enough
-			-- to see, which is what makes the road feel like a road.
+			-- Segmented kerbs between intersections so kerbs never block cross-streets.
 			for _, side in { -1, 1 } do
 				local edge = offset + side * (ROAD_WIDTH * 0.5 + 2)
-				Util.Part({
-					Name = "Kerb",
-					Size = if alongZ then Vector3.new(4, 1.6, size) else Vector3.new(size, 1.6, 4),
-					CFrame = if alongZ then CFrame.new(edge, 1, 0) else CFrame.new(0, 1, edge),
-					Color = kerbColor,
-					Material = Enum.Material.Concrete,
-					Parent = parent,
-				})
+				for seg = 1, #offsets - 1 do
+					local segStart = offsets[seg] + ROAD_WIDTH * 0.5 + 4
+					local segEnd = offsets[seg + 1] - ROAD_WIDTH * 0.5 - 4
+					local segLen = segEnd - segStart
+					if segLen > 4 then
+						local mid = (segStart + segEnd) * 0.5
+						Util.Part({
+							Name = "Kerb",
+							Size = if alongZ then Vector3.new(4, 1.4, segLen) else Vector3.new(segLen, 1.4, 4),
+							CFrame = if alongZ then CFrame.new(edge, 0.9, mid) else CFrame.new(mid, 0.9, edge),
+							Color = kerbColor,
+							Material = Enum.Material.Concrete,
+							Parent = parent,
+						})
+					end
+				end
 			end
 		end
 	end
@@ -2770,8 +2885,12 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 
 	local size = mapConfig.Size
 	local half = size * 0.5
-	-- The same seed every time, so a map looks the way players remember it.
-	local rng = Random.new(#mapConfig.Id * 7919)
+	-- Deterministic polynomial hash of mapConfig.Id so every map gets a unique layout.
+	local seed = 5381
+	for i = 1, #mapConfig.Id do
+		seed = (seed * 33 + string.byte(mapConfig.Id, i)) % 2147483647
+	end
+	local rng = Random.new(seed)
 
 	-- The floor. One flat slab, so nothing snags a wheel.
 	Util.Part({
@@ -2945,8 +3064,8 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 			local alongX = rng:NextNumber() < 0.5
 			for _, side in { -1, 1 } do
 				local spot = block.center + if alongX
-					then Vector3.new(side * shift * 0.5, 0, 0)
-					else Vector3.new(0, 0, side * shift * 0.5)
+					then Vector3.new(side * shift, 0, 0)
+					else Vector3.new(0, 0, side * shift)
 				local roof = building(spot, footprint, rng:NextInteger(2, 3), mapConfig.Theme, model, false)
 				table.insert(towers, {
 					center = spot,
@@ -3212,12 +3331,15 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		table.insert(vehiclePads, { position = at, kind = "Tube" })
 	end
 	for index, at in resort.skiPads do
-		-- Skis at the summit, and a glider beside them. The lower lift
-		-- station gets a glider too, so being shot down is not the end of
-		-- flying for the whole round.
 		table.insert(vehiclePads, {
 			position = at + Vector3.new(0, 2, 0),
 			kind = if index == 2 then "Glider" else "Skis",
+		})
+	end
+	if resort.liftStations[1] then
+		table.insert(vehiclePads, {
+			position = resort.liftStations[1] + Vector3.new(0, 2, -24),
+			kind = "Glider",
 		})
 	end
 
@@ -3715,6 +3837,7 @@ end
 	somebody else drives: the seat you are in decides which gun is yours.
 ]]
 local function bindSeat(seat: Seat | VehicleSeat, model: Model, role: string)
+	local lastOccupant: Player? = nil
 	seat:GetPropertyChangedSignal("Occupant"):Connect(function()
 		local occupant = seat.Occupant
 
@@ -3722,14 +3845,12 @@ local function bindSeat(seat: Seat | VehicleSeat, model: Model, role: string)
 			local character = occupant.Parent
 			local player = if character then Players:GetPlayerFromCharacter(character) else nil
 			if player then
+				lastOccupant = player
 				local state = PlayerState.Get(player)
 				state.vehicle = model
 				state.seatRole = role
 				PlayerState.Changed.Fire(player)
 
-				-- Remembered past the moment they get out, so an explosion
-				-- has somebody to credit. A blast with no attacker scores
-				-- nothing and appears in the kill feed as a nameless death.
 				local vehicleState = active[model]
 				if vehicleState and role == "Driver" then
 					vehicleState.lastDriver = player
@@ -3738,13 +3859,18 @@ local function bindSeat(seat: Seat | VehicleSeat, model: Model, role: string)
 			return
 		end
 
-		-- Somebody just got out. Clear whoever was pointing at this seat.
-		for _, player in Players:GetPlayers() do
-			local state = PlayerState.Get(player)
+		if role == "Driver" and model.Parent then
+			model:SetAttribute("Turbo", false)
+		end
+
+		local departed = lastOccupant
+		lastOccupant = nil
+		if departed and departed.Parent then
+			local state = PlayerState.Get(departed)
 			if state.vehicle == model and state.seatRole == role then
 				state.vehicle = nil
 				state.seatRole = nil
-				PlayerState.Changed.Fire(player)
+				PlayerState.Changed.Fire(departed)
 			end
 		end
 	end)
@@ -3792,6 +3918,63 @@ function VehicleService.SpawnCar(
 		14,
 		10
 	)
+	-- Realistic automotive details: tinted reflective windshield, headlights with SpotLights, tail lights.
+	local halfW = body.Size.X * 0.5
+	local halfH = body.Size.Y * 0.5
+	local halfL = body.Size.Z * 0.5
+
+	local windshield = Util.Part({
+		Name = "Windshield",
+		Size = Vector3.new(body.Size.X * 0.84, 2.2, 0.35),
+		CFrame = chassis.CFrame * CFrame.new(0, halfH + 1.0, -halfL * 0.36) * CFrame.Angles(math.rad(-26), 0, 0),
+		Color = Color3.fromRGB(36, 52, 68),
+		Material = Enum.Material.Glass,
+		Reflectance = 0.45,
+		Transparency = 0.25,
+		Anchored = false,
+		CanCollide = false,
+		Massless = true,
+		Parent = model,
+	})
+	Util.Weld(chassis, windshield)
+
+	for _, side in { -1, 1 } do
+		local headLight = Util.Part({
+			Name = "Headlight",
+			Size = Vector3.new(1.5, 0.8, 0.3),
+			CFrame = chassis.CFrame * CFrame.new(side * (halfW - 1.3), 0.1, -halfL - 0.1),
+			Color = Color3.fromRGB(255, 246, 214),
+			Material = Enum.Material.Neon,
+			Anchored = false,
+			CanCollide = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(chassis, headLight)
+
+		local beam = Instance.new("SpotLight")
+		beam.Face = Enum.NormalId.Front
+		beam.Color = Color3.fromRGB(255, 244, 210)
+		beam.Brightness = 3.2
+		beam.Range = 54
+		beam.Angle = 52
+		beam.Shadows = false
+		beam.Parent = headLight
+
+		local tailLight = Util.Part({
+			Name = "Taillight",
+			Size = Vector3.new(1.6, 0.7, 0.3),
+			CFrame = chassis.CFrame * CFrame.new(side * (halfW - 1.3), 0.2, halfL + 0.1),
+			Color = Color3.fromRGB(235, 36, 36),
+			Material = Enum.Material.Neon,
+			Anchored = false,
+			CanCollide = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(chassis, tailLight)
+	end
+
 	local seat = addDriverSeat(chassis, model, Vector3.new(0, body.Size.Y * 0.5 + 0.5, 1))
 	bindSeat(seat, model, "Driver")
 	addVehicleLabel(chassis, `{body.Name} · {tier.Name}`, Color3.fromRGB(230, 240, 250))
@@ -4036,17 +4219,27 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 		Name = "Chassis",
 		Size = Vector3.new(4, 4, 18),
 		CFrame = CFrame.new(position + Vector3.new(0, 8, 0)),
-		Shape = Enum.PartType.Cylinder,
-		Color = spec.Color,
-		Material = Enum.Material.Metal,
+		Transparency = 1,
 		Anchored = false,
 		CustomPhysicalProperties = PhysicalProperties.new(0.4, 0.3, 0.2, 1, 1),
 		Parent = model,
 	})
-	-- A cylinder points along its own X, but we want it pointing forwards,
-	-- so the visible shell is rotated a quarter turn onto Z.
-	body.CFrame = CFrame.new(position + Vector3.new(0, 8, 0)) * CFrame.Angles(0, math.rad(90), 0)
 	model.PrimaryPart = body
+
+	-- Visual cylindrical torpedo hull (Size.X = length 18, Y/Z = diameter 4) rotated onto Z.
+	local shell = Util.Part({
+		Name = "TorpedoShell",
+		Size = Vector3.new(18, 4, 4),
+		CFrame = body.CFrame * CFrame.Angles(0, math.rad(90), 0),
+		Shape = Enum.PartType.Cylinder,
+		Color = spec.Color,
+		Material = Enum.Material.Metal,
+		Anchored = false,
+		CanCollide = false,
+		Massless = true,
+		Parent = model,
+	})
+	Util.Weld(body, shell)
 
 	-- The saddle. This is the bit you actually sit on.
 	-- It is a VehicleSeat rather than a plain Seat specifically so that WASD
@@ -4116,10 +4309,9 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 		velocity = velocity,
 		orientation = orientation,
 		heading = body.CFrame.Rotation,
-		-- A second on the pad before it will go off, so it does not detonate
-		-- against the ground the instant it is built.
-		armedAt = os.clock() + 1.0,
-		expiresAt = os.clock() + (spec.Lifetime or 20),
+		-- Armed and timed from the moment someone actually climbs aboard.
+		armedAt = nil,
+		expiresAt = nil,
 	}
 	return model
 end
@@ -4143,25 +4335,21 @@ function VehicleService.SpawnTube(position: Vector3): Model
 
 	local hub = Util.Part({
 		Name = "Chassis",
-		Size = Vector3.new(11, 3, 11),
-		CFrame = CFrame.new(position),
+		Size = Vector3.new(3, 11, 11),
+		CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90)),
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(250, 150, 40),
-		Material = Enum.Material.Plastic,
+		Material = Enum.Material.Rubber,
 		Anchored = false,
-		-- Light and very slippery, so it skids down snow and bobs along the
-		-- river instead of gripping like a tyre.
 		CustomPhysicalProperties = PhysicalProperties.new(0.25, 0.08, 0.5, 1, 1),
 		Parent = model,
 	})
-	-- A cylinder's flat faces point along its own X, so stand it up.
-	hub.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
 	model.PrimaryPart = hub
 
 	-- The hole in the middle, which is what makes it read as a tube.
 	Util.Part({
 		Name = "TubeHole",
-		Size = Vector3.new(5.4, 3.4, 5.4),
+		Size = Vector3.new(3.4, 5.4, 5.4),
 		CFrame = hub.CFrame,
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(40, 40, 46),
@@ -4666,6 +4854,12 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		return
 	end
 
+	if model:GetAttribute("LiftLocked") == true then
+		drive.Enabled = false
+		turn.Enabled = false
+		return
+	end
+
 	-- The drive axis: the chassis's forward, flattened onto the horizontal.
 	-- Flattening is what guarantees the car drives along the ground instead
 	-- of nosing into the sky when it tips on a ramp.
@@ -4725,7 +4919,7 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		local radius = WHEEL_DIAMETER * 0.5
 		state.wheelSpin = (state.wheelSpin or 0) + (current / radius) * deltaTime
 		for _, wheel in state.wheels do
-			local spun = chassis.CFrame * wheel.offset * CFrame.Angles(state.wheelSpin, 0, 0)
+			local spun = chassis.CFrame * wheel.offset * CFrame.Angles(-state.wheelSpin, 0, 0)
 			wheel.part.CFrame = spun
 			if wheel.hub then
 				wheel.hub.CFrame = spun
@@ -4917,10 +5111,10 @@ local TRICK_AIR_POINTS = 26 -- per second airborne
 
 local TRICK_NAMES = {
 	{ spin = 1080, name = "TRIPLE CORK" },
-	{ spin = 720, name = "DOUBLE SPIN" },
-	{ spin = 480, name = "BIG SPIN" },
-	{ spin = 270, name = "SEVEN-TWENTY" },
-	{ spin = 160, name = "SPINNER" },
+	{ spin = 720, name = "SEVEN-TWENTY" },
+	{ spin = 480, name = "FIVE-FORTY" },
+	{ spin = 270, name = "THREE-SIXTY" },
+	{ spin = 160, name = "ONE-EIGHTY" },
 	{ spin = 0, name = "BIG AIR" },
 }
 
@@ -5093,22 +5287,37 @@ local function drivePlane(model: Model, state: any, deltaTime: number)
 	local pitchRate = spec.PitchRate or 1.4
 	local yawRate = spec.YawRate or 0.8
 
-	-- Throttle nudges the speed up and down between the stall and top speed.
-	local target = state.speed + seat.Throttle * 90 * deltaTime
+	-- Track takeoff grace period so planes sitting on the pad never explode on boarding.
+	local now = os.clock()
+	if not state.boardedAt then
+		state.boardedAt = now
+		state.airborne = false
+		state.speed = math.max(state.speed or 0, stallSpeed * 1.25)
+		-- Gentle climb attitude on takeoff.
+		state.heading = CFrame.new() * state.heading.Rotation * CFrame.Angles(math.rad(14), 0, 0)
+	end
+	if body.Position.Y > 18 then
+		state.airborne = true
+	end
+
+	-- Maintain smooth cruise speed; W climbs gently and S dives/slows rather than slamming into the ground.
+	local cruise = (stallSpeed + topSpeed) * 0.55
+	local target = if seat.Throttle ~= 0
+		then (state.speed or cruise) + seat.Throttle * 55 * deltaTime
+		else (state.speed or cruise) + (cruise - (state.speed or cruise)) * math.min(1, deltaTime * 1.5)
 	state.speed = math.clamp(target, stallSpeed, topSpeed)
 
-	-- Steering rolls the aircraft, and rolling is what turns it.
 	local roll = -seat.Steer * rollRate * deltaTime
-	local pitch = -seat.Throttle * pitchRate * deltaTime * 0.35
+	local pitch = seat.Throttle * pitchRate * deltaTime * 0.45
 	local yaw = -seat.Steer * yawRate * deltaTime
 
 	state.heading = state.heading * CFrame.Angles(pitch, yaw, roll)
 	state.orientation.CFrame = state.heading
 
-	state.velocity.VectorVelocity = state.heading.LookVector * state.speed
+	local liftBoost = if (not state.airborne) and (now - state.boardedAt < 2.2) then Vector3.new(0, 26, 0) else Vector3.zero
+	state.velocity.VectorVelocity = state.heading.LookVector * state.speed + liftBoost
 
-	-- If it belly-flops into the ground, that is a crash.
-	if body.Position.Y < 6 then
+	if state.airborne and body.Position.Y < 6 then
 		VehicleService.Damage(model, 9999, nil)
 	end
 end
@@ -5155,11 +5364,15 @@ local function driveTorpedo(model: Model, state: any, deltaTime: number)
 		fast are not something to rely on.
 	]]
 	local now = os.clock()
-	if now < (state.armedAt or 0) then
+	if not state.armedAt then
+		state.armedAt = now + 1.0
+		state.expiresAt = now + (spec.Lifetime or 20)
+	end
+	if now < state.armedAt then
 		return
 	end
 
-	if now >= (state.expiresAt or math.huge) then
+	if now >= state.expiresAt then
 		VehicleService.Explode(model)
 		return
 	end
@@ -5277,7 +5490,6 @@ function VehicleService.Eject(player: Player)
 		Name = "Canopy",
 		Size = Vector3.new(22, 9, 22),
 		CFrame = root.CFrame * CFrame.new(0, 13, 0),
-		Shape = Enum.PartType.Ball,
 		Color = Color3.fromRGB(240, 130, 60),
 		Material = Enum.Material.Fabric,
 		Anchored = false,
@@ -5285,6 +5497,9 @@ function VehicleService.Eject(player: Player)
 		Massless = true,
 		Parent = canopy,
 	})
+	local domeMesh = Instance.new("SpecialMesh")
+	domeMesh.MeshType = Enum.MeshType.Sphere
+	domeMesh.Parent = dome
 
 	-- Lines from the canopy down to the jumper.
 	for index = 1, 4 do
@@ -5361,13 +5576,21 @@ function VehicleService.Eject(player: Player)
 end
 
 --[[ Hurt a vehicle. At zero health it explodes and takes its riders with it. ]]
-function VehicleService.Damage(model: Model, amount: number, _attacker: Player?)
+function VehicleService.Damage(model: Model, amount: number, attacker: Player?)
 	if not model or not model.Parent then
+		return
+	end
+	if not (amount > 0) or amount == math.huge then
 		return
 	end
 	local health = model:GetAttribute("Health")
 	if typeof(health) ~= "number" then
 		return
+	end
+
+	local state = active[model]
+	if state and attacker then
+		state.lastAttacker = attacker
 	end
 
 	local resistance = model:GetAttribute("DamageResistance")
@@ -5429,7 +5652,11 @@ function VehicleService.Explode(model: Model)
 	-- Announced rather than applied directly. DamageService already requires
 	-- this module, so calling into it from here would be a dependency cycle;
 	-- it listens for this instead, and the dependency stays one-way.
-	VehicleService.Wrecked.Fire(position, blastRadius, blastDamage, state.lastDriver)
+	if state.rider then
+		VehicleService.DismountSkis(state.rider)
+	end
+
+	VehicleService.Wrecked.Fire(position, blastRadius, blastDamage, state.lastAttacker or state.lastDriver)
 
 	active[model] = nil
 	model:Destroy()
@@ -5497,9 +5724,20 @@ end
 
 --[[ Everything currently alive, so the round can clean up after itself. ]]
 function VehicleService.ClearAll()
-	for model in active do
+	for model, state in active do
+		if state.rider then
+			VehicleService.DismountSkis(state.rider)
+		end
 		if model.Parent then
 			model:Destroy()
+		end
+	end
+	for _, player in Players:GetPlayers() do
+		local pState = PlayerState.Get(player)
+		if pState.vehicle then
+			pState.vehicle = nil
+			pState.seatRole = nil
+			PlayerState.Changed.Fire(player)
 		end
 	end
 	table.clear(active)
@@ -5807,13 +6045,17 @@ local function muzzleFor(player: Player): Vector3?
 	local state = PlayerState.Get(player)
 
 	if state.vehicle and state.vehicle.Parent then
-		local barrel = state.vehicle:FindFirstChild("Barrel", true)
-		if barrel and barrel:IsA("BasePart") then
-			local muzzle = barrel:FindFirstChild("Muzzle")
-			if muzzle and muzzle:IsA("Attachment") then
-				return muzzle.WorldPosition
+		local isMountedUser = state.seatRole == "Gunner"
+			or (state.seatRole == "Driver" and state.vehicle:GetAttribute("VehicleKind") == "Plane")
+		if isMountedUser then
+			local barrel = state.vehicle:FindFirstChild("Barrel", true)
+			if barrel and barrel:IsA("BasePart") then
+				local muzzle = barrel:FindFirstChild("Muzzle")
+				if muzzle and muzzle:IsA("Attachment") then
+					return muzzle.WorldPosition
+				end
+				return barrel.Position
 			end
-			return barrel.Position
 		end
 	end
 
@@ -5876,13 +6118,17 @@ local function beginReload(player: Player, weaponName: string)
 		return
 	end
 
-	slot.reloadingUntil = os.clock() + spec.ReloadTime
+	local expectedUntil = os.clock() + spec.ReloadTime
+	slot.reloadingUntil = expectedUntil
 	PlayerState.Changed.Fire(player)
 
 	task.delay(spec.ReloadTime, function()
+		if not player.Parent then
+			return
+		end
 		local current = PlayerState.Get(player)
 		local currentSlot = current.weapons[weaponName]
-		if currentSlot then
+		if currentSlot and currentSlot.reloadingUntil == expectedUntil then
 			currentSlot.ammo = spec.MagSize
 			currentSlot.reloadingUntil = 0
 			PlayerState.Changed.Fire(player)
@@ -5983,13 +6229,13 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 		aiming hard; it is there to make "behind me" impossible.
 	]]
 	local aimReference: Vector3? = nil
-	if state.vehicle and state.vehicle.Parent then
-		-- On a mounted gun the barrel does the aiming, not the head.
+	if state.vehicle and state.vehicle.Parent and spec.MountedOnly then
 		local barrel = state.vehicle:FindFirstChild("Barrel", true)
 		if barrel and barrel:IsA("BasePart") then
 			aimReference = barrel.CFrame.LookVector
 		end
-	elseif humanoid.RootPart then
+	end
+	if not aimReference and humanoid.RootPart then
 		local head = character and character:FindFirstChild("Head")
 		aimReference = if head and head:IsA("BasePart")
 			then head.CFrame.LookVector
@@ -5998,17 +6244,18 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 
 	if aimReference and aimReference.Magnitude > 0.001 then
 		local tolerance = Config.Combat.AutoAimServerToleranceDegrees
-		-- Doubled, and then some. The head's own facing lags the camera on
-		-- the client, so a tight cone would reject honest shots taken while
-		-- turning -- which is most of them.
 		if Util.AngleBetween(aimReference, direction) > tolerance * 3.4 then
 			return
 		end
 	end
 
+	if spec.AmmoFromPickupsOnly and slot.ammo <= 0 then
+		return
+	end
+
 	slot.nextFireAt = now + spec.Cooldown
-	if not Config.InfiniteAmmo then
-		slot.ammo -= 1
+	if (not Config.InfiniteAmmo) or spec.AmmoFromPickupsOnly then
+		slot.ammo = math.max(0, slot.ammo - 1)
 	end
 
 	-- Fries give you three barrels for a while; normally this is just one.
@@ -6018,9 +6265,8 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 	for barrel = 1, barrels do
 		local barrelDirection = direction
 		if barrels > 1 then
-			-- Fan the extra barrels out evenly either side of where you aimed.
 			local offset = (barrel - (barrels + 1) * 0.5) * barrelSpread
-			barrelDirection = (CFrame.new(Vector3.zero, direction) * CFrame.Angles(0, math.rad(offset), 0)).LookVector
+			barrelDirection = (Util.LookAt(Vector3.zero, direction) * CFrame.Angles(0, math.rad(offset), 0)).LookVector
 		end
 
 		if spec.Kind == "Hitscan" then
@@ -6288,7 +6534,7 @@ function WeaponService.Start()
 	end)
 
 	Remotes.Event("SetPedal").OnServerEvent:Connect(function(player, value)
-		if typeof(value) == "number" then
+		if typeof(value) == "number" and value == value and math.abs(value) < math.huge then
 			VehicleService.SetPedal(player, value)
 		end
 	end)
@@ -6382,6 +6628,9 @@ type Projectile = {
 	-- Drones only: who it is chasing.
 	target: BasePart?,
 	stuck: boolean,
+	stuckTo: BasePart?,
+	stuckOffset: CFrame?,
+	hitEntities: { [Instance]: boolean },
 	dead: boolean,
 	-- Everything this projectile is not allowed to hit (the shooter, their car).
 	ignore: { Instance },
@@ -6391,35 +6640,53 @@ local live: { Projectile } = {}
 
 --[[ A small glowing part so players can actually see what is flying at them. ]]
 local function makeVisual(spec: Config.WeaponSpec, position: Vector3, isDiamond: boolean): BasePart
+	local isBall = spec.Kind == "Arcing"
+	local isRocket = spec.Kind == "Rocket" or spec.Kind == "Homing"
+	local size = if isDiamond
+		then Vector3.new(1.5, 1.5, 2.8)
+		elseif isBall then Vector3.new(1.3, 1.3, 1.3)
+		elseif isRocket then Vector3.new(0.9, 0.9, 2.8)
+		else Vector3.new(0.45, 0.45, 1.8)
+	local material = if spec.Splat
+		then Enum.Material.Mud
+		elseif isBall and not spec.Sticky then Enum.Material.Metal
+		else Enum.Material.Neon
+
 	local part = Util.Part({
 		Name = "Projectile",
-		Size = if isDiamond then Vector3.new(1.4, 1.4, 2.6) else Vector3.new(0.5, 0.5, 1.8),
+		Size = size,
 		CFrame = CFrame.new(position),
+		Shape = if isBall then Enum.PartType.Ball else Enum.PartType.Block,
 		Color = spec.Color,
-		Material = if isDiamond then Enum.Material.Neon else Enum.Material.Neon,
+		Material = material,
 		CanCollide = false,
 		CanQuery = false,
 		CanTouch = false,
+		CastShadow = false,
 		Anchored = true,
 		Parent = workspace,
 	})
 
-	if isDiamond then
+	if isDiamond or isRocket or spec.Sticky then
 		local light = Instance.new("PointLight")
 		light.Color = spec.Color
-		light.Range = 18
-		light.Brightness = 3
+		light.Range = if isDiamond then 22 else 14
+		light.Brightness = if isDiamond then 4 else 2.5
+		light.Shadows = false
 		light.Parent = part
 	end
 
+	-- Attachments perpendicular to forward (-Z) travel so the Trail ribbon has real width.
+	local trailHalf = if isDiamond then 0.55 elseif isRocket then 0.35 else 0.22
 	local trail = Instance.new("Trail")
-	local a0 = Util.Attachment(part, Vector3.new(0, 0, 0.6), "TrailA")
-	local a1 = Util.Attachment(part, Vector3.new(0, 0, -0.6), "TrailB")
+	local a0 = Util.Attachment(part, Vector3.new(0, trailHalf, 0), "TrailA")
+	local a1 = Util.Attachment(part, Vector3.new(0, -trailHalf, 0), "TrailB")
 	trail.Attachment0 = a0
 	trail.Attachment1 = a1
-	trail.Lifetime = 0.35
+	trail.Lifetime = if isRocket then 0.5 else 0.35
 	trail.Color = ColorSequence.new(spec.Color)
 	trail.WidthScale = NumberSequence.new(1, 0)
+	trail.LightEmission = if spec.Splat then 0 else 0.85
 	trail.Parent = part
 
 	return part
@@ -6450,13 +6717,48 @@ local function detonate(projectile: Projectile, position: Vector3, scale: number
 		DamageService.Explode(
 			position, radius, damage,
 			projectile.owner, spec.VehicleDamageMultiplier,
-			-- Only a mega-detonation counts as one, and only that is big
-			-- enough to put a giant animal down.
-			scale > 1
+			scale > 1,
+			spec.DisplayName
 		)
-		-- A big enough blast leaves a mark in the mud.
 		if scale > 1 then
 			DamageService.Crater(position, radius * 0.5)
+		end
+	end
+
+	-- Cluster bombs burst into short-fuse bomblets fanning outward.
+	local clusterCount = (spec :: any).Cluster
+	if typeof(clusterCount) == "number" and clusterCount > 0 then
+		local subRadius = (spec :: any).ClusterRadius or 30
+		local subDamage = (spec :: any).ClusterDamage or 65
+		local subSpec = table.clone(spec :: any)
+		subSpec.Cluster = nil
+		subSpec.BlastRadius = subRadius
+		subSpec.BlastDamage = subDamage
+		subSpec.FuseTime = 0.75
+		subSpec.Sticky = false
+
+		for i = 1, clusterCount do
+			local angle = (i / clusterCount) * math.pi * 2
+			local vel = Vector3.new(math.cos(angle) * 48, 34, math.sin(angle) * 48)
+			local sub: Projectile = {
+				owner = projectile.owner,
+				weaponName = projectile.weaponName,
+				spec = subSpec,
+				part = makeVisual(subSpec, position + Vector3.new(0, 1.5, 0), false),
+				position = position + Vector3.new(0, 1.5, 0),
+				velocity = vel,
+				piercesLeft = 0,
+				bornAt = os.clock(),
+				fuseAt = os.clock() + 0.75 + (i % 3) * 0.12,
+				target = nil,
+				stuck = false,
+				stuckTo = nil,
+				stuckOffset = nil,
+				hitEntities = {},
+				dead = false,
+				ignore = projectile.ignore,
+			}
+			table.insert(live, sub)
 		end
 	end
 end
@@ -6477,17 +6779,30 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 
 	local humanoid, character = Util.HumanoidFromHit(hitPart)
 	if humanoid and character then
+		if projectile.hitEntities[character] then
+			return
+		end
+		projectile.hitEntities[character] = true
 		local victim = Players:GetPlayerFromCharacter(character)
 		if victim and victim ~= projectile.owner then
-			DamageService.ApplyDamage(victim, spec.Damage, projectile.owner, spec.DisplayName)
+			local headshot = hitPart.Name == "Head" and not spec.Splat
+			local dmg = if headshot then spec.Damage * 1.8 else spec.Damage
+			local applied = DamageService.ApplyDamage(victim, dmg, projectile.owner, spec.DisplayName)
+			if applied and projectile.owner.Parent then
+				Remotes.Event("Hitmarker"):FireClient(projectile.owner, {
+					damage = math.floor(dmg + 0.5),
+					headshot = headshot,
+				})
+			end
 
-			-- Poop does barely any damage; the point is that they cannot see.
 			if spec.Splat then
 				Remotes.Event("PlayEffect"):FireClient(victim, {
 					effect = "Splat",
 					duration = Config.Wildlife.SplatDuration,
 				})
-				Remotes.Event("Notify"):FireClient(projectile.owner, "Direct hit. Disgusting.")
+				if projectile.owner.Parent then
+					Remotes.Event("Notify"):FireClient(projectile.owner, "Direct hit. Disgusting.")
+				end
 			end
 			return
 		end
@@ -6495,6 +6810,10 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 
 	local vehicle = VehicleService.FromPart(hitPart)
 	if vehicle then
+		if projectile.hitEntities[vehicle] then
+			return
+		end
+		projectile.hitEntities[vehicle] = true
 		VehicleService.Damage(
 			vehicle,
 			spec.Damage * (spec.VehicleDamageMultiplier or 1),
@@ -6534,8 +6853,10 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 				-- Turn toward the target at a limited rate, so it arcs round
 				-- rather than snapping onto them instantly.
 				local turnRate = (spec.HomingTurnRate or 3) * deltaTime
-				projectile.velocity = (projectile.velocity + (wanted - projectile.velocity) * math.min(1, turnRate)).Unit
-					* projectile.velocity.Magnitude
+				local blended = projectile.velocity + (wanted - projectile.velocity) * math.min(1, turnRate)
+				if blended.Magnitude > 0.001 then
+					projectile.velocity = blended.Unit * projectile.velocity.Magnitude
+				end
 			end
 		end
 	end
@@ -6566,11 +6887,19 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 		end
 
 		if kind == "Arcing" then
+			if spec.Splat or not projectile.fuseAt then
+				retire(projectile)
+				return
+			end
 			if spec.Sticky then
-				-- Sticky bombs stop dead where they land and wait for the fuse.
 				projectile.stuck = true
 				projectile.position = hitPoint + result.Normal * 0.5
-				projectile.part.CFrame = CFrame.new(projectile.position)
+				local hitCFrame = CFrame.new(projectile.position)
+				projectile.part.CFrame = hitCFrame
+				if result.Instance and result.Instance:IsA("BasePart") and not result.Instance.Anchored then
+					projectile.stuckTo = result.Instance
+					projectile.stuckOffset = result.Instance.CFrame:ToObjectSpace(hitCFrame)
+				end
 				return
 			end
 			-- Ordinary grenades bounce, losing most of their energy.
@@ -6601,10 +6930,32 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 
 	-- Point the visible part along the direction of travel.
 	if projectile.velocity.Magnitude > 0.01 then
-		projectile.part.CFrame = CFrame.lookAt(projectile.position, projectile.position + projectile.velocity)
+		projectile.part.CFrame = Util.LookAt(projectile.position, projectile.position + projectile.velocity)
 	else
 		projectile.part.CFrame = CFrame.new(projectile.position)
 	end
+end
+
+--[[ Check if an enemy player walked or drove over a planted LandMine. ]]
+local function checkMineProximity(projectile: Projectile): boolean
+	local owner = projectile.owner
+	for _, player in Players:GetPlayers() do
+		if player == owner then
+			continue
+		end
+		if owner.Team and player.Team and owner.Team == player.Team then
+			continue
+		end
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
+			if (root.Position - projectile.position).Magnitude <= 10 then
+				return true
+			end
+		end
+	end
+	return false
 end
 
 --[[ Every live projectile gets a frame. ]]
@@ -6619,6 +6970,29 @@ local function step(deltaTime: number)
 			continue
 		end
 
+		-- Keep sticky bombs attached to moving vehicles or characters.
+		if projectile.stuck and projectile.stuckTo then
+			if projectile.stuckTo.Parent and projectile.stuckOffset then
+				local worldCf = projectile.stuckTo.CFrame * projectile.stuckOffset
+				projectile.position = worldCf.Position
+				projectile.part.CFrame = worldCf
+			else
+				projectile.stuckTo = nil
+				projectile.stuckOffset = nil
+				projectile.stuck = false
+			end
+		end
+
+		-- Armed land mines detonate when an enemy approaches.
+		if projectile.stuck and projectile.weaponName == "LandMine" and now - projectile.bornAt > 0.8 then
+			if checkMineProximity(projectile) then
+				detonate(projectile, projectile.position, 1)
+				retire(projectile)
+				table.remove(live, index)
+				continue
+			end
+		end
+
 		-- Grenade fuses run whether the grenade is moving or wedged in a wall.
 		if projectile.fuseAt and now >= projectile.fuseAt then
 			detonate(projectile, projectile.position, 1)
@@ -6627,7 +7001,8 @@ local function step(deltaTime: number)
 			continue
 		end
 
-		if now - projectile.bornAt > MAX_LIFETIME then
+		-- Respect fuseAt so long-fuse LandMines (40s) and Drones (14s) are not deleted early.
+		if not projectile.fuseAt and now - projectile.bornAt > MAX_LIFETIME then
 			retire(projectile)
 			table.remove(live, index)
 			continue
@@ -6708,6 +7083,9 @@ function ProjectileService.Spawn(
 			else nil,
 		target = lockedTarget,
 		stuck = false,
+		stuckTo = nil,
+		stuckOffset = nil,
+		hitEntities = {},
 		dead = false,
 		ignore = ignore,
 	}
@@ -6814,7 +7192,7 @@ function DamageService.ApplyDamage(
 	attacker: Player?,
 	cause: string?
 ): boolean
-	if amount <= 0 then
+	if not (amount > 0) or amount == math.huge then
 		return false
 	end
 
@@ -6827,8 +7205,8 @@ function DamageService.ApplyDamage(
 		return false
 	end
 
-	-- Freshly spawned, or chewing an invincibility burger.
-	if PlayerState.IsInvincible(victim) then
+	-- Freshly spawned, ForceField protected, or chewing an invincibility burger.
+	if PlayerState.IsInvincible(victim) or character:FindFirstChildOfClass("ForceField") then
 		return false
 	end
 
@@ -6876,10 +7254,12 @@ end
 
 --[[ Book-keeping for a death: keys to the killer, a tally for both. ]]
 function DamageService.HandleDeath(victim: Player, killer: Player?, cause: string)
-	local victimState = PlayerState.Get(victim)
-	victimState.deaths += 1
+	if victim.Parent then
+		local victimState = PlayerState.Get(victim)
+		victimState.deaths += 1
+	end
 
-	if killer and killer ~= victim then
+	if killer and killer ~= victim and killer.Parent then
 		local killerState = PlayerState.Get(killer)
 		killerState.kills += 1
 		-- Keys are the progression: every kill moves you toward a faster car.
@@ -6900,8 +7280,13 @@ function DamageService.Explode(
 	maxDamage: number,
 	attacker: Player?,
 	vehicleMultiplier: number?,
-	isMega: boolean?
+	isMega: boolean?,
+	cause: string?
 )
+	if not (radius > 0) or radius == math.huge then
+		return
+	end
+	local damageCause = cause or "Explosion"
 	if isMega then
 		DamageService.MegaBlast.Fire(position, radius, attacker)
 	end
@@ -6927,7 +7312,7 @@ function DamageService.Explode(
 			local distance = (root.Position - position).Magnitude
 			if distance <= radius then
 				local falloff = 1 - (distance / radius)
-				DamageService.ApplyDamage(player, maxDamage * falloff, attacker, "Explosion")
+				DamageService.ApplyDamage(player, maxDamage * falloff, attacker, damageCause)
 			end
 		end
 	end
@@ -6983,20 +7368,18 @@ VehicleService.Wrecked.Connect(function(
 end)
 
 function DamageService.Crater(position: Vector3, radius: number)
+	-- Cylinder height is Size.X; diameter is Size.Y/Size.Z.
 	local crater = Util.Part({
 		Name = "Crater",
-		Size = Vector3.new(radius * 2, Config.Mega.CraterDepth, radius * 2),
-		CFrame = CFrame.new(position - Vector3.new(0, Config.Mega.CraterDepth * 0.4, 0)),
+		Size = Vector3.new(Config.Mega.CraterDepth, radius * 2, radius * 2),
+		CFrame = CFrame.new(position - Vector3.new(0, Config.Mega.CraterDepth * 0.4, 0))
+			* CFrame.Angles(0, 0, math.rad(90)),
 		Shape = Enum.PartType.Cylinder,
-		Color = Color3.fromRGB(52, 38, 24),
+		Color = Color3.fromRGB(48, 34, 22),
 		Material = Enum.Material.Mud,
 		CanCollide = false,
 		Parent = workspace:FindFirstChild("Arena") or workspace,
 	})
-	-- A cylinder lies on its own X axis, so stand it upright to be a hole.
-	crater.CFrame = CFrame.new(position - Vector3.new(0, Config.Mega.CraterDepth * 0.4, 0))
-		* CFrame.Angles(0, 0, math.rad(90))
-	-- Craters fade rather than piling up forever and eating the frame rate.
 	Util.DestroyAfter(crater, 45)
 end
 
@@ -7031,6 +7414,7 @@ local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 
 local PickupService = {}
 
@@ -7109,7 +7493,7 @@ local function grant(player: Player, kind: string, weapon: string?)
 	local now = os.clock()
 
 	if kind == "Burger" then
-		state.burgerUntil = now + Config.Pickups.Burger.Duration
+		state.burgerUntil = math.max(state.burgerUntil, now + Config.Pickups.Burger.Duration)
 	elseif kind == "Fries" then
 		state.friesUntil = now + Config.Pickups.Fries.Duration
 	elseif kind == "Shield" then
@@ -7133,7 +7517,7 @@ local function grant(player: Player, kind: string, weapon: string?)
 		end
 	elseif kind == "Invincibility" then
 		-- Twenty seconds of nothing being able to touch you.
-		state.burgerUntil = now + Config.Pickups.Invincibility.Duration
+		state.burgerUntil = math.max(state.burgerUntil, now + Config.Pickups.Invincibility.Duration)
 	elseif kind == "PoopAmmo" then
 		local slot = state.weapons.Poop
 		local spec = Config.Weapons.Poop
@@ -7156,7 +7540,10 @@ local function grant(player: Player, kind: string, weapon: string?)
 		if spec and not spec.MountedOnly then
 			state.equipped = weapon
 			local slot = state.weapons[weapon]
-			if slot then
+			if not slot then
+				slot = { ammo = spec.MagSize, reloadingUntil = 0, nextFireAt = 0 }
+				state.weapons[weapon] = slot
+			else
 				slot.ammo = spec.MagSize
 				slot.reloadingUntil = 0
 			end
@@ -7216,12 +7603,26 @@ local function createPickup(kind: string, position: Vector3, parent: Folder, wea
 		if not pickup.available then
 			return
 		end
+		local player: Player? = nil
 		local character = hit:FindFirstAncestorOfClass("Model")
-		if not character then
+		if character then
+			player = Players:GetPlayerFromCharacter(character)
+		end
+		if not player then
+			local vehicle = VehicleService.FromPart(hit)
+			if vehicle then
+				local seat = vehicle:FindFirstChild("DriverSeat")
+				if seat and seat:IsA("Seat") and seat.Occupant and seat.Occupant.Parent then
+					player = Players:GetPlayerFromCharacter(seat.Occupant.Parent :: Model)
+				end
+			end
+		end
+		if not player then
 			return
 		end
-		local player = Players:GetPlayerFromCharacter(character)
-		if not player then
+		local pChar = player.Character
+		local pHum = pChar and pChar:FindFirstChildOfClass("Humanoid")
+		if not pHum or pHum.Health <= 0 then
 			return
 		end
 
@@ -7321,6 +7722,7 @@ local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
 local WildlifeService = {}
+local populationGeneration = 0
 
 type Dweller = {
 	kind: string,
@@ -7583,7 +7985,7 @@ local function spawnTarget(position: Vector3)
 		for ring = 1, 4 do
 			Util.Part({
 				Name = "Ring",
-				Size = Vector3.new(radius * 2, radius * 2, 0.2),
+				Size = Vector3.new(0.2, radius * 2, radius * 2),
 				CFrame = board.CFrame * CFrame.new(0, 0, facing * (0.45 + ring * 0.01)),
 				Shape = Enum.PartType.Cylinder,
 				Color = if ring % 2 == 1 then Color3.fromRGB(220, 40, 40) else Color3.fromRGB(250, 250, 250),
@@ -7662,15 +8064,13 @@ local function raisePoopColumn(pile: BasePart)
 
 	local column = Util.Part({
 		Name = "Column",
-		Size = Vector3.new(radius * 2, height, radius * 2),
-		CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)),
+		Size = Vector3.new(height, radius * 2, radius * 2),
+		CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(92, 64, 38),
-		Material = Enum.Material.Sand,
+		Material = Enum.Material.Mud,
 		Parent = model,
 	})
-	-- Stand the cylinder upright.
-	column.CFrame = CFrame.new(base + Vector3.new(0, height * 0.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
 
 	-- The platform on top.
 	Util.Part({
@@ -7766,7 +8166,8 @@ local function dropPoop(position: Vector3)
 			return
 		end
 		local character = hit:FindFirstAncestorOfClass("Model")
-		local player = if character then Players:GetPlayerFromCharacter(character) else nil
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local player = if character and humanoid and humanoid.Health > 0 then Players:GetPlayerFromCharacter(character) else nil
 		if player then
 			collectPoop(player, pile)
 		end
@@ -7842,9 +8243,12 @@ local function kill(dweller: Dweller, attacker: Player?)
 	Debris:AddItem(anchor, 2.5)
 
 	local kind = dweller.kind
+	local gen = populationGeneration
 	dweller.model:Destroy()
 	task.delay(Config.Population.RespawnDelay, function()
-		respawnOne(kind)
+		if gen == populationGeneration then
+			respawnOne(kind)
+		end
 	end)
 end
 
@@ -7930,12 +8334,13 @@ local function nearestLiving(from: Vector3): (Player?, Vector3?, number)
 	return best, bestPosition, bestDistance
 end
 
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+
 local function groundHeight(position: Vector3, ignore: Instance): number
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { ignore }
-	local hit = workspace:Raycast(position + Vector3.new(0, 200, 0), Vector3.new(0, -600, 0), params)
-	return if hit then hit.Position.Y else 0
+	groundParams.FilterDescendantsInstances = { ignore }
+	local hit = workspace:Raycast(position + Vector3.new(0, 6, 0), Vector3.new(0, -24, 0), groundParams)
+	return if hit then hit.Position.Y else position.Y
 end
 
 local function stepDweller(dweller: Dweller, deltaTime: number)
@@ -7983,7 +8388,10 @@ local function stepDweller(dweller: Dweller, deltaTime: number)
 	end
 
 	local direction = toGoal.Unit
-	dweller.facing = (dweller.facing + (direction - dweller.facing) * math.min(1, deltaTime * 3)).Unit
+	local blended = dweller.facing + (direction - dweller.facing) * math.min(1, deltaTime * 3)
+	if blended.Magnitude > 1e-4 then
+		dweller.facing = blended.Unit
+	end
 	dweller.position += dweller.facing * speed * deltaTime
 	dweller.position = Vector3.new(
 		dweller.position.X,
@@ -8039,6 +8447,7 @@ function WildlifeService.Populate(mapSize: number)
 end
 
 function WildlifeService.Clear()
+	populationGeneration += 1
 	for _, dweller in dwellers do
 		if dweller.model.Parent then
 			dweller.model:Destroy()
@@ -8242,6 +8651,16 @@ local function buildDunkTank(at: Vector3, parent: Instance)
 		Parent = parent,
 	})
 
+	-- Interior exit ladder so dunked players can climb right back out.
+	local ladder = Instance.new("TrussPart")
+	ladder.Name = "TankLadder"
+	ladder.Size = Vector3.new(2, 15, 2)
+	ladder.CFrame = CFrame.new(at + Vector3.new(0, 7.5, -11.2))
+	ladder.Anchored = true
+	ladder.Color = Color3.fromRGB(220, 185, 60)
+	ladder.Material = Enum.Material.Metal
+	ladder.Parent = parent
+
 	-- The water. Non-solid, so you fall in rather than onto.
 	Util.Part({
 		Name = "DunkWater",
@@ -8285,7 +8704,7 @@ local function buildDunkTank(at: Vector3, parent: Instance)
 	prompt.Triggered:Connect(function(player)
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		if humanoid and humanoid.Health > 0 and not humanoid.SeatPart then
+		if humanoid and humanoid.Health > 0 and not humanoid.SeatPart and not seat.Occupant then
 			seat:Sit(humanoid)
 		end
 	end)
@@ -8317,7 +8736,7 @@ local function buildDunkTank(at: Vector3, parent: Instance)
 
 	local ring = Util.Part({
 		Name = "DunkRing",
-		Size = Vector3.new(4.6, 4.6, 0.3),
+		Size = Vector3.new(0.3, 4.6, 4.6),
 		CFrame = target.CFrame * CFrame.new(0, 0, -0.6) * CFrame.Angles(0, math.rad(90), 0),
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(220, 40, 40),
@@ -8346,12 +8765,21 @@ local function dunk(shooter: Player?)
 	if occupant then
 		local character = occupant.Parent
 		local dunked = if character then Players:GetPlayerFromCharacter(character) else nil
+		local weld = seat:FindFirstChild("SeatWeld")
+		if weld then
+			weld:Destroy()
+		end
 		occupant.Sit = false
 
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") then
-			root.CFrame = CFrame.new(seat.Position - Vector3.new(0, 14, 0))
-			root.AssemblyLinearVelocity = Vector3.zero
+			local targetPos = seat.Position - Vector3.new(0, 14, 0)
+			task.defer(function()
+				if root.Parent then
+					root.CFrame = CFrame.new(targetPos)
+					root.AssemblyLinearVelocity = Vector3.zero
+				end
+			end)
 		end
 
 		if dunked then
@@ -8425,6 +8853,9 @@ local function buildGallery(at: Vector3, parent: Instance)
 			CFrame = duck.CFrame * CFrame.new(1.4, 2.6, 0),
 			Color = duck.Color,
 			Material = Enum.Material.SmoothPlastic,
+			Anchored = false,
+			CanCollide = false,
+			Massless = true,
 			Parent = parent,
 		})
 		head:SetAttribute("Carnival", "Duck")
@@ -8571,6 +9002,31 @@ function CarnivalService.Build(mapSize: number)
 	buildDunkTank(origin + Vector3.new(-45, 1, 0), folder)
 	buildGallery(origin + Vector3.new(30, 1, -30), folder)
 	buildStriker(origin + Vector3.new(35, 1, 35), folder)
+
+	-- Overhead warm fairground festoon string lights for Future-lighting ambience.
+	for idx, lightPos in {
+		origin + Vector3.new(-20, 26, -15),
+		origin + Vector3.new(10, 26, 0),
+		origin + Vector3.new(32, 26, 15),
+	} do
+		local bulb = Util.Part({
+			Name = "FairgroundBulb",
+			Size = Vector3.new(1.8, 1.8, 1.8),
+			CFrame = CFrame.new(lightPos),
+			Shape = Enum.PartType.Ball,
+			Color = if idx % 2 == 1 then Color3.fromRGB(255, 220, 130) else Color3.fromRGB(255, 160, 110),
+			Material = Enum.Material.Neon,
+			CanCollide = false,
+			CanQuery = false,
+			Parent = folder,
+		})
+		local glow = Instance.new("PointLight")
+		glow.Color = bulb.Color
+		glow.Brightness = 3.2
+		glow.Range = 55
+		glow.Shadows = true
+		glow.Parent = bulb
+	end
 end
 
 function CarnivalService.Clear()
@@ -8581,6 +9037,8 @@ function CarnivalService.Clear()
 	table.clear(ducks)
 	dunkSeat = nil
 	strikerPuck = nil
+	dunkWetUntil = 0
+	strikerUntil = 0
 end
 
 --[[ Ducks slide back and forth; a shot one lies down for a moment. ]]
@@ -8608,8 +9066,18 @@ local function step()
 	local puck = strikerPuck
 	if puck and puck.Parent then
 		local remaining = strikerUntil - now
-		local climbed = if remaining > 0 then (1 - remaining / 2.5) * 56 else 0
-		puck.CFrame = CFrame.new(puck.Position.X, origin.Y + 4 + climbed, puck.Position.Z)
+		local climbed = 0
+		if remaining > 0 then
+			local elapsed = 2.5 - remaining
+			if elapsed < 0.45 then
+				local t = elapsed / 0.45
+				climbed = (1 - (1 - t) * (1 - t)) * 56
+			else
+				local t = (elapsed - 0.45) / 2.05
+				climbed = (1 - t * t) * 56
+			end
+		end
+		puck.CFrame = CFrame.new(puck.Position.X, origin.Y + 5 + climbed, puck.Position.Z)
 	end
 end
 
@@ -8920,7 +9388,12 @@ local function onStandTouched(teamIndex: number, player: Player)
 	-- Halo's rule: your own flag has to be home for a capture to count.
 	local ownFlag = flags[teamIndex]
 	if Config.CTF.RequireOwnFlagHome and ownFlag and ownFlag.state ~= "Home" then
-		Remotes.Event("Notify"):FireClient(player, "Your own flag is not home — you cannot score yet!")
+		local now = os.clock()
+		local lastNotified = (player:GetAttribute("LastFlagNotify") :: number?) or 0
+		if now - lastNotified >= 2 then
+			player:SetAttribute("LastFlagNotify", now)
+			Remotes.Event("Notify"):FireClient(player, "Your own flag is not home — you cannot score yet!")
+		end
 		return
 	end
 
@@ -8931,6 +9404,10 @@ local function bindTouch(part: BasePart, handler: (Player) -> ())
 	part.Touched:Connect(function(hit)
 		local character = hit:FindFirstAncestorOfClass("Model")
 		if not character then
+			return
+		end
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if not humanoid or humanoid.Health <= 0 then
 			return
 		end
 		local player = Players:GetPlayerFromCharacter(character)
@@ -8957,9 +9434,10 @@ function FlagService.Setup(build: any, teamColours: { BrickColor })
 			continue
 		end
 
-		-- Behind the middle of that team's spawn line.
+		-- Just in front of that team's spawn line, safely inside the boundary walls.
 		local middle = spawns[math.max(1, math.floor(#spawns / 2))]
-		local home = Vector3.new(middle.X, 1, middle.Z * 1.04)
+		local inward = if middle.Z ~= 0 then -math.sign(middle.Z) * 20 else 0
+		local home = Vector3.new(middle.X, 1, middle.Z + inward)
 		local colour = teamColours[teamIndex] or BrickColor.new("Medium stone grey")
 
 		local stand = buildStand(home, colour, folder)
@@ -8978,8 +9456,22 @@ function FlagService.Setup(build: any, teamColours: { BrickColor })
 	active = true
 end
 
+function FlagService.IsCarrier(player: Player): boolean
+	for _, flag in flags do
+		if flag.carrier == player then
+			return true
+		end
+	end
+	return false
+end
+
 function FlagService.Clear()
 	active = false
+	for _, flag in flags do
+		if flag.carrier then
+			setCarrierSpeed(flag.carrier, false)
+		end
+	end
 	if container then
 		container:Destroy()
 		container = nil
@@ -9026,7 +9518,13 @@ local function step()
 	end
 end
 
+local started = false
+
 function FlagService.Start()
+	if started then
+		return
+	end
+	started = true
 	-- Dying drops whatever you were carrying, right where you fell.
 	DamageService.Killed.Connect(function(victim: Player, _killer: Player?, _cause: string)
 		for _, flag in flags do
@@ -9079,6 +9577,8 @@ local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local EffectService = require(script.Parent:WaitForChild("EffectService"))
 local ScoreboardService = require(script.Parent:WaitForChild("ScoreboardService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
+local ResortService = require(script.Parent:WaitForChild("ResortService"))
 
 local MatchService = {}
 
@@ -9251,13 +9751,21 @@ local function deployPlayer(player: Player, keepProgress: boolean)
 		return
 	end
 
+	if not player.Parent then
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid and not keepProgress then
+		humanoid.Sit = false
+		humanoid.Health = humanoid.MaxHealth
+	end
+
 	PlayerState.Reset(player, keepProgress)
 
 	local teamIndex = TeamService.IndexOf(player)
 	local spawns = build.teamSpawns[teamIndex]
 	if not spawns or #spawns == 0 then
-		-- No spawn line for this team; drop them in the middle rather than
-		-- erroring out of the whole deploy.
 		spawns = { Vector3.new(0, 8, 0) }
 	end
 	local spot = spawns[rng:NextInteger(1, #spawns)]
@@ -9282,8 +9790,11 @@ local function deployAll()
 		if player.Character then
 			deployPlayer(player, false)
 		else
+			PlayerState.Reset(player, false)
 			task.spawn(function()
-				player:LoadCharacterAsync()
+				if player.Parent then
+					player:LoadCharacterAsync()
+				end
 			end)
 		end
 	end
@@ -9361,17 +9872,22 @@ local function tallyVotes(): { map: Config.MapSpec, mode: typeof(Config.Modes[1]
 		end
 	end
 
-	local best, bestCount = 1, -1
+	local bestCount = -1
+	local tied: { number } = {}
 	for index = 1, #ballot do
 		if counts[index] > bestCount then
-			best, bestCount = index, counts[index]
+			bestCount = counts[index]
+			table.clear(tied)
+			table.insert(tied, index)
+		elseif counts[index] == bestCount then
+			table.insert(tied, index)
 		end
 	end
 
-	if bestCount <= 0 then
-		best = rng:NextInteger(1, #ballot)
+	if bestCount <= 0 or #tied == 0 then
+		return ballot[rng:NextInteger(1, #ballot)]
 	end
-	return ballot[best]
+	return ballot[tied[rng:NextInteger(1, #tied)]]
 end
 
 local function runRound()
@@ -9475,9 +9991,7 @@ function MatchService.Start()
 		sprees[victim] = 0
 		recentKills[victim] = {}
 
-		if killer and killer ~= victim and phase == "Playing" then
-			-- A sniper shot is worth more than a pistol round, and a running
-			-- multiplier makes everything worth more still.
+		if killer and killer ~= victim and killer.Parent and phase == "Playing" then
 			local base = pointsByWeapon[cause] or Config.Match.PointsPerKill
 			local earned = PlayerState.AwardPoints(killer, base)
 
@@ -9491,7 +10005,6 @@ function MatchService.Start()
 		end
 	end)
 
-	-- A capture is worth a great deal, and it goes on the team's total.
 	FlagService.Captured.Connect(function(_player: Player, teamIndex: number, points: number)
 		if phase == "Playing" then
 			scores[teamIndex] += points
@@ -9499,7 +10012,18 @@ function MatchService.Start()
 		end
 	end)
 
+	HockeyService.Goal.Connect(function(scorer: Player?, teamIndex: number, points: number)
+		if phase == "Playing" then
+			scores[teamIndex] += points
+			broadcast()
+		end
+		if scorer and scorer.Parent then
+			Remotes.Event("KillFeed"):FireAllClients(`{scorer.DisplayName} SCORED A GOAL! (+{points})`, false)
+		end
+	end)
+
 	FlagService.Start()
+	ResortService.Start()
 
 	Remotes.Event("CastVote").OnServerEvent:Connect(function(player, choice)
 		if phase ~= "Voting" then
@@ -9524,19 +10048,18 @@ function MatchService.Start()
 		TeamService.Assign(player)
 
 		player.CharacterAdded:Connect(function()
-			-- Give the character a moment to finish assembling before moving it.
 			task.wait(0.35)
-			-- Deploy whatever phase we are in, so you always land on the map
-			-- with a car — including while waiting for a round to start.
-			-- Respawning keeps your keys, so one unlucky rocket does not wipe
-			-- out a good run.
-			deployPlayer(player, true)
+			if player.Parent then
+				deployPlayer(player, true)
+			end
 		end)
 
 		if player.Character then
 			task.spawn(function()
 				task.wait(0.35)
-				deployPlayer(player, true)
+				if player.Parent then
+					deployPlayer(player, true)
+				end
 			end)
 		end
 	end
@@ -9570,7 +10093,10 @@ function MatchService.Start()
 			if root and root:IsA("BasePart") and root.Position.Y < -120 then
 				local humanoid = character:FindFirstChildOfClass("Humanoid")
 				if humanoid and humanoid.Health > 0 then
-					humanoid.Health = 0
+					DamageService.ApplyDamage(player, humanoid.MaxHealth + 1000, nil, "Void")
+					if humanoid.Health > 0 then
+						humanoid.Health = 0
+					end
 				end
 			end
 		end
@@ -9599,6 +10125,14 @@ end
 	already live.
 ]]
 VehicleService.TrickLanded.Connect(function(player: Player, name: string, points: number, airtime: number)
+	if not player.Parent then
+		return
+	end
+	if phase == "Playing" then
+		local teamIndex = TeamService.IndexOf(player)
+		scores[teamIndex] += points
+		broadcast()
+	end
 	Remotes.Event("Medal"):FireClient(player, `{name}  +{points}`)
 	Remotes.Event("PlaySound"):FireClient(player, "Medal")
 
@@ -9992,6 +10526,9 @@ function EffectService.PlayDeathGag(position: Vector3)
 		return
 	end
 
+	if #Config.Effects.Gags == 0 then
+		return
+	end
 	local gag = Config.Effects.Gags[rng:NextInteger(1, #Config.Effects.Gags)]
 	if gag == "Donkey" then
 		spawnDonkey(position)
@@ -10016,7 +10553,30 @@ end
 	WIENER. The winning team gets hot dogs raining out of the sky and a very
 	large word across everybody's screen.
 ]]
+local celebrationGen = 0
+
+function EffectService.Clear()
+	celebrationGen += 1
+	local folder = workspace:FindFirstChild("ArenaEffects")
+	if folder then
+		folder:Destroy()
+	end
+end
+
+local function effectsContainer(): Folder
+	local existing = workspace:FindFirstChild("ArenaEffects")
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = "ArenaEffects"
+	folder.Parent = workspace
+	return folder
+end
+
 function EffectService.CelebrateWinner(teamName: string)
+	celebrationGen += 1
+	local myGen = celebrationGen
 	for _, player in Players:GetPlayers() do
 		Remotes.Event("PlayEffect"):FireClient(player, {
 			effect = "Wiener",
@@ -10025,31 +10585,34 @@ function EffectService.CelebrateWinner(teamName: string)
 		})
 	end
 
-	-- Actual hot dogs, falling on the arena.
 	task.spawn(function()
 		local deadline = os.clock() + Config.Effects.WienerDuration
-		while os.clock() < deadline do
+		local parent = effectsContainer()
+		while os.clock() < deadline and myGen == celebrationGen and parent.Parent do
 			local drop = Util.Part({
 				Name = "HotDog",
-				Size = Vector3.new(2, 2, 7),
+				Size = Vector3.new(7, 2, 2),
 				CFrame = CFrame.new(rng:NextNumber(-260, 260), 220, rng:NextNumber(-260, 260))
 					* CFrame.Angles(rng:NextNumber(0, 6), rng:NextNumber(0, 6), rng:NextNumber(0, 6)),
-				Color = Color3.fromRGB(220, 150, 90),
+				Shape = Enum.PartType.Cylinder,
+				Color = Color3.fromRGB(196, 98, 62),
 				Material = Enum.Material.SmoothPlastic,
 				Anchored = false,
 				CanCollide = false,
-				Parent = workspace,
+				CanQuery = false,
+				Parent = parent,
 			})
 
 			local bun = Util.Part({
 				Name = "Bun",
-				Size = Vector3.new(2.6, 1.2, 7.4),
-				CFrame = drop.CFrame * CFrame.new(0, -0.9, 0),
-				Color = Color3.fromRGB(240, 205, 140),
+				Size = Vector3.new(7.4, 1.3, 2.6),
+				CFrame = drop.CFrame * CFrame.new(0, -0.8, 0),
+				Color = Color3.fromRGB(238, 198, 132),
 				Anchored = false,
 				CanCollide = false,
+				CanQuery = false,
 				Massless = true,
-				Parent = workspace,
+				Parent = parent,
 			})
 			Util.Weld(drop, bun)
 
@@ -10071,119 +10634,150 @@ return EffectService
 --[[
 	GraphicsService — makes it stop looking like a bin of bricks.
 
-	Roblox's default lighting is flat, shadowless and grey, which is most of
-	why a procedurally built map reads as "some blocks". None of this changes
-	a single part: it is all lighting, atmosphere and post-processing, so it
-	costs nothing to build and can be tuned without touching the game.
-
-	No asset IDs are used anywhere — a wrong one throws at runtime — so this
-	works in a place that has never been published.
+	Configures Future PBR lighting, 2022 surface materials, volumetric clouds,
+	realistic river water, atmospheric depth, and balanced filmic post-processing.
+	No external asset IDs are used anywhere, so everything works offline or in
+	an unpublished Studio place without throwing.
 ]]
 
 local Lighting = game:GetService("Lighting")
+local MaterialService = game:GetService("MaterialService")
 
 local GraphicsService = {}
 
---[[ Remove anything we added last time, so this can be re-run safely. ]]
+--[[ Remove previous arena graphics and any default lighting clutter that would stack. ]]
 local function clearPrevious()
 	for _, child in Lighting:GetChildren() do
-		if child:GetAttribute("ArenaGraphics") then
+		if
+			child:GetAttribute("ArenaGraphics")
+			or child:IsA("Sky")
+			or child:IsA("Atmosphere")
+			or child:IsA("PostEffect")
+		then
 			child:Destroy()
+		end
+	end
+
+	local terrain = workspace.Terrain
+	if terrain then
+		for _, child in terrain:GetChildren() do
+			if child:GetAttribute("ArenaGraphics") or child:IsA("Clouds") then
+				child:Destroy()
+			end
 		end
 	end
 end
 
-local function tag(instance: Instance): Instance
+local function tag(instance: Instance, parent: Instance?): Instance
 	instance:SetAttribute("ArenaGraphics", true)
-	instance.Parent = Lighting
+	instance.Parent = parent or Lighting
 	return instance
 end
 
 function GraphicsService.Start()
 	clearPrevious()
 
-	-- Future lighting gives real shadows and light that bounces off surfaces,
-	-- which is the single biggest difference between "blocks" and "a place".
+	-- Future lighting gives real per-pixel shadows, specular highlights, and
+	-- local light pools. Technology is [NotScriptable] in live servers, so both
+	-- assignments stay protected in pcall (and Future is also baked in the place).
 	local ok = pcall(function()
 		Lighting.Technology = Enum.Technology.Future
 	end)
 	if not ok then
-		Lighting.Technology = Enum.Technology.ShadowMap
+		pcall(function()
+			Lighting.Technology = Enum.Technology.ShadowMap
+		end)
 	end
 
-	Lighting.Brightness = 3.1
-	Lighting.ClockTime = 15.2
-	Lighting.GeographicLatitude = 24
-	Lighting.ExposureCompensation = 0.18
-	Lighting.EnvironmentDiffuseScale = 0.55
-	Lighting.EnvironmentSpecularScale = 0.7
+	-- Enable 2022 PBR material textures (normal, roughness, metalness maps) so
+	-- Concrete, Asphalt, Metal, Mud, Snow, Ice, and WoodPlanks catch real light.
+	pcall(function()
+		(MaterialService :: any).Use2022Materials = true
+	end)
+
+	-- Late-afternoon golden hour: lower sun angle casts long architectural
+	-- shadows across streets and gives buildings clear lit vs. shaded faces.
+	Lighting.Brightness = 2.85
+	Lighting.ClockTime = 16.2
+	Lighting.GeographicLatitude = 26
+	Lighting.ExposureCompensation = 0.0
+	Lighting.EnvironmentDiffuseScale = 0.85
+	Lighting.EnvironmentSpecularScale = 1.0
 	Lighting.GlobalShadows = true
-	--[[
-		Contrast is what makes it stop looking like a bin of bricks.
+	pcall(function()
+		Lighting.ShadowSoftness = 0.22
+	end)
 
-		These were set high enough that a sunlit wall and a shadowed alley
-		came out nearly the same grey, and once every surface is the same
-		brightness the shapes stop reading at all -- every building is a flat
-		rectangle again no matter how it is built. Lower ambient and a warmer
-		top shift give sunlit faces somewhere to be bright AGAINST.
-	]]
-	Lighting.Ambient = Color3.fromRGB(48, 52, 64)
-	Lighting.OutdoorAmbient = Color3.fromRGB(88, 96, 116)
-	Lighting.ColorShift_Top = Color3.fromRGB(255, 232, 186)
-	Lighting.ColorShift_Bottom = Color3.fromRGB(70, 78, 96)
-	Lighting.FogEnd = 2200
-	Lighting.FogStart = 400
-	Lighting.FogColor = Color3.fromRGB(150, 162, 178)
+	-- Cool shadowed ambient against warm sunlight gives natural sky-fill contrast.
+	Lighting.Ambient = Color3.fromRGB(38, 44, 58)
+	Lighting.OutdoorAmbient = Color3.fromRGB(76, 86, 108)
+	Lighting.ColorShift_Top = Color3.fromRGB(255, 224, 176)
+	Lighting.ColorShift_Bottom = Color3.fromRGB(58, 68, 88)
 
-	-- Haze and depth. Distant buildings fade instead of standing there in
-	-- full colour, which is most of what sells a big map as big.
+	-- Atmospheric scattering and distance perspective.
 	local atmosphere = Instance.new("Atmosphere")
-	-- Haze at 0.36 with Haze 1.6 was a grey sheet over everything past a
-	-- hundred studs: distant buildings did not fade into depth, they faded
-	-- into porridge. Enough to give depth, not enough to eat the skyline.
-	atmosphere.Density = 0.22
-	atmosphere.Offset = 0.15
-	atmosphere.Color = Color3.fromRGB(196, 200, 208)
-	atmosphere.Decay = Color3.fromRGB(104, 112, 128)
-	atmosphere.Glare = 0.28
-	atmosphere.Haze = 0.8
+	atmosphere.Density = 0.24
+	atmosphere.Offset = 0.2
+	atmosphere.Color = Color3.fromRGB(210, 206, 198)
+	atmosphere.Decay = Color3.fromRGB(96, 108, 130)
+	atmosphere.Glare = 0.34
+	atmosphere.Haze = 0.95
 	tag(atmosphere)
 
-	-- A proper sky rather than the flat blue void.
+	-- Clear physical sky dome with crisp celestial bodies.
 	local sky = Instance.new("Sky")
 	sky.CelestialBodiesShown = true
+	sky.SunAngularSize = 14
+	sky.MoonAngularSize = 9
 	sky.StarCount = 3000
 	tag(sky)
 
-	-- Neon tracers, muzzle flashes and the diamond gun all bloom, which is
-	-- what makes them read as light rather than as coloured plastic.
+	-- Volumetric overhead clouds break up the skyline and cast subtle sky variation.
+	local terrain = workspace.Terrain
+	if terrain then
+		local clouds = Instance.new("Clouds")
+		clouds.Cover = 0.56
+		clouds.Density = 0.68
+		clouds.Color = Color3.fromRGB(236, 230, 220)
+		tag(clouds, terrain)
+
+		-- Realistic water appearance for Terrain water.
+		terrain.WaterWaveSize = 0.18
+		terrain.WaterWaveSpeed = 12
+		terrain.WaterReflectance = 0.85
+		terrain.WaterTransparency = 0.32
+		terrain.WaterColor = Color3.fromRGB(36, 108, 128)
+	end
+
+	-- Selective bloom: high threshold prevents sunlit concrete from clipping to
+	-- flat white while Neon tracers, headlights, and explosions glow vividly.
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.55
-	bloom.Size = 26
-	bloom.Threshold = 1.1
+	bloom.Intensity = 0.38
+	bloom.Size = 24
+	bloom.Threshold = 1.45
 	tag(bloom)
 
 	local sunRays = Instance.new("SunRaysEffect")
-	sunRays.Intensity = 0.14
-	sunRays.Spread = 0.9
+	sunRays.Intensity = 0.16
+	sunRays.Spread = 0.85
 	tag(sunRays)
 
-	-- A gentle warm grade. Everything default-lit in Roblox looks washed out;
-	-- a touch of contrast and saturation does more than any amount of
-	-- rebuilding the parts would.
+	-- Balanced filmic color grade that keeps material grain and texture detail.
 	local grade = Instance.new("ColorCorrectionEffect")
-	grade.Brightness = 0.02
-	grade.Contrast = 0.16
-	grade.Saturation = 0.18
-	grade.TintColor = Color3.fromRGB(255, 248, 240)
+	grade.Brightness = 0.01
+	grade.Contrast = 0.12
+	grade.Saturation = 0.1
+	grade.TintColor = Color3.fromRGB(255, 250, 244)
 	tag(grade)
 
-	-- Very slight, only on the far distance, so aiming is unaffected.
+	-- Kept disabled by default to avoid wasting a full-screen GPU pass during
+	-- hipfire; can be toggled dynamically if a zoomed scope wants shallow DoF.
 	local depth = Instance.new("DepthOfFieldEffect")
-	depth.FarIntensity = 0.12
+	depth.Enabled = false
+	depth.FarIntensity = 0.14
 	depth.NearIntensity = 0
-	depth.FocusDistance = 90
-	depth.InFocusRadius = 900
+	depth.FocusDistance = 120
+	depth.InFocusRadius = 600
 	tag(depth)
 end
 
@@ -10255,6 +10849,12 @@ local function getReceiptStore(): GlobalDataStore?
 end
 
 --[[ Does this player own a pass? In free mode, everybody owns everything. ]]
+local passCache: { [number]: { [string]: boolean } } = {}
+
+Players.PlayerRemoving:Connect(function(player)
+	passCache[player.UserId] = nil
+end)
+
 function MonetizationService.OwnsPass(player: Player, passKey: string): boolean
 	if Config.FreeMode then
 		return true
@@ -10262,13 +10862,27 @@ function MonetizationService.OwnsPass(player: Player, passKey: string): boolean
 
 	local passId = Config.GamePasses[passKey]
 	if not passId or passId == 0 then
-		return true
+		return false
+	end
+
+	local userCache = passCache[player.UserId]
+	if userCache and userCache[passKey] ~= nil then
+		return userCache[passKey]
 	end
 
 	local success, owns = pcall(function()
 		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passId)
 	end)
-	return success and owns == true
+	local result = success and owns == true
+	if success then
+		-- `or {}` rather than an if: reassigning an existing cache to itself
+		-- is harmless, and this is the only shape strict mode can see as
+		-- definitely-a-table.
+		local cache: { [string]: boolean } = userCache or {}
+		passCache[player.UserId] = cache
+		cache[passKey] = result
+	end
+	return result
 end
 
 --[[ Give out whatever a product was bought for. Returns false if it could not. ]]
@@ -10326,38 +10940,34 @@ function MonetizationService.Start()
 			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
 
-		-- Already paid out? Say yes and stop.
-		local readSuccess, alreadyGranted = pcall(function()
-			return store:GetAsync(receiptKey)
-		end)
-		if readSuccess and alreadyGranted then
-			return Enum.ProductPurchaseDecision.PurchaseGranted
-		end
-		if not readSuccess then
-			-- We cannot tell whether they were already paid. Refusing to guess
-			-- is the safe move; Roblox retries.
-			return Enum.ProductPurchaseDecision.NotProcessedYet
-		end
-
 		local productKey = productKeyFromId(receiptInfo.ProductId)
 		if not productKey then
 			warn(`MonetizationService: unknown product {receiptInfo.ProductId}`)
 			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
 
-		if not grantProduct(player, productKey) then
-			return Enum.ProductPurchaseDecision.NotProcessedYet
-		end
-
-		-- Record the receipt BEFORE telling Roblox it is done. If this write
-		-- fails we must not confirm, or a retry would pay out twice.
-		local writeSuccess = pcall(function()
-			store:SetAsync(receiptKey, true)
+		-- Atomically claim the receipt before granting so retries can never double-grant.
+		local alreadyClaimed = false
+		local claimOk = pcall(function()
+			store:UpdateAsync(receiptKey, function(old)
+				if old then
+					alreadyClaimed = true
+					return old
+				end
+				return true
+			end)
 		end)
-		if not writeSuccess then
+		if not claimOk then
 			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
+		if alreadyClaimed then
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+		if not player.Parent then
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
 
+		grantProduct(player, productKey)
 		Remotes.Event("Notify"):FireClient(player, "Purchase complete. Thank you!")
 		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
@@ -10396,28 +11006,16 @@ local Radar = require(modules:WaitForChild("Radar"))
 
 local player = Players.LocalPlayer
 
---[[
-	Start the interface and the controls, separately and defensively.
-
-	These used to be two bare calls. When Controls.Start() threw — which it did
-	if the server had not finished booting — every input handler after the
-	throw was never connected, so nothing responded to the mouse or keyboard
-	and there was no visible sign of why.
-]]
 local hudOk = pcall(Hud.Build)
 if not hudOk then
 	warn("[Nuclear Mud Arena] HUD failed to build.")
 end
 
--- The closure returns a value so that a failure's error message comes back
--- as pcall's second result rather than being dropped.
 local function startControls(): string
 	Controls.Start()
 	return "ok"
 end
 
--- The camera reactions. Nothing else depends on this, so a failure here
--- must not take the controls down with it.
 if not pcall(Feel.Start) then
 	warn("[Nuclear Mud Arena] Camera feel failed to start.")
 end
@@ -10433,7 +11031,6 @@ else
 	warn(`[Nuclear Mud Arena] Controls failed to start: {controlsErr}`)
 	Hud.SetStatus(`CONTROLS FAILED: {controlsErr}`, false)
 
-	-- Keep trying. Whatever it was waiting for may simply not be ready yet.
 	task.spawn(function()
 		for attempt = 1, 10 do
 			task.wait(1)
@@ -10449,10 +11046,26 @@ end
 
 -- ============================================================ HEALTH TRACKING ==
 
+local characterConnections: { RBXScriptConnection } = {}
+local lastWatchedCharacter: Model? = nil
+
+local function disconnectCharacter()
+	for _, conn in characterConnections do
+		conn:Disconnect()
+	end
+	table.clear(characterConnections)
+end
+
 --[[ Follow the health bar of whichever body we are currently wearing. ]]
 local function watchCharacter(character: Model)
+	if lastWatchedCharacter == character then
+		return
+	end
+	disconnectCharacter()
+	lastWatchedCharacter = character
+
 	local humanoid = character:WaitForChild("Humanoid", 10)
-	if not humanoid or not humanoid:IsA("Humanoid") then
+	if not humanoid or not humanoid:IsA("Humanoid") or lastWatchedCharacter ~= character then
 		return
 	end
 
@@ -10461,8 +11074,6 @@ local function watchCharacter(character: Model)
 	local function refresh()
 		Hud.SetHealth(humanoid.Health, humanoid.MaxHealth)
 
-		-- Flinch when hit. Being shot at from somewhere you cannot see is
-		-- the one thing a HUD number alone never communicates in time.
 		local lost = lastHealth - humanoid.Health
 		lastHealth = humanoid.Health
 		if lost > 0 and humanoid.Health > 0 then
@@ -10470,14 +11081,11 @@ local function watchCharacter(character: Model)
 		end
 	end
 
-	humanoid.HealthChanged:Connect(refresh)
+	table.insert(characterConnections, humanoid.HealthChanged:Connect(refresh))
 	refresh()
 
-	-- A hard landing should land. Track where the fall started, because the
-	-- vertical velocity has already been zeroed by the time Roblox reports
-	-- the landing itself.
 	local fallFrom: number? = nil
-	humanoid.StateChanged:Connect(function(_, new)
+	table.insert(characterConnections, humanoid.StateChanged:Connect(function(_, new)
 		local root = humanoid.RootPart
 		if new == Enum.HumanoidStateType.Freefall then
 			fallFrom = if root then root.Position.Y else nil
@@ -10490,9 +11098,18 @@ local function watchCharacter(character: Model)
 					Feel.Shake(math.clamp(drop * 0.03, 0.4, 2.5))
 				end
 			end
+		elseif new ~= Enum.HumanoidStateType.Jumping then
+			fallFrom = nil
 		end
-	end)
+	end))
 end
+
+player.CharacterRemoving:Connect(function(character)
+	if lastWatchedCharacter == character then
+		disconnectCharacter()
+		lastWatchedCharacter = nil
+	end
+end)
 
 if player.Character then
 	task.spawn(watchCharacter, player.Character)
@@ -10501,10 +11118,9 @@ player.CharacterAdded:Connect(watchCharacter)
 
 -- =================================================================== LISTENERS ==
 
-Remotes.Event("HudUpdate").OnClientEvent:Connect(function(state)
-	if typeof(state) ~= "table" then
-		return
-	end
+local receivedHudUpdate = false
+
+local function applyHudState(state: { [string]: any })
 	Hud.SetShield(state.shield or 0, state.maxShield or 0)
 	Hud.SetWeapon(state.weaponName or "—", state.ammo or 0, state.magSize or 0, state.reloading == true)
 	Hud.SetStats(
@@ -10514,6 +11130,14 @@ Remotes.Event("HudUpdate").OnClientEvent:Connect(function(state)
 		state.kills or 0,
 		state.deaths or 0
 	)
+end
+
+Remotes.Event("HudUpdate").OnClientEvent:Connect(function(state)
+	if typeof(state) ~= "table" then
+		return
+	end
+	receivedHudUpdate = true
+	applyHudState(state)
 end)
 
 Remotes.Event("MatchState").OnClientEvent:Connect(function(payload)
@@ -10528,8 +11152,6 @@ Remotes.Event("MatchState").OnClientEvent:Connect(function(payload)
 		payload.modeName,
 		payload.flags
 	)
-	-- The ballot only belongs on screen while voting is actually open, and
-	-- the cursor has to come free to click it.
 	if payload.phase ~= "Voting" then
 		Hud.HideVote()
 		Controls.SetMouseFree(false)
@@ -10565,47 +11187,56 @@ Remotes.Event("PlayEffect").OnClientEvent:Connect(function(payload)
 	end
 end)
 
---[[
-	Rattle the camera for every explosion, wherever it came from.
-
-	Watching for the replicated Explosion instances rather than sending a
-	message per blast means this covers grenades, rockets, mines, cluster
-	bombs, torpedoes, wrecked vehicles and the diamond mega-detonation
-	without any of them having to know the camera exists.
-]]
 workspace.DescendantAdded:Connect(function(descendant)
 	local blast = descendant :: Instance
 	if not blast:IsA("Explosion") then
 		return
 	end
-	local radius: number = blast.BlastRadius
-	-- Bigger blast, harder shake and felt from further away.
-	Feel.ShakeFrom(blast.Position, math.clamp(radius * 0.06, 0.8, 3.6), radius * 2.6)
+	task.defer(function()
+		if not blast.Parent then
+			return
+		end
+		local radius: number = blast.BlastRadius
+		Feel.ShakeFrom(blast.Position, math.clamp(radius * 0.06, 0.8, 3.6), radius * 2.6)
+	end)
 end)
 
---[[ Somebody else's shot. Ours was drawn locally the moment we fired. ]]
+--[[ Somebody else's shot. Supports both single and batched pellet payloads. ]]
 Remotes.Event("ShotFired").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
 	end
-	if typeof(payload.origin) ~= "Vector3" or typeof(payload.endPoint) ~= "Vector3" then
+	if typeof(payload.origin) ~= "Vector3" then
 		return
 	end
 	local colour = if typeof(payload.color) == "Color3"
 		then payload.color
 		else Color3.fromRGB(255, 240, 180)
-	Shot.Full(
-		payload.origin,
-		payload.endPoint,
-		colour,
-		if typeof(payload.normal) == "Vector3" then payload.normal else nil
-	)
+
+	if typeof(payload.rays) == "table" then
+		Shot.MuzzleFlash(payload.origin, colour)
+		for _, ray in payload.rays do
+			if typeof(ray) == "table" and typeof(ray.endPoint) == "Vector3" then
+				Shot.Tracer(payload.origin, ray.endPoint, colour)
+				if typeof(ray.normal) == "Vector3" then
+					Shot.Impact(ray.endPoint, ray.normal, colour)
+				end
+			end
+		end
+	elseif typeof(payload.endPoint) == "Vector3" then
+		Shot.Full(
+			payload.origin,
+			payload.endPoint,
+			colour,
+			if typeof(payload.normal) == "Vector3" then payload.normal else nil
+		)
+	end
+
 	if typeof(payload.sound) == "string" then
 		Sound.At(payload.sound, payload.origin)
 	end
 end)
 
---[[ A hockey fight. Mash F -- and your guns still work, so consider those. ]]
 Remotes.Event("FightStarted").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
@@ -10623,7 +11254,6 @@ Remotes.Event("FightResult").OnClientEvent:Connect(function(payload)
 	Hud.FightResult(payload.won == true, payload.draw == true, payload.brokeStick == true)
 end)
 
---[[ The scoreboard we asked for, or the one pushed at the end of a round. ]]
 Remotes.Event("Scoreboard").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" or typeof(payload.rows) ~= "table" then
 		return
@@ -10631,7 +11261,6 @@ Remotes.Event("Scoreboard").OnClientEvent:Connect(function(payload)
 	Hud.SetScoreboard(payload.rows, payload.heading)
 end)
 
---[[ A shot connected. Marker, number, and the right click in your ears. ]]
 Remotes.Event("Hitmarker").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
@@ -10653,7 +11282,6 @@ Remotes.Event("Medal").OnClientEvent:Connect(function(text)
 	end
 end)
 
---[[ A noise the server wants this player specifically to hear. ]]
 Remotes.Event("PlaySound").OnClientEvent:Connect(function(name)
 	if typeof(name) == "string" then
 		Sound.Flat(name)
@@ -10666,19 +11294,12 @@ Remotes.Event("Notify").OnClientEvent:Connect(function(message)
 	end
 end)
 
--- Ask once for where we stand, in case we joined mid-round.
 task.spawn(function()
-	local state = Remotes.Function("GetPlayerState"):InvokeServer()
-	if typeof(state) == "table" then
-		Hud.SetShield(state.shield or 0, state.maxShield or 0)
-		Hud.SetWeapon(state.weaponName or "—", state.ammo or 0, state.magSize or 0, state.reloading == true)
-		Hud.SetStats(
-			state.keys or 0,
-			state.carTierName or "—",
-			state.megaCharges or 0,
-			state.kills or 0,
-			state.deaths or 0
-		)
+	local ok, state = pcall(function()
+		return Remotes.Function("GetPlayerState"):InvokeServer()
+	end)
+	if ok and not receivedHudUpdate and typeof(state) == "table" then
+		applyHudState(state)
 	end
 end)
 
@@ -10718,7 +11339,7 @@ local lowHealthHolder: Frame? = nil
 local vignetteStrength = 0
 local vignettePulse = 0
 local scoreboard: Frame? = nil
-local scoreboardRows: Frame? = nil
+local scoreboardRows: ScrollingFrame? = nil
 local scoreboardTitle: TextLabel? = nil
 
 local screen: ScreenGui
@@ -10824,7 +11445,17 @@ local function makeBar(parent: Instance, position: UDim2, colour: Color3): (Fram
 	return track, fill
 end
 
+local hudBuilt = false
+local hitToken = 0
+local medalToken = 0
+local wienerToken = 0
+local killFeedOrder = 100000
+
 function Hud.Build()
+	if hudBuilt and screen and screen.Parent then
+		return
+	end
+	hudBuilt = true
 	screen = Instance.new("ScreenGui")
 	screen.Name = "NuclearMudHud"
 	screen.ResetOnSpawn = false
@@ -11013,10 +11644,20 @@ function Hud.Build()
 			Size = UDim2.new(0.5, -170, 1, 0),
 			Position = if side == -1 then UDim2.fromScale(0, 0) else UDim2.new(0.5, 170, 0, 0),
 			BackgroundColor3 = Color3.new(0, 0, 0),
-			BackgroundTransparency = 0.05,
+			BackgroundTransparency = 0.02,
 			ZIndex = 8,
 		})
 		bar.Name = "ScopeBlind"
+	end
+	for _, side in { -1, 1 } do
+		local vbar = makeFrame(scope, {
+			Size = UDim2.new(0, 340, 0.5, -170),
+			Position = if side == -1 then UDim2.new(0.5, -170, 0, 0) else UDim2.new(0.5, -170, 0.5, 170),
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BackgroundTransparency = 0.02,
+			ZIndex = 8,
+		})
+		vbar.Name = "ScopeBlindV"
 	end
 
 	local lens = makeFrame(scope, {
@@ -11125,9 +11766,10 @@ function Hud.Build()
 	-- This replaces a toast that fired on every weapon change. Cycling
 	-- through a slot popped four toasts that sat on screen together, which
 	-- read as four guns being selected at once.
+	local barWidth = SLOT_COUNT * 110
 	weaponBar = makeFrame(screen, {
-		Size = UDim2.fromOffset(660, 36),
-		Position = UDim2.new(0.5, -330, 1, -64),
+		Size = UDim2.fromOffset(barWidth, 36),
+		Position = UDim2.new(0.5, -math.floor(barWidth * 0.5), 1, -64),
 		BackgroundTransparency = 1,
 	})
 
@@ -11265,17 +11907,22 @@ function Hud.Build()
 	makeLabel(board, {
 		Size = UDim2.new(1, -24, 0, 18),
 		Position = UDim2.fromOffset(12, 48),
-		Text = "PLAYER                                 PTS    KILLS   DEATHS",
-		TextSize = 13,
+		Text = string.format("%-30s %6s %7s %8s", "PLAYER", "PTS", "KILLS", "DEATHS"),
+		TextSize = 15,
+		Font = Enum.Font.Code,
 		TextColor3 = Color3.fromRGB(150, 165, 180),
 		TextXAlignment = Enum.TextXAlignment.Left,
 	})
 
-	local rows = makeFrame(board, {
-		Size = UDim2.new(1, -24, 1, -84),
-		Position = UDim2.fromOffset(12, 72),
-		BackgroundTransparency = 1,
-	})
+	local rows = Instance.new("ScrollingFrame")
+	rows.Size = UDim2.new(1, -24, 1, -84)
+	rows.Position = UDim2.fromOffset(12, 72)
+	rows.BackgroundTransparency = 1
+	rows.BorderSizePixel = 0
+	rows.ScrollBarThickness = 4
+	rows.CanvasSize = UDim2.new(0, 0, 0, 0)
+	rows.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	rows.Parent = board
 	local rowLayout = Instance.new("UIListLayout")
 	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	rowLayout.Padding = UDim.new(0, 2)
@@ -11529,10 +12176,15 @@ function Hud.ShowDeath(duration: number, killerName: string?)
 	end)
 
 	task.delay(duration, function()
+		if respawnToken ~= token or not deathOverlay then
+			return
+		end
 		local fade = TweenService:Create(deathOverlay, TweenInfo.new(0.4), { BackgroundTransparency = 1 })
 		fade:Play()
 		fade.Completed:Wait()
-		deathOverlay.Visible = false
+		if respawnToken == token and deathOverlay then
+			deathOverlay.Visible = false
+		end
 	end)
 end
 
@@ -11540,10 +12192,14 @@ function Hud.ShowWiener(teamName: string, duration: number)
 	if not wienerOverlay then
 		return
 	end
+	wienerToken += 1
+	local token = wienerToken
 	wienerOverlay.Text = `{string.upper(teamName)}\nIS THE WIENER!`
 	wienerOverlay.Visible = true
 	task.delay(duration, function()
-		wienerOverlay.Visible = false
+		if wienerToken == token and wienerOverlay then
+			wienerOverlay.Visible = false
+		end
 	end)
 end
 
@@ -11687,11 +12343,18 @@ function Hud.Hit(damage: number, headshot: boolean)
 		return
 	end
 
+	hitToken += 1
+	local myHitToken = hitToken
 	hitmarker.Visible = true
-	hitmarker.Size = if headshot then UDim2.fromOffset(56, 56) else UDim2.fromOffset(40, 40)
-	hitmarker.Position = if headshot
-		then UDim2.new(0.5, -28, 0.5, -28)
-		else UDim2.new(0.5, -20, 0.5, -20)
+	local existingScale = hitmarker:FindFirstChildOfClass("UIScale")
+	local scale: UIScale
+	if existingScale then
+		scale = existingScale
+	else
+		scale = Instance.new("UIScale")
+		scale.Parent = hitmarker
+	end
+	scale.Scale = if headshot then 1.4 else 1.0
 	for _, stroke in hitmarker:GetChildren() do
 		if stroke:IsA("Frame") then
 			stroke.BackgroundColor3 = if headshot
@@ -11701,7 +12364,7 @@ function Hud.Hit(damage: number, headshot: boolean)
 	end
 
 	task.delay(0.12, function()
-		if hitmarker then
+		if hitToken == myHitToken and hitmarker then
 			hitmarker.Visible = false
 		end
 	end)
@@ -11745,18 +12408,21 @@ function Hud.KillFeed(text: string, mine: boolean)
 		end
 	end
 	if #lines >= 5 then
+		table.sort(lines, function(a, b)
+			return a.LayoutOrder > b.LayoutOrder
+		end)
 		lines[1]:Destroy()
 	end
 
+	killFeedOrder -= 1
 	local entry = makeLabel(killFeed, {
 		Size = UDim2.new(1, 0, 0, 24),
 		Text = text,
 		TextSize = 17,
 		TextXAlignment = Enum.TextXAlignment.Right,
-		-- Your own kills stand out from everybody else's.
 		TextColor3 = if mine then Color3.fromRGB(255, 220, 120) else Color3.fromRGB(205, 215, 225),
 	})
-	entry.LayoutOrder = math.floor(os.clock() * 100)
+	entry.LayoutOrder = killFeedOrder
 
 	task.delay(6, function()
 		if entry.Parent then
@@ -11776,12 +12442,14 @@ function Hud.Medal(text: string)
 	if not medalLabel then
 		return
 	end
+	medalToken += 1
+	local myMedalToken = medalToken
 	medalLabel.Text = text
 	medalLabel.TextTransparency = 0
 	medalLabel.TextStrokeTransparency = 0.3
 
 	task.delay(1.6, function()
-		if not medalLabel then
+		if medalToken ~= myMedalToken or not medalLabel then
 			return
 		end
 		TweenService:Create(medalLabel, TweenInfo.new(0.6), {
@@ -11854,10 +12522,10 @@ function Hud.SetScoreboard(
 			Size = UDim2.new(1, 0, 0, 20),
 			Text = string.format(
 				"%-30s %6d %7d %8d",
-				string.sub(row.name, 1, 30),
-				row.points,
-				row.kills,
-				row.deaths
+				string.sub(tostring(row.name or "Player"), 1, 30),
+				tonumber(row.points) or 0,
+				tonumber(row.kills) or 0,
+				tonumber(row.deaths) or 0
 			),
 			TextSize = 15,
 			Font = Enum.Font.Code, -- monospaced, or the columns do not line up
@@ -11903,11 +12571,21 @@ function Hud.FightResult(won: boolean, draw: boolean, brokeStick: boolean)
 	if not fightLabel or not fightCount then
 		return
 	end
+	fightLabel.Visible = true
+	fightCount.Visible = true
 	fightLabel.Text = if draw
 		then "A DRAW"
 		elseif won then "YOU WON THE FIGHT"
 		else "YOU LOST THE FIGHT"
 	fightCount.Text = if brokeStick then "YOUR STICK BROKE — USE IT" else ""
+	task.delay(2.0, function()
+		if fightLabel then
+			fightLabel.Visible = false
+		end
+		if fightCount then
+			fightCount.Visible = false
+		end
+	end)
 end
 
 --[[ Count the mashes back, so mashing feels like it is doing something. ]]
@@ -11980,9 +12658,16 @@ local Hud = require(script.Parent:WaitForChild("Hud"))
 local Feel = require(script.Parent:WaitForChild("Feel"))
 
 local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
+
+local function getCamera(): Camera?
+	return workspace.CurrentCamera
+end
 
 local Controls = {}
+local controlsStarted = false
+local inFight = false
+local lastAimSentAt = 0
+local lastLockCheckAt = 0
 
 type ArsenalEntry = {
 	Slot: number,
@@ -12123,7 +12808,15 @@ local function findAutoAimTarget(origin: Vector3, aimDirection: Vector3): BasePa
 		local angle = Util.AngleBetween(aimDirection, toTarget)
 		if angle < bestAngle then
 			-- Only lock on if we can actually see them.
-			local params = Util.RayParams({ player.Character :: Instance, character })
+			local ignoreList: { Instance } = { player.Character :: Instance, character }
+			local myHum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			if myHum and myHum.SeatPart then
+				local veh = myHum.SeatPart:FindFirstAncestorOfClass("Model")
+				if veh then
+					table.insert(ignoreList, veh)
+				end
+			end
+			local params = Util.RayParams(ignoreList)
 			local blocked = workspace:Raycast(origin, toTarget, params)
 			if not blocked then
 				best = torso
@@ -12142,16 +12835,21 @@ local function currentAimDirection(): (Vector3?, Vector3?)
 		return nil, nil
 	end
 
-	local rawDirection = camera.CFrame.LookVector
+	local cam = getCamera()
+	if not cam then
+		return nil, nil
+	end
+	local rawDirection = cam.CFrame.LookVector
 	local spec = arsenal[effectiveWeaponName()]
 
-	-- Auto-aim is always on for touch players. Aiming precisely with a thumb
-	-- on glass is not a fair fight against a mouse.
-	if spec and (spec.AutoAim or UserInputService.TouchEnabled) then
+	if spec and (spec.AutoAim or (UserInputService.TouchEnabled and not UserInputService.MouseEnabled)) then
 		local target = findAutoAimTarget(origin, rawDirection)
 		lockedTarget = target
 		if target then
-			return origin, (target.Position - origin).Unit
+			local delta = target.Position - origin
+			if delta.Magnitude > 0.001 then
+				return origin, delta.Unit
+			end
 		end
 	else
 		lockedTarget = nil
@@ -12161,6 +12859,12 @@ local function currentAimDirection(): (Vector3?, Vector3?)
 end
 
 -- ==================================================================== FIRING ==
+
+-- Declared up here because onInputBegan reads it, and onInputBegan is
+-- defined well above where this used to sit -- which made it a nil global
+-- rather than this local, so the "ignore clicks while the cursor is free"
+-- guard silently did nothing.
+local mouseFree = false
 
 local nextShotFeedback = 0
 
@@ -12218,6 +12922,13 @@ local function tryFire()
 	local character = player.Character
 	if character then
 		table.insert(ignore, character)
+		local hum = character:FindFirstChildOfClass("Humanoid")
+		if hum and hum.SeatPart then
+			local veh = hum.SeatPart:FindFirstAncestorOfClass("Model")
+			if veh then
+				table.insert(ignore, veh)
+			end
+		end
 	end
 	local look = workspace:Raycast(origin, direction * spec.Range, Util.RayParams(ignore))
 	local endPoint = if look then look.Position else origin + direction * spec.Range
@@ -12235,25 +12946,33 @@ end
 	a room without losing track of where you are.
 ]]
 local function applyZoom()
+	local cam = getCamera()
 	local spec = arsenal[effectiveWeaponName()]
 	local levels = spec and spec.ZoomLevels
 
-	if not levels or zoomStage < 1 then
+	if zoomStage < 1 or (not levels and not (spec and spec.ZoomFov)) then
 		zoomStage = 0
-		TweenService:Create(camera, TweenInfo.new(0.12), { FieldOfView = defaultFov }):Play()
-		-- Back over the shoulder.
+		if cam then
+			TweenService:Create(cam, TweenInfo.new(0.12), { FieldOfView = defaultFov }):Play()
+		end
 		player.CameraMode = Enum.CameraMode.Classic
 		Hud.SetZoom(0)
 		return
 	end
 
-	local magnification = levels[math.clamp(zoomStage, 1, #levels)]
-	TweenService:Create(camera, TweenInfo.new(0.12), {
-		FieldOfView = defaultFov / magnification,
-	}):Play()
-	-- Down the sight properly. Zoomed out over the shoulder, the character's
-	-- own head sits in the middle of the scope and hides what you are
-	-- aiming at; first person puts the camera where his eye is.
+	local targetFov: number
+	local magnification: number
+	if levels and #levels > 0 then
+		magnification = levels[math.clamp(zoomStage, 1, #levels)]
+		targetFov = defaultFov / magnification
+	else
+		targetFov = (spec and spec.ZoomFov) or defaultFov
+		magnification = math.floor(defaultFov / math.max(targetFov, 1) + 0.5)
+	end
+
+	if cam then
+		TweenService:Create(cam, TweenInfo.new(0.12), { FieldOfView = targetFov }):Play()
+	end
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
 	Hud.SetZoom(magnification)
 end
@@ -12263,15 +12982,9 @@ local function cycleZoom()
 	local spec = arsenal[effectiveWeaponName()]
 	local levels = spec and spec.ZoomLevels
 	if not levels or #levels == 0 then
-		-- A gun with a single fixed scope still toggles.
 		if spec and spec.ZoomFov then
 			zoomStage = if zoomStage == 0 then 1 else 0
-			if zoomStage == 1 then
-				TweenService:Create(camera, TweenInfo.new(0.12), { FieldOfView = spec.ZoomFov }):Play()
-				Hud.SetZoom(math.floor(defaultFov / spec.ZoomFov + 0.5))
-			else
-				applyZoom()
-			end
+			applyZoom()
 		end
 		return
 	end
@@ -12382,7 +13095,7 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	local isMouseButton = input.UserInputType == Enum.UserInputType.MouseButton1
 		or input.UserInputType == Enum.UserInputType.MouseButton2
 
-	if processed and not isMouseButton then
+	if (processed and not isMouseButton) or (isMouseButton and mouseFree) then
 		return
 	end
 
@@ -12496,18 +13209,39 @@ local function onHeartbeat()
 		tryFire()
 	end
 
+	local now = os.clock()
+	if now - lastLockCheckAt >= 0.06 then
+		lastLockCheckAt = now
+		local spec = arsenal[effectiveWeaponName()]
+		local cam = getCamera()
+		local origin = shotOrigin()
+		if spec and cam and origin and (spec.AutoAim or (UserInputService.TouchEnabled and not UserInputService.MouseEnabled)) then
+			lockedTarget = findAutoAimTarget(origin, cam.CFrame.LookVector)
+		else
+			lockedTarget = nil
+		end
+	end
+
 	Hud.SetLocked(lockedTarget ~= nil)
 	updateLook()
 
-	-- If we are working a mounted gun, tell the server where to point it.
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if humanoid and humanoid.SeatPart and humanoid.SeatPart.Name == "GunnerSeat" then
+	if (not humanoid or humanoid.Health <= 0) and zoomStage > 0 then
+		clearZoom()
+	end
+
+	if humanoid and humanoid.SeatPart and humanoid.SeatPart.Name == "GunnerSeat" and now - lastAimSentAt >= 0.05 then
+		lastAimSentAt = now
+		local cam = getCamera()
 		local origin = shotOrigin()
-		if origin then
-			local aim = camera.CFrame.LookVector
-			if lockedTarget then
-				aim = (lockedTarget.Position - origin).Unit
+		if origin and cam then
+			local aim = cam.CFrame.LookVector
+			if lockedTarget and lockedTarget.Parent then
+				local delta = lockedTarget.Position - origin
+				if delta.Magnitude > 0.001 then
+					aim = delta.Unit
+				end
 			end
 			Remotes.Event("SetAimDirection"):FireServer(origin + aim * 300)
 		end
@@ -12517,7 +13251,6 @@ end
 -- ============================================================== LOOK & AIM ==
 
 --[[ While the vote panel is up the cursor has to be free to click it. ]]
-local mouseFree = false
 
 function Controls.SetMouseFree(free: boolean)
 	mouseFree = free
@@ -12532,7 +13265,7 @@ end
 	there is no loose cursor to drift over a HUD element and eat your clicks.
 ]]
 function updateLook()
-	if UserInputService.TouchEnabled then
+	if UserInputService.TouchEnabled and not UserInputService.MouseEnabled then
 		return
 	end
 
@@ -12544,7 +13277,6 @@ function updateLook()
 		return
 	end
 
-	-- Roblox resets this, so it is re-asserted every frame.
 	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 	UserInputService.MouseIconEnabled = false
 
@@ -12557,21 +13289,20 @@ function updateLook()
 	if humanoid.Health <= 0 then
 		return
 	end
-	-- In a vehicle the seat decides which way you face; do not fight it.
 	if humanoid.SeatPart then
 		humanoid.AutoRotate = true
+		humanoid.CameraOffset = Vector3.zero
 		return
 	end
 
 	humanoid.AutoRotate = false
+	humanoid.CameraOffset = if zoomStage > 0 then Vector3.zero else Vector3.new(1.8, 3.2, 0)
 
-	-- Lift the camera above his head and out to the side. The crosshair sits
-	-- in the middle of the screen, and from directly behind that put it
-	-- squarely on the back of his skull — you could not see what you were
-	-- shooting at.
-	humanoid.CameraOffset = Vector3.new(1.8, 3.2, 0)
-
-	local look = camera.CFrame.LookVector
+	local cam = getCamera()
+	if not cam then
+		return
+	end
+	local look = cam.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
 	if flat.Magnitude < 0.01 then
 		return
@@ -12747,7 +13478,12 @@ end
 -- ===================================================================== START ==
 
 function Controls.Start()
-	defaultFov = camera.FieldOfView
+	if controlsStarted then
+		return
+	end
+	controlsStarted = true
+	local cam = getCamera()
+	defaultFov = if cam then cam.FieldOfView else 70
 
 	-- Built straight from Config rather than asked for over the network.
 	--
@@ -12782,6 +13518,7 @@ function Controls.Start()
 	for _, name in Config.StartingLoadout do
 		if arsenal[name] then
 			equipped = name
+			slotChoice[arsenal[name].Slot] = name
 			break
 		end
 	end
@@ -12790,6 +13527,11 @@ function Controls.Start()
 
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UserInputService.InputEnded:Connect(onInputEnded)
+	UserInputService.WindowFocusReleased:Connect(function()
+		firing = false
+		Remotes.Event("SetTurbo"):FireServer(false)
+		Hud.SetTurbo(false)
+	end)
 	RunService.Heartbeat:Connect(onHeartbeat)
 
 	buildTouchButton()
@@ -12801,6 +13543,19 @@ function Controls.EquippedName(): string
 end
 
 --[[ Whether the scoreboard is up, for tests. ]]
+--[[
+	Allow Start() to run again, for tests.
+
+	Start() is idempotent in production on purpose -- it used to be able to
+	double-connect every input handler when the retry loop fired. A test that
+	needs to bring the controls up as a different kind of device has to be
+	able to clear that latch, and doing it through a named function is
+	honester than reaching into the module.
+]]
+function Controls.ResetForTests()
+	controlsStarted = false
+end
+
 --[[ A fight started or finished; F throws punches while one is running. ]]
 function Controls.SetFighting(fighting: boolean)
 	fightSwings = if fighting then 1 else 0
@@ -12825,15 +13580,10 @@ return Controls
 --[[
 	Nuclear Mud Arena — how the camera reacts to what you do.
 
-	Shooting in Halo felt like shooting because the camera moved. The rifle
-	pushed the view up a little and it settled back; a rocket landing nearby
-	rattled everything; a hard landing jolted you. None of it changes where a
-	bullet goes, and that is the point — this module never touches aim, only
-	the camera, so the game stays as accurate as it was before and simply
-	stops feeling like a spreadsheet.
-
-	Everything decays on its own, so a dropped frame or a missed event can
-	never leave the camera stuck off-axis.
+	Applies framerate-independent Perlin-noise trauma shake and recoil kick to
+	the camera AFTER Roblox's camera update, and strips that offset back off
+	BEFORE the next frame's camera/aim calculations so visual rattle never
+	shifts where bullets go or compounds on Scriptable cameras.
 ]]
 
 local RunService = game:GetService("RunService")
@@ -12841,52 +13591,36 @@ local Workspace = game:GetService("Workspace")
 
 local Feel = {}
 
--- Degrees of accumulated kick, and how fast it is bleeding off.
 local kickPitch = 0
 local kickYaw = 0
-
--- Shake amplitude, in degrees, and its own decay.
 local shake = 0
+local elapsed = 0
+local lastOffset = CFrame.identity
 
--- How quickly a kick settles back. Smaller is snappier. 0.09 of a second is
--- about where a burst reads as a burst rather than a slow drift upward.
 local KICK_RECOVERY = 0.09
-local SHAKE_RECOVERY = 0.22
+local SHAKE_RECOVERY = 0.24
+local SHAKE_FREQUENCY = 22
 
--- Hard ceilings. A minigun held down, or three rockets at once, must never
--- spin the view somewhere a player cannot recover from.
 local MAX_KICK = 7
 local MAX_SHAKE = 4
 
 local started = false
 
---[[
-	Kick the view, once, for one shot.
-
-	`degrees` comes from the weapon's own Recoil value, so a sniper shoves and
-	a minigun buzzes. The sideways component is randomised, which is what
-	stops a long burst from walking the camera in a perfectly straight line.
-]]
 function Feel.Kick(degrees: number)
-	if degrees <= 0 then
+	if not (degrees > 0) or degrees == math.huge then
 		return
 	end
 	kickPitch = math.min(kickPitch + degrees, MAX_KICK)
 	kickYaw = math.clamp(kickYaw + (math.random() - 0.5) * degrees * 0.6, -MAX_KICK, MAX_KICK)
 end
 
---[[ Rattle the camera: explosions, taking a hit, a heavy landing. ]]
 function Feel.Shake(degrees: number)
+	if not (degrees > 0) or degrees == math.huge then
+		return
+	end
 	shake = math.min(math.max(shake, degrees), MAX_SHAKE)
 end
 
---[[
-	Shake scaled by how far away the bang was.
-
-	A rocket at your feet should be violent and the same rocket across the map
-	should do nothing at all, which a flat shake for every explosion gets
-	wrong in both directions.
-]]
 function Feel.ShakeFrom(position: Vector3, degrees: number, falloff: number)
 	local camera = Workspace.CurrentCamera
 	if not camera then
@@ -12899,18 +13633,25 @@ function Feel.ShakeFrom(position: Vector3, degrees: number, falloff: number)
 	end
 end
 
---[[
-	Start driving the camera.
-
-	This has to run AFTER Roblox's own camera update, or the engine would
-	overwrite the offset in the same frame and nothing would move. That is
-	what the priority is for.
-]]
 function Feel.Start()
 	if started then
 		return
 	end
 	started = true
+	lastOffset = CFrame.identity
+
+	-- Strip the previous frame's visual offset before Roblox's camera controller
+	-- and before any Heartbeat aim reads so visual shake never corrupts aim.
+	RunService:BindToRenderStep("FeelCameraReset", Enum.RenderPriority.Camera.Value - 1, function()
+		if lastOffset == CFrame.identity then
+			return
+		end
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera.CFrame = camera.CFrame * lastOffset:Inverse()
+		end
+		lastOffset = CFrame.identity
+	end)
 
 	RunService:BindToRenderStep("FeelCamera", Enum.RenderPriority.Camera.Value + 1, function(deltaTime: number)
 		local camera = Workspace.CurrentCamera
@@ -12918,8 +13659,8 @@ function Feel.Start()
 			return
 		end
 
-		-- Exponential decay, framerate-independent: at 30fps and at 240fps
-		-- a kick takes the same amount of time to settle.
+		elapsed += deltaTime
+
 		local kickFade = math.exp(-deltaTime / KICK_RECOVERY)
 		kickPitch *= kickFade
 		kickYaw *= kickFade
@@ -12927,39 +13668,57 @@ function Feel.Start()
 		local shakeFade = math.exp(-deltaTime / SHAKE_RECOVERY)
 		shake *= shakeFade
 
-		-- Below a twentieth of a degree nobody can see it, and leaving it to
-		-- decay forever means every frame pays for arithmetic on nothing.
-		if kickPitch < 0.05 then kickPitch = 0 end
-		if kickYaw > -0.05 and kickYaw < 0.05 then kickYaw = 0 end
-		if shake < 0.05 then shake = 0 end
+		if kickPitch < 0.04 then
+			kickPitch = 0
+		end
+		if kickYaw > -0.04 and kickYaw < 0.04 then
+			kickYaw = 0
+		end
+		if shake < 0.04 then
+			shake = 0
+		end
 
 		if kickPitch == 0 and kickYaw == 0 and shake == 0 then
+			lastOffset = CFrame.identity
 			return
 		end
 
-		local rattlePitch = (math.random() - 0.5) * shake
-		local rattleYaw = (math.random() - 0.5) * shake
-		local rattleRoll = (math.random() - 0.5) * shake * 0.5
+		-- Smooth framerate-independent Perlin noise scaled quadratically for
+		-- punchy initial trauma that settles organically.
+		local trauma = (shake / MAX_SHAKE)
+		local amp = MAX_SHAKE * trauma * trauma
+		local sample = elapsed * SHAKE_FREQUENCY
+		local rattlePitch = math.noise(sample, 1.37) * amp
+		local rattleYaw = math.noise(sample, 7.91) * amp
+		local rattleRoll = math.noise(sample, 14.53) * amp * 0.6
 
-		camera.CFrame = camera.CFrame * CFrame.Angles(
+		local offset = CFrame.Angles(
 			math.rad(kickPitch + rattlePitch),
 			math.rad(kickYaw + rattleYaw),
 			math.rad(rattleRoll)
 		)
+		camera.CFrame = camera.CFrame * offset
+		lastOffset = offset
 	end)
 end
 
---[[ Let go of the camera completely. Used by the tests. ]]
 function Feel.Stop()
 	if not started then
 		return
 	end
 	started = false
+	if lastOffset ~= CFrame.identity then
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera.CFrame = camera.CFrame * lastOffset:Inverse()
+		end
+		lastOffset = CFrame.identity
+	end
 	kickPitch, kickYaw, shake = 0, 0, 0
+	RunService:UnbindFromRenderStep("FeelCameraReset")
 	RunService:UnbindFromRenderStep("FeelCamera")
 end
 
---[[ What the camera is currently doing, for tests and for the HUD. ]]
 function Feel.Debug(): { kick: number, yaw: number, shake: number }
 	return { kick = kickPitch, yaw = kickYaw, shake = shake }
 end
@@ -12975,22 +13734,8 @@ return Feel
 --[[
 	Nuclear Mud Arena — the motion tracker.
 
-	Halo's radar is the single most recognisable thing on its HUD, and it
-	changes how the game is played rather than just how it looks: you push
-	into a building because the tracker is empty, you back out because two
-	red dots appeared behind you. Without one, a twenty-player map with this
-	many corners is all ambushes.
-
-	It works the way Halo's did:
-
-	  - You are the centre, and the sweep is oriented to where you are
-	    FACING, not to north. Turn around and the dots swing round with you.
-	  - Enemies are red, team-mates are the softer team colour.
-	  - A dot above you sits on a lighter ring, below you on a darker one,
-	    because a map with roofs and basements is unreadable flat.
-
-	All of it is read straight off the replicated characters, so the server
-	does no work and sends no extra traffic for it.
+	Halo-style relative radar oriented to camera facing, with elevation shading
+	and properly centered sweep rotation.
 ]]
 
 local Players = game:GetService("Players")
@@ -13005,12 +13750,10 @@ local player = Players.LocalPlayer
 
 local Radar = {}
 
-local SIZE = 164 -- pixels across
+local SIZE = 164
 local DOT = 10
-local MAX_DOTS = 24 -- the dot pool; a 20-player server cannot exceed this
+local MAX_DOTS = 24
 
--- How far the tracker sees. Halo's was deliberately short: far enough to
--- stop you being walked up on, short enough that it never replaced looking.
 local RANGE = Config.Radar and Config.Radar.Range or 170
 local VERTICAL_RANGE = Config.Radar and Config.Radar.VerticalRange or 60
 
@@ -13042,8 +13785,15 @@ local function makeDot(parent: Instance): Frame
 	return dot
 end
 
---[[ Build the dial. Call once, from the HUD. ]]
+--[[ Build the dial. Safe to re-call without leaking dots or frames. ]]
 function Radar.Build(screen: Instance): Frame
+	if holder then
+		holder:Destroy()
+		holder = nil
+	end
+	table.clear(dots)
+	sweep = nil
+
 	local dial = Instance.new("Frame")
 	dial.Name = "MotionTracker"
 	dial.Size = UDim2.fromOffset(SIZE, SIZE)
@@ -13063,7 +13813,6 @@ function Radar.Build(screen: Instance): Frame
 	rim.Transparency = 0.25
 	rim.Parent = dial
 
-	-- Range rings, so a dot's distance is readable rather than guessed.
 	for _, fraction in { 0.33, 0.66 } do
 		local ring = Instance.new("Frame")
 		ring.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -13084,8 +13833,18 @@ function Radar.Build(screen: Instance): Frame
 		ringEdge.Parent = ring
 	end
 
-	-- The sweep, which is what makes it read as a live instrument rather
-	-- than a picture of one.
+	-- Full-size pivot wrapper centered on the dial so Rotation pivots cleanly
+	-- around (0.5, 0.5) instead of around the line's midpoint.
+	local sweepPivot = Instance.new("Frame")
+	sweepPivot.Name = "SweepPivot"
+	sweepPivot.AnchorPoint = Vector2.new(0.5, 0.5)
+	sweepPivot.Position = UDim2.fromScale(0.5, 0.5)
+	sweepPivot.Size = UDim2.fromScale(1, 1)
+	sweepPivot.BackgroundTransparency = 1
+	sweepPivot.BorderSizePixel = 0
+	sweepPivot.ZIndex = 2
+	sweepPivot.Parent = dial
+
 	local hand = Instance.new("Frame")
 	hand.Name = "Sweep"
 	hand.AnchorPoint = Vector2.new(0.5, 1)
@@ -13095,10 +13854,9 @@ function Radar.Build(screen: Instance): Frame
 	hand.BackgroundTransparency = 0.55
 	hand.BorderSizePixel = 0
 	hand.ZIndex = 2
-	hand.Parent = dial
-	sweep = hand
+	hand.Parent = sweepPivot
+	sweep = sweepPivot
 
-	-- You, at the centre, pointing up the way you are facing.
 	local you = Instance.new("Frame")
 	you.AnchorPoint = Vector2.new(0.5, 0.5)
 	you.Position = UDim2.fromScale(0.5, 0.5)
@@ -13112,8 +13870,6 @@ function Radar.Build(screen: Instance): Frame
 	youRound.CornerRadius = UDim.new(1, 0)
 	youRound.Parent = you
 
-	-- A fixed pool. Creating and destroying frames every refresh is the one
-	-- thing that would make a radar cost more than it is worth.
 	for _ = 1, MAX_DOTS do
 		table.insert(dots, makeDot(dial))
 	end
@@ -13122,17 +13878,11 @@ function Radar.Build(screen: Instance): Frame
 	return dial
 end
 
---[[
-	Where the local player is and which way they are looking.
-
-	Facing comes from the CAMERA, not the character: on foot the body turns
-	to follow the camera anyway, and in a vehicle the body faces wherever
-	the seat points while the player is looking somewhere else entirely.
-]]
 local function viewerFrame(): (Vector3?, Vector3?)
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not root or not root:IsA("BasePart") then
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
 		return nil, nil
 	end
 
@@ -13154,7 +13904,6 @@ local function refresh()
 
 	local from, facing = viewerFrame()
 	if not from or not facing then
-		-- Dead or still loading: blank it rather than freezing the last frame.
 		for _, dot in dots do
 			dot.Visible = false
 		end
@@ -13164,8 +13913,6 @@ local function refresh()
 
 	dial.BackgroundTransparency = 0.35
 
-	-- Facing is the dial's "up", so the sideways axis is facing turned 90
-	-- degrees about Y.
 	local right = Vector3.new(-facing.Z, 0, facing.X)
 	local radius = SIZE * 0.5 - DOT * 0.75
 	local myTeam = player.Team
@@ -13192,33 +13939,22 @@ local function refresh()
 		used += 1
 		local dot = dots[used]
 
-		-- Project into the dial's own axes.
 		local forward = flat:Dot(facing) / RANGE
 		local sideways = flat:Dot(right) / RANGE
 
-		-- Screen Y grows downward, so forward is negative.
 		dot.Position = UDim2.new(0.5, sideways * radius, 0.5, -forward * radius)
 
-		-- Enemies red, team-mates yellow -- fixed colours, NOT the team's own.
-		-- Tinting allies with the team colour looks tidier and is useless in
-		-- practice: on the Red team every dot on the dial comes out red and
-		-- the tracker stops answering the only question it is for. Halo used
-		-- red and yellow for this reason whichever side you were on.
 		local friendly = myTeam ~= nil and other.Team == myTeam
 		local base = if friendly
 			then Color3.fromRGB(255, 212, 64)
 			else Color3.fromRGB(235, 60, 50)
 
-		-- Lighter when they are above you, darker when below. Guessing at an
-		-- elevation on a map with roofs and basements is most of what makes a
-		-- flat radar useless.
 		local lift = math.clamp(offset.Y / VERTICAL_RANGE, -1, 1)
 		dot.BackgroundColor3 = if lift > 0.08
 			then base:Lerp(Color3.new(1, 1, 1), lift * 0.55)
 			elseif lift < -0.08 then base:Lerp(Color3.new(0, 0, 0), -lift * 0.5)
 			else base
 
-		-- Nearer reads bigger, which is the cheapest possible depth cue.
 		local nearness = 1 - flat.Magnitude / RANGE
 		local pixels = math.floor(DOT * (0.7 + nearness * 0.5) + 0.5)
 		dot.Size = UDim2.fromOffset(pixels, pixels)
@@ -13230,7 +13966,6 @@ local function refresh()
 	end
 end
 
---[[ Start sweeping. ]]
 function Radar.Start()
 	if started then
 		return
@@ -13242,15 +13977,11 @@ function Radar.Start()
 			return
 		end
 
-		-- The sweep runs every frame, because it is the only part anyone
-		-- would notice stuttering.
 		sweepAngle = (sweepAngle + deltaTime * 170) % 360
 		if sweep then
 			sweep.Rotation = sweepAngle
 		end
 
-		-- The dots do not. Fifteen times a second is faster than anybody
-		-- reacts, and it keeps a twenty-player scan off the frame budget.
 		local now = os.clock()
 		if now >= nextRefresh then
 			nextRefresh = now + 1 / 15
@@ -13259,23 +13990,10 @@ function Radar.Start()
 	end)
 end
 
---[[
-	Run one refresh now, for tests.
-
-	The real one is driven from the render loop at 15 Hz, which a headless
-	test has no way to wait for.
-]]
 function Radar.RefreshForTests()
 	refresh()
 end
 
---[[
-	What the visible dots currently say, for tests.
-
-	Returned in pixels from the centre and as colours, because those are the
-	two things that have to be right: a contact behind you plotting behind
-	you, and an enemy reading as an enemy.
-]]
 function Radar.ContactsForTests(): { { offsetX: number, offsetY: number, color: Color3 } }
 	local out = {}
 	for _, dot in dots do
@@ -13290,7 +14008,6 @@ function Radar.ContactsForTests(): { { offsetX: number, offsetY: number, color: 
 	return out
 end
 
---[[ Current dot count, for tests. ]]
 function Radar.VisibleContacts(): number
 	local total = 0
 	for _, dot in dots do
@@ -13307,4 +14024,4 @@ return Radar
 
 ---
 
-End of source: 13063 lines.
+End of source: 13780 lines.

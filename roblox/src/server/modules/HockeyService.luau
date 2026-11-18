@@ -31,6 +31,10 @@ local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+-- Required, and it was not. TeamService.IndexOf is called when a goal goes
+-- in, so without this every single goal threw "attempt to index nil" inside
+-- the Heartbeat connection and took the whole hockey step down with it.
+local TeamService = require(script.Parent:WaitForChild("TeamService"))
 
 local HockeyService = {}
 
@@ -128,16 +132,27 @@ local function boards(centre: Vector3, parent: Instance)
 		Vector3.new(-halfWidth, 0, halfLength - cornerCut),
 	}
 
+	local cornerArcs = {
+		[1] = { pivot = Vector3.new(-halfWidth + cornerCut, 0, -halfLength + cornerCut), a0 = math.pi, a1 = math.pi * 1.5 },
+		[3] = { pivot = Vector3.new(halfWidth - cornerCut, 0, -halfLength + cornerCut), a0 = math.pi * 1.5, a1 = math.pi * 2 },
+		[5] = { pivot = Vector3.new(halfWidth - cornerCut, 0, halfLength - cornerCut), a0 = 0, a1 = math.pi * 0.5 },
+		[7] = { pivot = Vector3.new(-halfWidth + cornerCut, 0, halfLength - cornerCut), a0 = math.pi * 0.5, a1 = math.pi },
+	}
+
 	for index = 1, #outline do
-		local from = centre + outline[index]
-		local to = centre + outline[(index % #outline) + 1]
-		-- Corners get broken into segments so the curve is a curve.
-		local isCorner = index % 2 == 0
-		local steps = if isCorner then CORNER_SEGMENTS else 1
-		for step = 0, steps - 1 do
-			local a = from + (to - from) * (step / steps)
-			local b = from + (to - from) * ((step + 1) / steps)
-			board(a, b)
+		local arc = cornerArcs[index]
+		if arc then
+			for step = 0, CORNER_SEGMENTS - 1 do
+				local angA = arc.a0 + (arc.a1 - arc.a0) * (step / CORNER_SEGMENTS)
+				local angB = arc.a0 + (arc.a1 - arc.a0) * ((step + 1) / CORNER_SEGMENTS)
+				local a = centre + arc.pivot + Vector3.new(math.cos(angA) * cornerCut, 0, math.sin(angA) * cornerCut)
+				local b = centre + arc.pivot + Vector3.new(math.cos(angB) * cornerCut, 0, math.sin(angB) * cornerCut)
+				board(a, b)
+			end
+		else
+			local from = centre + outline[index]
+			local to = centre + outline[(index % #outline) + 1]
+			board(from, to)
 		end
 	end
 end
@@ -147,9 +162,11 @@ local function goal(centre: Vector3, facingZ: number, defendingTeam: number, par
 	local width = 26
 	local height = 15
 	local depth = 14
-	local colour = Config.Teams[defendingTeam]
-		and Config.Teams[defendingTeam].Color
-		or Color3.fromRGB(200, 60, 60)
+	local rawColour = Config.Teams[defendingTeam] and Config.Teams[defendingTeam].Color
+	local colour = if typeof(rawColour) == "BrickColor"
+		then rawColour.Color
+		elseif typeof(rawColour) == "Color3" then rawColour
+		else Color3.fromRGB(200, 60, 60)
 
 	-- Posts and crossbar.
 	for _, side in { -1, 1 } do
@@ -197,7 +214,7 @@ local function goal(centre: Vector3, facingZ: number, defendingTeam: number, par
 	Util.Part({
 		Name = "GoalLine",
 		Size = Vector3.new(width + 10, 0.2, 1.4),
-		CFrame = CFrame.new(centre + Vector3.new(0, 0.7, 0)),
+		CFrame = CFrame.new(centre + Vector3.new(0, 1.1, 0)),
 		Color = Color3.fromRGB(210, 50, 50),
 		Material = Enum.Material.SmoothPlastic,
 		CanCollide = false,
@@ -318,7 +335,7 @@ local function dropPuck()
 
 	local fresh = Util.Part({
 		Name = "Puck",
-		Size = Vector3.new(3.4, 1.2, 3.4),
+		Size = Vector3.new(1.2, 3.4, 3.4),
 		CFrame = CFrame.new(puckHome),
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(22, 22, 26),
@@ -384,6 +401,13 @@ local function checkGoals()
 		return
 	end
 
+	-- Reset puck if blasted over the boards or out of bounds.
+	local distFromHome = live.Position - puckHome
+	if live.Position.Y < -20 or math.abs(distFromHome.X) > RINK_WIDTH * 0.65 or math.abs(distFromHome.Z) > RINK_LENGTH * 0.65 then
+		dropPuck()
+		return
+	end
+
 	local now = os.clock()
 	if now - lastGoalAt < 3 then
 		return
@@ -403,7 +427,7 @@ local function checkGoals()
 			local scoringTeam = if zone.defendingTeam == 1 then 2 else 1
 			local points = Config.Hockey.GoalPoints
 
-			if scorer then
+			if scorer and TeamService.IndexOf(scorer) == scoringTeam then
 				PlayerState.AwardPoints(scorer, points)
 			end
 			HockeyService.Goal.Fire(scorer, scoringTeam, points)
@@ -463,12 +487,19 @@ function HockeyService.StartFight(a: Player, b: Player): boolean
 	return true
 end
 
---[[ A swing thrown during a fight. The client sends one per mash. ]]
+local lastSwingAt: { [Player]: number } = {}
+
+--[[ A swing thrown during a fight. The client sends one per mash (rate-limited). ]]
 function HockeyService.Swing(player: Player)
 	local fight = fightOf[player]
 	if not fight then
 		return
 	end
+	local now = os.clock()
+	if now - (lastSwingAt[player] or 0) < 0.08 then
+		return
+	end
+	lastSwingAt[player] = now
 	fight.swings[player] = (fight.swings[player] or 0) + 1
 end
 
@@ -555,6 +586,13 @@ end
 -- ===================================================================== BUILD ==
 
 function HockeyService.Clear()
+	for _, fight in fights do
+		for _, fighter in { fight.a, fight.b } do
+			if fighter.Parent then
+				Remotes.Event("FightResult"):FireClient(fighter, { won = false, draw = true, brokeStick = false })
+			end
+		end
+	end
 	if rink then
 		rink:Destroy()
 		rink = nil
@@ -563,6 +601,7 @@ function HockeyService.Clear()
 	table.clear(goalZones)
 	table.clear(fights)
 	table.clear(fightOf)
+	table.clear(lastSwingAt)
 end
 
 --[[ Put the rink down, off to one side of the city. ]]
@@ -602,7 +641,23 @@ function HockeyService.ReservedArea(mapSize: number): { centre: Vector3, radius:
 	}
 end
 
+local hockeyStarted = false
+
+local function isAlive(p: Player): boolean
+	if p.Parent == nil then
+		return false
+	end
+	local char = p.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	return hum ~= nil and hum.Health > 0
+end
+
 function HockeyService.Start()
+	if hockeyStarted then
+		return
+	end
+	hockeyStarted = true
+
 	Remotes.Event("FightSwing").OnServerEvent:Connect(function(player: Player)
 		HockeyService.Swing(player)
 	end)
@@ -613,15 +668,18 @@ function HockeyService.Start()
 		local now = os.clock()
 		for index = #fights, 1, -1 do
 			local fight = fights[index]
-			-- A fight ends on the clock, or the moment either of them leaves
-			-- or dies, which would otherwise leave it running forever.
-			local aGone = fight.a.Parent == nil
-			local bGone = fight.b.Parent == nil
+			local aGone = not isAlive(fight.a)
+			local bGone = not isAlive(fight.b)
 			if now >= fight.endsAt or aGone or bGone then
 				table.remove(fights, index)
 				if aGone or bGone then
 					fightOf[fight.a] = nil
 					fightOf[fight.b] = nil
+					for _, fighter in { fight.a, fight.b } do
+						if fighter.Parent then
+							Remotes.Event("FightResult"):FireClient(fighter, { won = false, draw = true, brokeStick = false })
+						end
+					end
 				else
 					settle(fight)
 				end
@@ -631,6 +689,7 @@ function HockeyService.Start()
 
 	Players.PlayerRemoving:Connect(function(player)
 		fightOf[player] = nil
+		lastSwingAt[player] = nil
 	end)
 end
 

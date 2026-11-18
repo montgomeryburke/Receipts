@@ -27,6 +27,8 @@ local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local EffectService = require(script.Parent:WaitForChild("EffectService"))
 local ScoreboardService = require(script.Parent:WaitForChild("ScoreboardService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
+local ResortService = require(script.Parent:WaitForChild("ResortService"))
 
 local MatchService = {}
 
@@ -199,13 +201,21 @@ local function deployPlayer(player: Player, keepProgress: boolean)
 		return
 	end
 
+	if not player.Parent then
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid and not keepProgress then
+		humanoid.Sit = false
+		humanoid.Health = humanoid.MaxHealth
+	end
+
 	PlayerState.Reset(player, keepProgress)
 
 	local teamIndex = TeamService.IndexOf(player)
 	local spawns = build.teamSpawns[teamIndex]
 	if not spawns or #spawns == 0 then
-		-- No spawn line for this team; drop them in the middle rather than
-		-- erroring out of the whole deploy.
 		spawns = { Vector3.new(0, 8, 0) }
 	end
 	local spot = spawns[rng:NextInteger(1, #spawns)]
@@ -230,8 +240,11 @@ local function deployAll()
 		if player.Character then
 			deployPlayer(player, false)
 		else
+			PlayerState.Reset(player, false)
 			task.spawn(function()
-				player:LoadCharacterAsync()
+				if player.Parent then
+					player:LoadCharacterAsync()
+				end
 			end)
 		end
 	end
@@ -309,17 +322,22 @@ local function tallyVotes(): { map: Config.MapSpec, mode: typeof(Config.Modes[1]
 		end
 	end
 
-	local best, bestCount = 1, -1
+	local bestCount = -1
+	local tied: { number } = {}
 	for index = 1, #ballot do
 		if counts[index] > bestCount then
-			best, bestCount = index, counts[index]
+			bestCount = counts[index]
+			table.clear(tied)
+			table.insert(tied, index)
+		elseif counts[index] == bestCount then
+			table.insert(tied, index)
 		end
 	end
 
-	if bestCount <= 0 then
-		best = rng:NextInteger(1, #ballot)
+	if bestCount <= 0 or #tied == 0 then
+		return ballot[rng:NextInteger(1, #ballot)]
 	end
-	return ballot[best]
+	return ballot[tied[rng:NextInteger(1, #tied)]]
 end
 
 local function runRound()
@@ -423,9 +441,7 @@ function MatchService.Start()
 		sprees[victim] = 0
 		recentKills[victim] = {}
 
-		if killer and killer ~= victim and phase == "Playing" then
-			-- A sniper shot is worth more than a pistol round, and a running
-			-- multiplier makes everything worth more still.
+		if killer and killer ~= victim and killer.Parent and phase == "Playing" then
 			local base = pointsByWeapon[cause] or Config.Match.PointsPerKill
 			local earned = PlayerState.AwardPoints(killer, base)
 
@@ -439,7 +455,6 @@ function MatchService.Start()
 		end
 	end)
 
-	-- A capture is worth a great deal, and it goes on the team's total.
 	FlagService.Captured.Connect(function(_player: Player, teamIndex: number, points: number)
 		if phase == "Playing" then
 			scores[teamIndex] += points
@@ -447,7 +462,18 @@ function MatchService.Start()
 		end
 	end)
 
+	HockeyService.Goal.Connect(function(scorer: Player?, teamIndex: number, points: number)
+		if phase == "Playing" then
+			scores[teamIndex] += points
+			broadcast()
+		end
+		if scorer and scorer.Parent then
+			Remotes.Event("KillFeed"):FireAllClients(`{scorer.DisplayName} SCORED A GOAL! (+{points})`, false)
+		end
+	end)
+
 	FlagService.Start()
+	ResortService.Start()
 
 	Remotes.Event("CastVote").OnServerEvent:Connect(function(player, choice)
 		if phase ~= "Voting" then
@@ -472,19 +498,18 @@ function MatchService.Start()
 		TeamService.Assign(player)
 
 		player.CharacterAdded:Connect(function()
-			-- Give the character a moment to finish assembling before moving it.
 			task.wait(0.35)
-			-- Deploy whatever phase we are in, so you always land on the map
-			-- with a car — including while waiting for a round to start.
-			-- Respawning keeps your keys, so one unlucky rocket does not wipe
-			-- out a good run.
-			deployPlayer(player, true)
+			if player.Parent then
+				deployPlayer(player, true)
+			end
 		end)
 
 		if player.Character then
 			task.spawn(function()
 				task.wait(0.35)
-				deployPlayer(player, true)
+				if player.Parent then
+					deployPlayer(player, true)
+				end
 			end)
 		end
 	end
@@ -518,7 +543,10 @@ function MatchService.Start()
 			if root and root:IsA("BasePart") and root.Position.Y < -120 then
 				local humanoid = character:FindFirstChildOfClass("Humanoid")
 				if humanoid and humanoid.Health > 0 then
-					humanoid.Health = 0
+					DamageService.ApplyDamage(player, humanoid.MaxHealth + 1000, nil, "Void")
+					if humanoid.Health > 0 then
+						humanoid.Health = 0
+					end
 				end
 			end
 		end
@@ -547,6 +575,14 @@ end
 	already live.
 ]]
 VehicleService.TrickLanded.Connect(function(player: Player, name: string, points: number, airtime: number)
+	if not player.Parent then
+		return
+	end
+	if phase == "Playing" then
+		local teamIndex = TeamService.IndexOf(player)
+		scores[teamIndex] += points
+		broadcast()
+	end
 	Remotes.Event("Medal"):FireClient(player, `{name}  +{points}`)
 	Remotes.Event("PlaySound"):FireClient(player, "Medal")
 
