@@ -43,6 +43,8 @@ async function startMockAI({ port = 0 } = {}) {
     requests: [],
     anthropic: (body) => anthropicMessage({ content: [text('ok')] }, body),
     gemini: () => geminiReply({ text: 'ok' }),
+    // A local OpenAI-compatible model server (Ollama / LM Studio), at /llm/ like the NAS proxy.
+    local: () => ({ choices: [{ message: { role: 'assistant', content: '{}' } }], usage: { prompt_tokens: 500, completion_tokens: 50 }, model: 'qwen2.5:7b' }),
     geminiModels: ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.7-flash-preview-09-2026', 'gemini-3.5-pro', 'gemini-3.5-flash-image'],
     anthropicStatus: null, // e.g. {status: 401, body: {...}} to simulate errors once
     reset() {
@@ -50,6 +52,7 @@ async function startMockAI({ port = 0 } = {}) {
       this.anthropicStatus = null;
       this.anthropic = (body) => anthropicMessage({ content: [text('ok')] }, body);
       this.gemini = () => geminiReply({ text: 'ok' });
+      this.local = () => ({ choices: [{ message: { role: 'assistant', content: '{}' } }], usage: { prompt_tokens: 500, completion_tokens: 50 }, model: 'qwen2.5:7b' });
     },
     ofApi(api) {
       return this.requests.filter((r) => r.api === api);
@@ -94,6 +97,16 @@ async function startMockAI({ port = 0 } = {}) {
           ai.requests.push({ api: 'gemini-models', path: url.pathname, headers: req.headers });
           if (req.headers['x-goog-api-key'] !== 'AIza-test') return send(400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } });
           return send(200, { models: ai.geminiModels.map((n) => ({ name: 'models/' + n, supportedGenerationMethods: ['generateContent', 'countTokens'] })) });
+        }
+        if (url.pathname === '/llm/v1/models' && req.method === 'GET') {
+          ai.requests.push({ api: 'local-models', path: url.pathname, headers: req.headers });
+          return send(200, { object: 'list', data: [{ id: 'qwen2.5:7b' }, { id: 'llama3.1:8b' }] });
+        }
+        if (url.pathname === '/llm/v1/chat/completions' && req.method === 'POST') {
+          ai.requests.push({ api: 'local', path: url.pathname, body, headers: req.headers });
+          const out = await ai.local(body, req);
+          if (out && out.__status) return send(out.__status, out.body);
+          return send(200, { id: 'chatcmpl-1', object: 'chat.completion', ...out });
         }
         const gm = /^\/v1beta\/models\/([^:]+):generateContent$/.exec(url.pathname);
         if (gm && req.method === 'POST') {

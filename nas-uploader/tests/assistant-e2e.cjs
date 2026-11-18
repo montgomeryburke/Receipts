@@ -416,11 +416,15 @@ function scannedFixtures() {
 
 
 /** A stand-in for Outlook on the web: same roles and labels the content script looks for. */
-const FAKE_OUTLOOK = `<!doctype html><html><head><meta charset="utf-8"><title>Mail - Outlook</title></head><body>
-<div role="listbox" aria-label="Message list">
+const FAKE_OUTLOOK = `<!doctype html><html><head><meta charset="utf-8"><title>Mail - Outlook</title>
+<style>[aria-label="Message body"]{white-space:pre-wrap}</style></head><body>
+<div role="listbox" aria-label="Message list" style="max-height:160px;overflow:auto">
   <div role="option" data-convid="conv-alert-1" aria-selected="true" aria-label="Alert Bridge deck width Engineer">Alert Bridge deck width</div>
+  <div role="option" data-convid="conv-pour-2" aria-selected="false" aria-label="RE: Alert Bridge deck pour Dana Lee">RE: Alert Bridge deck pour</div>
+  <div role="option" data-convid="conv-supply-3" aria-selected="false" aria-label="Concrete supply notice Arctic Fresh">Concrete supply notice</div>
 </div>
-<div role="main" style="min-height:300px">
+<div role="main" id="pane" style="min-height:300px"></div>
+<template id="t-conv-alert-1">
   <div role="heading" aria-level="2">Alert Bridge deck width</div>
   <div class="msg">
     <div><span title="engineer@client.ca">Engineer</span> <span aria-label="To: Monty Burke">To: Monty</span></div>
@@ -434,7 +438,52 @@ Engineer</div>
     <button aria-label="Reply" onclick="if(!document.getElementById('ed')){const d=document.createElement('div');d.id='ed';d.contentEditable='true';d.setAttribute('role','textbox');d.setAttribute('aria-label','Message body, press Alt+F10 to exit');d.style.height='200px';d.style.border='1px solid #999';document.querySelector('[role=main]').append(d);}">Reply</button>
     <button aria-label="Reply all">Reply all</button>
   </div>
-</div></body></html>`;
+</template>
+<template id="t-conv-pour-2">
+  <div role="heading" aria-level="2">RE: Alert Bridge deck pour</div>
+  <div class="msg">
+    <div><span title="dana@client.ca">Dana Lee</span> <span aria-label="To: Monty Burke">To: Monty</span></div>
+    <time title="2026-11-12 08:30">2026-11-12 08:30</time>
+    <div aria-label="Message body" id="b2">Hi Monty,
+
+Following up on the below: can you confirm the pour date and whether the revised rebar shop drawings were approved?
+
+Thanks,
+Dana</div>
+    <div id="h2" hidden>From: Monty Burke &lt;monty@example.ca&gt;
+Sent: Tuesday, November 10, 2026 3:12 PM
+To: Dana Lee &lt;dana@client.ca&gt;
+Subject: RE: Alert Bridge deck pour
+
+Dana, we are targeting November 18 for the deck pour, pending the rebar shop drawing review.
+
+Monty</div>
+    <button aria-label="Show message history" onclick="var b=document.getElementById('b2');b.textContent=b.textContent+'\\n\\n'+document.getElementById('h2').textContent;this.remove()">…</button>
+  </div>
+  <div class="msg">
+    <div><span title="pm@arcticfresh.ca">Arctic Fresh PM</span></div>
+    <time title="2026-11-06 16:00">2026-11-06 16:00</time>
+    <div aria-label="Message body">Please advise the pour date. The concrete supplier needs 48 hours notice before any pour.</div>
+  </div>
+</template>
+<template id="t-conv-supply-3">
+  <div role="heading" aria-level="2">Concrete supply notice</div>
+  <div class="msg">
+    <div><span title="pm@arcticfresh.ca">Arctic Fresh PM</span> <span aria-label="To: Monty Burke">To: Monty</span></div>
+    <time title="2026-11-14 09:00">2026-11-14 09:00</time>
+    <div aria-label="Message body">Monty, the batch plant is closed on November 17 for maintenance. Ready-mix deliveries resume on the 18th.</div>
+  </div>
+</template>
+<script>
+function show(id) {
+  document.querySelectorAll('[role=option]').forEach(function (o) { o.setAttribute('aria-selected', String(o.dataset.convid === id)); });
+  var pane = document.getElementById('pane');
+  pane.innerHTML = '';
+  pane.append(document.getElementById('t-' + id).content.cloneNode(true));
+}
+document.querySelectorAll('[role=option]').forEach(function (o) { o.addEventListener('click', function () { show(o.dataset.convid); }); });
+show('conv-alert-1');
+</script></body></html>`;
 
 async function startFakeOutlook() {
   const server = http.createServer((req, res) => {
@@ -556,7 +605,7 @@ test('email draft: local search picks the right file, prompt carries instruction
   eq(req.body.fallbacks, 'default', 'server-side fallback requested');
   assert(String(req.headers['anthropic-beta']).includes('server-side-fallback-2026-07-01'), 'fallback beta header');
   eq(req.body.output_config?.format?.type, 'json_schema', 'structured output');
-  eq(req.body.output_config?.effort, 'low', 'low effort by default');
+  eq(req.body.output_config?.effort, 'medium', 'email drafts think at medium effort by default (complete replies)');
   eq(req.body.model, 'claude-opus-5-5', 'default model');
   // The side panel shows it.
   await panel.click('.tabs [data-tab="drafts"]');
@@ -2142,6 +2191,380 @@ test('agent (Gemini): screenshot sent as a picture, held arrow key moves a canva
   const pos = Number(await g.textContent('#pos'));
   assert(pos >= 40, 'game moved: ' + pos);
   await site.close();
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+// ---------------------------------------------------------------------------
+// round 5: model pickers, whole email chains, the email index, meeting research and minutes
+// ---------------------------------------------------------------------------
+
+test('models: Settings lists the models the key can use (Pro included), keeps "auto", explains a free-tier quota, tests web search', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  const options = await b.open('options.html');
+  await setSettings(options, keys({ provider: 'gemini', geminiModel: 'auto' }));
+  await options.reload();
+  await options.waitForFunction(() => document.querySelectorAll('#model-gemini option').length > 3, null, { timeout: 15000 });
+  const opts = await options.$$eval('#model-gemini option', (os) => os.map((o) => [o.value, o.textContent]));
+  const values = opts.map((o) => o[0]);
+  assert(values.includes('gemini-3.5-pro') && values.includes('gemini-3.5-flash') && values.includes('gemini-3.5-flash-lite'), 'text models listed: ' + values.join(','));
+  assert(!values.includes('gemini-3.5-flash-image'), 'image model left out');
+  eq(values[0], 'auto', '"auto" first');
+  assert(/now gemini-3\.5-flash/.test(opts[0][1]), '"auto" says what it means now: ' + opts[0][1]);
+  eq(await options.inputValue('#model-gemini'), 'auto', 'the saved choice is shown');
+  // Pick Pro: saved, used for the next call.
+  await options.selectOption('#model-gemini', 'gemini-3.5-pro');
+  await waitFor(async () => (await options.evaluate(async () => (await (await import('./lib/db.js')).getSettings()).geminiModel)) === 'gemini-3.5-pro', { what: 'Pro saved' });
+  ai.gemini = () => geminiReply({ text: '{"ok":true}' });
+  await options.evaluate(async () => {
+    const { callLLM } = await import('./lib/llm.js');
+    await callLLM(await (await import('./lib/db.js')).getSettings(), { system: 's', parts: ['p'] });
+  });
+  eq(ai.ofApi('gemini').at(-1).model, 'gemini-3.5-pro', 'the chosen model is the one called');
+  // Any model name can be typed too.
+  await options.selectOption('#model-gemini', '__other');
+  await options.fill('#model-other-gemini', 'gemini-9.9-flash-experimental');
+  await options.press('#model-other-gemini', 'Tab');
+  await waitFor(async () => (await options.evaluate(async () => (await (await import('./lib/db.js')).getSettings()).geminiModel)) === 'gemini-9.9-flash-experimental', { what: 'typed model saved' });
+  // A free-tier quota error says what to do.
+  ai.gemini = () => ({ __status: 429, body: { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0' } } });
+  const msg = await options.evaluate(async () => {
+    const { callLLM } = await import('./lib/llm.js');
+    try {
+      await callLLM(await (await import('./lib/db.js')).getSettings(), { system: 's', parts: ['p'] });
+      return 'no error';
+    } catch (err) {
+      return err.message;
+    }
+  });
+  assert(/free tier/.test(msg) && /billing/.test(msg), 'free tier explained: ' + msg);
+  // Test web search.
+  ai.gemini = (body) => (body.tools?.some((t) => t.google_search)
+    ? geminiReply({ text: 'Chrome 142 is the latest stable version.', grounding: { groundingChunks: [{ web: { uri: 'https://chromereleases.googleblog.com/', title: 'Chrome Releases' } }] } })
+    : geminiReply({ text: 'ok' }));
+  await options.click('[data-webtest="gemini"]');
+  await options.waitForFunction(() => /Web search works/.test(document.querySelector('[data-testout="gemini"]').textContent), null, { timeout: 15000 });
+  // A wrong key is reported, not hidden behind a guessed model.
+  await setSettings(options, { geminiKey: 'AIza-wrong', geminiModel: 'auto' });
+  const wrong = await options.evaluate(async () => {
+    const { callLLM } = await import('./lib/llm.js');
+    try {
+      await callLLM(await (await import('./lib/db.js')).getSettings(), { system: 's', parts: ['p'], provider: 'gemini' });
+      return 'no error';
+    } catch (err) {
+      return `${err.kind}: ${err.message}`;
+    }
+  });
+  assert(/^auth/.test(wrong), 'wrong key reported: ' + wrong);
+  // The side panel's key box keeps "auto" (it used to replace it with the first Flash in the list).
+  await setSettings(options, { geminiKey: 'AIza-test', geminiModel: 'auto' });
+  const panel = await b.open('sidepanel.html');
+  await panel.evaluate(async () => (await import('./lib/db.js')).saveSettings({ geminiKey: '' }));
+  await panel.reload();
+  await panel.waitForSelector('#setup:not([hidden])');
+  await panel.check('input[name="setupProvider"][value="gemini"]');
+  await panel.fill('#setupKey', 'AIza-test');
+  await panel.click('#setupSave');
+  await panel.waitForFunction(() => /Key works/.test(document.getElementById('setupMsg').textContent), null, { timeout: 15000 });
+  eq(await panel.evaluate(async () => (await (await import('./lib/db.js')).getSettings()).geminiModel), 'auto', '"auto" kept');
+  // The meeting window offers the same list.
+  const meeting = await b.open('meeting.html');
+  await meeting.waitForFunction(() => window.meeting?.ready);
+  await meeting.click('#btnSettings');
+  await meeting.waitForFunction(() => document.querySelectorAll('#mtgModel option').length > 3, null, { timeout: 15000 });
+  await options.screenshot({ path: path.join(SHOTS, 'models-settings.png'), fullPage: true });
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+test('email chain: Outlook history opened and read, older messages of the conversation read, earlier emails found; complete reply; every email indexed under its project; "Index these emails"', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const outlook = await startFakeOutlook();
+  const b = await launch();
+  const { prefix } = await mirrorProjects(b);
+  await waitIndexed(b, 6);
+  const alert = `${prefix}/2024-017 Alert Bridge`;
+  const panel = await b.open('sidepanel.html');
+  await setSettings(panel, keys({ provider: 'anthropic', extraOutlookUrls: outlook.pattern, processOnOpen: false, autoScan: false, myName: 'Monty', projectMail: { [alert]: { people: 'pm@arcticfresh.ca', keywords: '' } } }));
+  await panel.evaluate(() => chrome.runtime.sendMessage({ to: 'bg', type: 'scripts.sync' }));
+  const reply = (summary, draftText) => ({ content: [text(JSON.stringify({ needs_reply: true, category: 'information_request', summary, thread_summary: 'Dana asked for the pour date; Monty said November 18 pending the rebar review; the supplier needs 48 hours notice.', requests: [{ ask: 'Pour date', status: 'answered', answer: 'November 18', sources: ['thread'] }], missing_info: [], search_terms: [], data_requests: [], draft_reply: draftText, confidence: 'high' }))] });
+  ai.anthropic = () => reply('Asks for the pour date and rebar approval.', 'Hi Dana,\n\nThanks for following up.\n\n1. Pour date: we are still targeting November 18, as I wrote on November 10.\n2. Rebar shop drawings: [MISSING: approval status]\n\nRegards,\nMonty');
+  const mail = await b.ctx.newPage();
+  await mail.goto(outlook.url);
+  await mail.click('[data-convid="conv-pour-2"]');
+  await mail.waitForSelector('#b2');
+  await panel.reload();
+  await panel.waitForFunction(() => /Outlook connected/.test(document.getElementById('chips').textContent), null, { timeout: 15000 });
+  await panel.click('.tabs [data-tab="drafts"]');
+  await panel.click('#draftOpen');
+  await panel.selectOption('#filter', 'all');
+  await panel.waitForFunction(() => /Needs info|Ready/.test(document.getElementById('list').textContent), null, { timeout: 30000 });
+  const req = ai.ofApi('anthropic')[0].body;
+  const user = userText(req);
+  assert(/<earlier_messages_in_this_thread/.test(user), 'thread sent');
+  assert(/targeting November 18 for the deck pour/.test(user), 'the history Outlook hid behind "…" was opened and read');
+  assert(/48 hours notice/.test(user), 'the older message of the conversation was read');
+  assert(/Read the whole thread/.test(sysText(req)) && /complete, professional reply/.test(sysText(req)), 'thread-aware, professional prompt');
+  eq(req.output_config?.effort, 'medium', 'medium effort for drafts');
+  if (!(await panel.$('#list .card [data-thread-read]'))) await panel.click('#list .card .card-head');
+  await panel.waitForSelector('#list .card [data-thread-read]');
+  const card = await panel.textContent('#list .card');
+  assert(/Read 2 earlier messages in this thread/.test(card) && /Monty said November 18/.test(card), 'card shows what was read: ' + card.slice(0, 300));
+  // The email is in the index, filed under the project, with its whole chain.
+  const hits = (await engine(b.sw, { type: 'search', q: 'concrete supplier 48 hours notice pour' })).hits;
+  assert(hits.some((h) => h.path.startsWith(`${alert}/Emails/`) && h.path.endsWith('.eml')), 'email indexed under the project: ' + JSON.stringify(hits.map((h) => h.path)));
+  // A later email on the same subject finds the earlier one and the reply drafted for it.
+  ai.anthropic = () => reply('Any update?', 'Hi Dana,\n\nStill November 18.\n\nMonty');
+  await engine(b.sw, { type: 'email.capture', email: { from: 'Dana Lee <dana@client.ca>', subject: 'RE: Alert Bridge deck pour', body: 'Any update on this?', source: 'manual', receivedAt: '2026-11-16 09:00' } });
+  await waitFor(() => ai.ofApi('anthropic').length >= 2, { what: 'second draft' });
+  const user2 = userText(ai.ofApi('anthropic')[1].body);
+  assert(/<related_emails/.test(user2) && /Reply drafted/.test(user2) && /Following up on the below/.test(user2), 'earlier email and its reply found: ' + user2.slice(-900));
+  // "Index the emails listed in Outlook": all three, no AI; the supplier's email filed by the person on the project.
+  const callsBefore = ai.requests.length;
+  await panel.click('.tabs [data-tab="files"]');
+  await panel.click('#mailIndexBtn');
+  await panel.waitForFunction(() => /Done: 3 emails indexed/.test(document.getElementById('mailIndexMsg').textContent), null, { timeout: 60000 });
+  eq(ai.requests.length, callsBefore, 'indexing used no AI');
+  const supply = (await engine(b.sw, { type: 'search', q: 'batch plant closed maintenance ready-mix' })).hits;
+  assert(supply.some((h) => h.path.startsWith(`${alert}/Emails/`) && /Concrete supply notice/.test(h.path)), 'filed under the project by its people rule: ' + JSON.stringify(supply.map((h) => h.path)));
+  await panel.screenshot({ path: path.join(SHOTS, 'email-index.png') });
+  await outlook.close();
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+test('email chain parsing: Outlook (EN/FR), "Original Message" and "On … wrote:" quotes become separate earlier messages', async () => {
+  const b = await launch();
+  const page = await b.open('sidepanel.html');
+  const r = await page.evaluate(async () => {
+    const { splitThread, threadOf } = await import('./lib/text.js');
+    const body = 'Hi Monty,\n\nFollowing up — pour date?\n\nDana\n\nFrom: Monty Burke <monty@example.ca>\nSent: Tuesday, November 10, 2026 3:12 PM\nTo: Dana Lee <dana@client.ca>\nSubject: RE: deck pour\n\nTargeting November 18.\n\nDe : Dana Lee <dana@client.ca>\nEnvoyé : lundi 9 novembre 2026 09:01\nÀ : Monty Burke\nObjet : deck pour\n\nQuand est le coulage?\n\nOn Fri, Nov 6, 2026 at 4:00 PM Arctic Fresh <pm@arcticfresh.ca> wrote:\n> Please advise the pour date.\n> Regards';
+    const s = splitThread(body);
+    return { latest: s.latest.trim(), earlier: s.earlier.map((m) => [m.from, m.subject, m.text]), thread: threadOf({ body }).length };
+  });
+  eq(r.latest, 'Hi Monty,\n\nFollowing up — pour date?\n\nDana', 'newest message');
+  eq(r.earlier.length, 3, 'three earlier messages');
+  eq(r.earlier[0][0], 'Monty Burke <monty@example.ca>', 'English Outlook header');
+  eq(r.earlier[1][1], 'deck pour', 'French Outlook header (Objet)');
+  eq(r.earlier[2][0], 'Arctic Fresh <pm@arcticfresh.ca>', '"On … wrote:" sender');
+  eq(r.earlier[2][2], 'Please advise the pour date.\nRegards', 'quote marks removed');
+  eq(r.thread, 3, 'threadOf keeps all three');
+});
+
+test('meeting: 🔎 Research (web, key points, links, checked), Ask now always helps, private "look up…" searches the web, 📝 Minutes saved as Word and text', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  await mirrorProjects(b);
+  await waitIndexed(b, 6);
+  const meeting = await b.open('meeting.html');
+  await meeting.waitForFunction(() => window.meeting?.ready);
+  await setSettings(meeting, keys({ provider: 'anthropic', geminiKey: '', crossCheck: true, meetingWebLookup: true, meetingPrompts: 'manual', meetingFolder: '/Meetings', myName: 'Monty' }));
+  meetingClaude(ai);
+  const claude = ai.anthropic;
+  const searches = [];
+  ai.anthropic = (body) => {
+    const sys = sysText(body);
+    const u = userText(body);
+    if (body.tools?.some((t) => t.type === 'web_search_20260209')) {
+      searches.push({ sys, u });
+      if (/You check facts/.test(sys)) return { content: [text('ALL OK')] };
+      if (/You research a topic/.test(sys)) {
+        return { content: [{ type: 'text', text: 'TOPIC: Self-consolidating concrete for bridge decks\n- SCC needs a slump flow of 550–750 mm per CSA A23.1 Annex I.\n- Formwork pressure is close to full hydrostatic; design forms for it.\n- Finishing a sloped deck is harder with SCC.\nASK: Has the contractor shown a trial batch for the deck mix?', citations: [{ type: 'web_search_result_location', url: 'https://www.csagroup.org/a23-1', title: 'CSA A23.1', cited_text: 'slump flow', encrypted_index: 'x' }] }] };
+      }
+      return { content: [{ type: 'text', text: 'CSA S6 is in its 2025 edition (CSA S6:25).', citations: [{ type: 'web_search_result_location', url: 'https://www.csagroup.org/s6', title: 'CSA S6:25', cited_text: '2025', encrypted_index: 'y' }] }] };
+    }
+    if (isReview(sys)) return { content: [text(JSON.stringify({ verdict: 'ok', issues: [], missed: [] }))] };
+    if (/pressed "Ask now"/.test(sys)) {
+      return { content: [text(JSON.stringify({ needed: true, topic: 'Deck concrete', suggestions: [{ say: 'Could we confirm the deck mix design and curing plan before the pour?', why: 'General knowledge: deck cracking usually comes from curing, not strength.', sources: [] }], lookup: '' }))] };
+    }
+    if (/Write the minutes/.test(sys)) {
+      return { content: [text(JSON.stringify({ title: 'Deck pour coordination', summary: 'The team discussed the deck pour and the concrete mix.', attendees: ['Monty', 'Dana Lee'], purpose: 'Plan the Alert Bridge deck pour.', topics: [{ heading: 'Concrete mix', discussion: 'Dana proposed self-consolidating concrete. Monty asked for a trial batch.', decisions: ['Trial batch before approval'] }], next_meeting: 'November 20, 10:00', decisions: ['Trial batch before approval'], action_items: [{ who: 'Dana Lee', what: 'Send the SCC trial batch results', when: 'November 19' }], open_questions: ['Curing method'], remember: [] }))] };
+    }
+    if (/<private_question>/.test(u)) return { content: [text(JSON.stringify({ answer: 'I will check the current edition online.', say: '', sources: [], lookup: '' }))] };
+    return claude(body);
+  };
+  await meeting.evaluate(async () => {
+    const m = window.meeting;
+    m.settings = await (await import('./lib/db.js')).getSettings();
+    m.startedAt = Date.now();
+    m.meetingId = 'test-meeting';
+    const t = Date.now();
+    m.onText({ who: 'Them', start: t, end: t + 4000 }, 'For the Alert Bridge deck we are thinking about self-consolidating concrete to speed up the pour.');
+    m.onText({ who: 'Me', start: t + 5000, end: t + 9000 }, 'What would that mean for the formwork and the finishing on the crossfall?');
+  });
+  // 🔎 Research: the web, key points, links, checked by a second search.
+  await meeting.click('#btnResearch');
+  await meeting.waitForSelector('#prompts .card.research .points li', { timeout: 30000 });
+  const rc = await meeting.textContent('#prompts .card.research');
+  assert(/Self-consolidating concrete/.test(rc) && /550–750 mm/.test(rc) && /trial batch/.test(rc), 'research card: ' + rc);
+  assert(await meeting.$('#prompts .card.research a[href="https://www.csagroup.org/a23-1"]'), 'source linked');
+  await meeting.waitForSelector('#prompts .card.research [data-check="ok"]');
+  assert(searches.some((x) => /meeting so far/i.test(x.u) && /self-consolidating/.test(x.u)), 'researched what was being discussed');
+  // Ask now: always something useful, marked when it isn't from the files.
+  await meeting.click('#btnAsk');
+  await meeting.waitForFunction(() => /confirm the deck mix design/.test(document.getElementById('prompts').textContent), null, { timeout: 20000 });
+  assert(await meeting.$('#prompts .card .tag'), '"general knowledge" tag shown');
+  // A private "look up…" goes to the web even when the model didn't ask for it.
+  await meeting.fill('#askInput', 'Look up the current edition of CSA S6');
+  await meeting.click('#askForm button[type="submit"]');
+  await meeting.waitForFunction(() => /CSA S6:25/.test(document.getElementById('answers').textContent), null, { timeout: 20000 });
+  // 🔎 Web with a typed topic.
+  await meeting.fill('#askInput', 'SCC formwork pressure');
+  await meeting.click('#btnWeb');
+  await waitFor(() => searches.some((x) => /Research this for the meeting: SCC formwork pressure/.test(x.u)), { what: 'typed topic researched' });
+  // 📝 Minutes: Word + text on the NAS next to the transcript.
+  await meeting.click('#btnMinutes');
+  await meeting.waitForSelector('#prompts .card.minutes', { timeout: 20000 });
+  await meeting.waitForFunction(() => /saved to/.test(document.querySelector('#prompts .card.minutes').textContent), null, { timeout: 20000 });
+  const saved = await meeting.evaluate(() => window.meeting.prompts.find((p) => p.kind === 'minutes').savedTo);
+  assert(/^\/Meetings\/.*— Minutes\.docx$/.test(saved), 'minutes path: ' + saved);
+  const docxRes = await new Promise((resolve, reject) => {
+    const u = davUrl(saved);
+    http.get(u, { headers: { Authorization: 'Basic ' + Buffer.from(`${USER}:${PASSWORD}`).toString('base64') } }, (res) => {
+      const bufs = [];
+      res.on('data', (c) => bufs.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, buf: Buffer.concat(bufs) }));
+    }).on('error', reject);
+  });
+  eq(docxRes.status, 200, 'Word file on the NAS');
+  eq(docxRes.buf.slice(0, 2).toString(), 'PK', 'a zip (docx)');
+  const raw = docxRes.buf.toString('utf8');
+  assert(raw.includes('word/document.xml') && raw.includes('Minutes — Deck pour coordination') && raw.includes('Send the SCC trial batch results'), 'minutes in the Word file');
+  const pyCheck = spawnSync('python3', ['-I', '-c', 'import sys,zipfile,io; z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())); assert z.testzip() is None; print(len(z.namelist()))'], { input: docxRes.buf });
+  eq(String(pyCheck.stdout).trim(), '5', `a valid zip with 5 parts (${pyCheck.stderr})`);
+  const md = await dav('GET', saved.replace(/\.docx$/, '.md'));
+  assert(md.status === 200 && /\| Send the SCC trial batch results \| Dana Lee \| November 19 \|/.test(md.body) && /## 1\. Concrete mix/.test(md.body), 'text minutes');
+  await meeting.screenshot({ path: path.join(SHOTS, 'meeting-research-minutes.png'), fullPage: true });
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+// ---------------------------------------------------------------------------
+// To do: invoices and priorities; the local model on the HP; background tasks & cost
+// ---------------------------------------------------------------------------
+
+const OCT_EMAILS = [
+  { from: 'Acme Steel AR <ar@acmesteel.ca>', subject: 'Invoice INV-1043 — Alert Bridge rebar', receivedAt: '2026-10-05T09:00:00Z', body: 'Hello,\n\nPlease find attached invoice INV-1043 for rebar supplied to the Alert Bridge, amount $12,450.00, due 2026-11-05 (net 30).\n\nAcme Steel Accounts Receivable' },
+  { from: 'Rebar Co <billing@rebarco.ca>', subject: 'Statement — invoice RB-77 past due', receivedAt: '2026-10-28T15:00:00Z', body: 'Reminder: invoice RB-77 for $3,200.00 was due on 2026-10-30. Please arrange payment.\n\nRebar Co Billing' },
+  { from: 'Monty <monty@example.ca>', subject: 'RE: Invoice INV-1043', receivedAt: '2026-11-03T10:00:00Z', body: 'Acme team,\n\nPayment for INV-1043 ($12,450.00) was sent today by EFT.\n\nMonty' },
+  { from: 'Dana Lee <dana@client.ca>', subject: 'Site visit Thursday', receivedAt: '2026-10-20T08:00:00Z', body: 'Can you confirm you will attend the site visit on Thursday at 9? Please send the updated schedule before then.' },
+];
+
+test('To do: invoice summary for a month (amounts checked against the emails, Word + CSV on the NAS); priority list on the local model, notes what is done, ticks', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  const panel = await b.open('sidepanel.html');
+  await setSettings(panel, keys({ provider: 'anthropic', geminiKey: '', crossCheck: false, myName: 'Monty', localUrl: `${ai.url}/llm/`, localModel: 'qwen2.5:7b', localAuth: 'none', localFor: { priorities: true, invoices: false, check: false } }));
+  for (const e of OCT_EMAILS) await engine(b.sw, { type: 'mail.index', email: { ...e, source: 'outlook' } });
+  // Invoices (Claude): one row is made up — its amount isn't in any email.
+  ai.anthropic = (body) => {
+    const u = userText(body);
+    const tag = (re) => (new RegExp(`\\[(E\\d+)\\][^\\[]*${re}`).exec(u) || [])[1] || 'E1';
+    assert(/INV-1043/.test(u) && /RB-77/.test(u) && !/Site visit/.test(u), 'only invoice emails sent: ' + u.slice(0, 300));
+    return { content: [text(JSON.stringify({ summary: 'Two invoices: INV-1043 paid; RB-77 overdue.', invoices: [
+      { party: 'Acme Steel', direction: 'to pay', invoice_number: 'INV-1043', project: 'Alert Bridge', invoice_date: '2026-10-05', amount: '$12,450.00', due_date: '2026-11-05', status: 'paid', source: tag('Payment for INV-1043'), notes: 'Paid by EFT' },
+      { party: 'Rebar Co', direction: 'to pay', invoice_number: 'RB-77', project: '', invoice_date: '', amount: '$3,200.00', due_date: '2026-10-30', status: 'reminder', source: tag('RB-77'), notes: 'Pay now' },
+      { party: 'Ghost Ltd', direction: 'to pay', invoice_number: 'G-1', project: '', invoice_date: '', amount: '$9,999.00', due_date: '', status: 'received', source: tag('RB-77'), notes: '' },
+    ] }))] };
+  };
+  const rep = await engine(b.sw, { type: 'todo.invoices', month: '2026-10' });
+  assert(!rep.error, 'invoice report: ' + rep.error);
+  eq(rep.emails, 3, 'three invoice-related emails (the site visit left out)');
+  const byNo = Object.fromEntries(rep.invoices.map((i) => [i.invoice_number, i]));
+  eq(byNo['INV-1043'].status, 'paid', 'paid kept');
+  eq(byNo['RB-77'].status, 'overdue', 'past its due date and unpaid → overdue');
+  eq(byNo['INV-1043'].verified, true, 'amount found in its email');
+  eq(byNo['G-1'].verified, false, 'made-up amount flagged');
+  eq(rep.savedTo, '/Reports/Invoices 2026-10.docx', 'saved to the NAS');
+  eq((await dav('GET', '/Reports/Invoices 2026-10.csv')).status, 200, 'CSV on the NAS');
+  // The side panel shows it.
+  await panel.click('.tabs [data-tab="todo"]');
+  await panel.fill('#invMonth', '2026-10');
+  await panel.click('#invBtn');
+  await panel.waitForSelector('#invOut table.inv');
+  assert(/overdue/.test(await panel.textContent('#invOut')) && (await panel.$('#invOut .pill.warn')), 'table with the "check" mark');
+  // Priorities on the local model (free): material from the emails, the invoices and an own task.
+  await engine(b.sw, { type: 'todo.addTask', text: 'Renew the WorkSafe certificate', due: '2026-11-30' });
+  ai.local = (body) => {
+    const u = body.messages.map((m) => m.content).join('\n');
+    assert(/\[E\d+\].*site visit/i.test(u) && /\[I\d+\].*RB-77/.test(u) && /\[T1\] Renew the WorkSafe certificate/.test(u), 'material gathered: ' + u.slice(0, 600));
+    return { model: 'qwen2.5:7b', usage: { prompt_tokens: 900, completion_tokens: 200 }, choices: [{ message: { role: 'assistant', content: JSON.stringify({ summary: 'Pay Rebar Co today; confirm the site visit.', items: [
+      { title: 'Pay Rebar Co invoice RB-77', why: '$3,200.00, overdue since Oct 30', next_step: 'Approve the payment', due: '2026-10-30', urgency: 'now', source: 'I1', done: false, done_evidence: '' },
+      { title: 'Confirm the site visit with Dana', why: 'Dana asked on Oct 20', next_step: 'Reply and send the schedule', due: '', urgency: 'today', source: 'E3', done: false, done_evidence: '' },
+      { title: 'Pay Acme Steel invoice INV-1043', why: '$12,450.00', next_step: '', due: '2026-11-05', urgency: 'this week', source: 'E1', done: true, done_evidence: 'payment sent by EFT on Nov 3' },
+      { title: 'Renew the WorkSafe certificate', why: 'Your task', next_step: '', due: '2026-11-30', urgency: 'later', source: 'T1', done: false, done_evidence: '' },
+    ] }) } }] };
+  };
+  const anthropicBefore = ai.ofApi('anthropic').length;
+  await panel.click('#prioBtn');
+  await panel.waitForSelector('#prioList .prio', { timeout: 20000 });
+  eq(ai.ofApi('local').length, 1, 'the local model made the list');
+  eq(ai.ofApi('anthropic').length, anthropicBefore, 'no Claude call for it');
+  const pl = await panel.textContent('#prioList');
+  assert(/Now/.test(pl) && /Pay Rebar Co invoice RB-77/.test(pl) && /Done \(1\)/.test(pl), 'grouped, with what is done: ' + pl.slice(0, 300));
+  const sp = (await engine(b.sw, { type: 'status' })).ai.spend;
+  assert(!sp.byFeature.priorities, 'the local model costs nothing: ' + JSON.stringify(sp.byFeature));
+  assert(sp.byFeature.invoices > 0, 'the invoice summary is counted under its feature');
+  // Tick one done; the next list keeps it done.
+  await panel.check('#prioList [data-prio="confirm the site visit with dana"]');
+  await panel.waitForFunction(() => /Done \(2\)/.test(document.getElementById('prioList').textContent));
+  const again = await engine(b.sw, { type: 'todo.priorities' });
+  assert(again.items.find((i) => i.id === 'confirm the site visit with dana').done, 'ticked stays done');
+  await panel.screenshot({ path: path.join(SHOTS, 'todo.png'), fullPage: true });
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+test('local model: Settings test lists its models; with one cloud key it does the second check of drafts (free)', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  await mirrorProjects(b, { pdf: false });
+  await waitIndexed(b, 5);
+  const options = await b.open('options.html');
+  await setSettings(options, keys({ provider: 'anthropic', geminiKey: '', crossCheck: true, localUrl: `${ai.url}/llm/`, localModel: 'qwen2.5:7b', localAuth: 'none', localFor: { priorities: true, invoices: false, check: true } }));
+  await options.reload();
+  await options.click('#localBox summary');
+  await options.click('#localTest');
+  await options.waitForFunction(() => /Connected · models: qwen2\.5:7b, llama3\.1:8b/.test(document.getElementById('localOut').textContent), null, { timeout: 15000 });
+  ai.anthropic = () => ({ content: [text(JSON.stringify({ needs_reply: true, category: 'information_request', summary: 's', thread_summary: '', requests: [], missing_info: [], search_terms: [], data_requests: [], draft_reply: 'Hi,\n\nThe clear deck width is 12.0 m.\n\nMonty', confidence: 'high' }))] });
+  ai.local = (body) => {
+    assert(/meticulous second reviewer/.test(body.messages[0].content), 'review prompt');
+    eq(body.response_format?.type, 'json_schema', 'structured output asked for');
+    return { model: 'qwen2.5:7b', usage: { prompt_tokens: 800, completion_tokens: 30 }, choices: [{ message: { role: 'assistant', content: '{"verdict":"ok","issues":[],"missed":[]}' } }] };
+  };
+  const panel = await b.open('sidepanel.html');
+  await engine(b.sw, { type: 'email.capture', email: { from: 'Engineer <engineer@client.ca>', subject: 'Deck width', body: 'What is the clear deck width of the Alert Bridge?', source: 'manual' } });
+  const item = await waitFor(async () => (await panel.evaluate(async () => (await import('./lib/db.js')).getAll('items'))).find((i) => i.status === 'ready'), { what: 'draft' });
+  eq(item.check.by, 'local', 'checked by the local model');
+  eq(ai.ofApi('local').length, 1, 'one local call');
+  eq(ai.ofApi('anthropic').length, 1, 'no second Claude call');
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+test('background tasks & cost: every automatic AI job has a switch; Saver preset turns them down; spend shown by feature', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  const options = await b.open('options.html');
+  await setSettings(options, keys({ provider: 'anthropic' }));
+  await options.reload();
+  await options.waitForSelector('#background .jobs input[data-key="processOnOpen"]');
+  await options.click('[data-preset="saver"]');
+  await waitFor(async () => {
+    const s = await options.evaluate(async () => (await import('./lib/db.js')).getSettings());
+    return !s.processOnOpen && !s.autoScan && !s.crossCheck && s.meetingPrompts === 'manual' && s.emailEffort === 'low' && s.meetingStt === 'whisper' ? s : null;
+  }, { what: 'Saver applied' });
+  eq(await options.isChecked('#background input[data-key="crossCheck"]'), false, 'switch shows it');
+  eq(await options.isChecked('#accuracy input[data-key="crossCheck"]'), false, 'the same switch in Accuracy & safety follows');
+  // Spending by feature.
+  ai.anthropic = () => ({ content: [text(JSON.stringify({ needs_reply: false, category: 'fyi', summary: 'FYI', thread_summary: '', requests: [], missing_info: [], search_terms: [], data_requests: [], draft_reply: '', confidence: 'high' }))] });
+  const panel = await b.open('sidepanel.html');
+  await engine(b.sw, { type: 'email.capture', email: { from: 'a@b.ca', subject: 'FYI', body: 'For your information: the site is closed Monday.', source: 'manual' } });
+  await waitFor(async () => (await panel.evaluate(async () => (await import('./lib/db.js')).getAll('items'))).find((i) => i.status === 'no-reply'), { what: 'processed' });
+  await options.reload();
+  await options.waitForFunction(() => /Email drafts/.test(document.getElementById('spendBox').textContent) && /this month \$/.test(document.getElementById('spendBox').textContent), null, { timeout: 15000 });
+  await options.screenshot({ path: path.join(SHOTS, 'background-tasks.png'), fullPage: true });
   eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
 });
 

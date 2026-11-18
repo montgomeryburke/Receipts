@@ -95,7 +95,7 @@ export async function runIndex(roots, settings, { onProgress = () => {}, signal,
 
   if (!signal?.aborted) {
     for (const [path, rec] of existing) {
-      if (rec.folderId === 'nas' || rec.folderId === 'meeting') continue; // not from a local folder: kept elsewhere
+      if (rec.folderId === 'nas' || rec.folderId === 'meeting' || rec.folderId === 'mail') continue; // not from a local folder: kept elsewhere
       if (!seen.has(path)) {
         await writer.removeFile(path);
         counts.removed++;

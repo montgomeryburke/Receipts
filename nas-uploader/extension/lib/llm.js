@@ -6,6 +6,8 @@
 
 import { Anthropic } from '../vendor/anthropic-sdk.mjs';
 import { getSettings, saveSettings, kvGet, kvSet } from './db.js';
+import { nasCreds } from './nas.js';
+import { basicAuthHeader } from './util.js';
 
 export class LLMError extends Error {
   constructor(kind, message, status) {
@@ -85,14 +87,31 @@ export async function spentToday() {
   return (await kvGet(`spend:${today()}`)) || 0;
 }
 
+// Spending is recorded per day and, for the month, per feature (settings._tag: 'email', 'check', 'meeting',
+// 'research', 'minutes', 'transcription', 'chat', 'agent', 'lookup', …), so Settings can show where it goes.
+const round5 = (n) => Math.round(n * 1e5) / 1e5;
 async function recordSpend(usage, model, settings) {
   const c = costOf(usage, model, settings);
   if (!c) return;
   try {
-    await kvSet(`spend:${today()}`, Math.round(((await spentToday()) + c) * 1e5) / 1e5);
+    await kvSet(`spend:${today()}`, round5((await spentToday()) + c));
+    const month = today().slice(0, 7);
+    const key = `spendtag:${month}:${settings?._tag || 'other'}`;
+    await kvSet(key, round5(((await kvGet(key)) || 0) + c));
+    const tags = new Set((await kvGet(`spendtags:${month}`)) || []);
+    if (!tags.has(settings?._tag || 'other')) await kvSet(`spendtags:${month}`, [...tags, settings?._tag || 'other']);
   } catch {
     /* the estimate is best effort */
   }
+}
+
+/** {today, month, byFeature: {email: $, …}} — estimated from token counts. */
+export async function spendReport() {
+  const month = today().slice(0, 7);
+  const tags = (await kvGet(`spendtags:${month}`)) || [];
+  const byFeature = {};
+  for (const t of tags) byFeature[t] = (await kvGet(`spendtag:${month}:${t}`)) || 0;
+  return { today: await spentToday(), month: round5(Object.values(byFeature).reduce((a, b) => a + b, 0)), byFeature };
 }
 
 /** Throws if AI is stopped or today's limit is reached. Reads the switch fresh, so it applies at once. */
@@ -139,6 +158,7 @@ export function priceFor(model, settings = {}) {
 }
 
 export function costOf(usage, model, settings) {
+  if (String(model || '').startsWith('local:')) return 0; // your own model on the HP: free
   const p = priceFor(model, settings);
   if (!p) return null;
   const [pin, pout, pread] = p;
@@ -151,7 +171,73 @@ export function activeModel(settings, provider = settings.provider) {
 }
 
 export function hasKey(settings, provider = settings.provider) {
+  if (provider === 'local') return !!(settings.localUrl && settings.localModel);
   return provider === 'gemini' ? !!settings.geminiKey : !!settings.anthropicKey;
+}
+
+/**
+ * The local model (on the HP) for a job the user gave it in Settings ('priorities', 'invoices', 'check'), else
+ * the given cloud provider.
+ */
+export function providerForJob(settings, job, fallback = settings.provider) {
+  return settings.localFor?.[job] && hasKey(settings, 'local') ? 'local' : pickProvider(settings, fallback);
+}
+
+// ---------------- the local model (OpenAI-compatible: Ollama, LM Studio, llama.cpp) ----------------
+
+function localBase(settings) {
+  const u = String(settings.localUrl || '').trim();
+  return u.endsWith('/') ? u : `${u}/`;
+}
+
+async function localHeaders(settings) {
+  const h = { 'content-type': 'application/json' };
+  if (settings.localAuth === 'nas') {
+    const c = await nasCreds().catch(() => null);
+    if (c) h.authorization = basicAuthHeader(c.username, c.password);
+  } else if (settings.localKey) h.authorization = `Bearer ${settings.localKey}`;
+  return h;
+}
+
+async function callLocal(settings, { system, parts, schema, maxTokens, signal }) {
+  const url = new URL('v1/chat/completions', localBase(settings)).href;
+  const headers = await localHeaders(settings);
+  const body = {
+    model: settings.localModel,
+    messages: [
+      { role: 'system', content: `${system}${schema ? `\n\nReply with one JSON object only (no other text), matching this JSON schema:\n${JSON.stringify(schema)}` : ''}` },
+      { role: 'user', content: parts.map((p) => (typeof p === 'string' ? p : p.text || '')).join('\n\n') },
+    ],
+    temperature: 0,
+    max_tokens: maxTokens || 4000,
+    stream: false,
+    ...(schema ? { response_format: { type: 'json_schema', json_schema: { name: 'result', schema, strict: true } } } : {}),
+  };
+  await aiGate();
+  const call = track(signal);
+  try {
+    let data;
+    try {
+      data = await httpJson(url, { method: 'POST', headers, body: JSON.stringify(body), signal: call.signal }, { retries: 1 });
+    } catch (err) {
+      // Older servers don't know json_schema: ask for JSON in the prompt only.
+      if (!schema || err.kind !== 'bad-request') throw err;
+      delete body.response_format;
+      data = await httpJson(url, { method: 'POST', headers, body: JSON.stringify(body), signal: call.signal }, { retries: 1 });
+    }
+    const text = String(data?.choices?.[0]?.message?.content || '').replace(/^\s*<think>[\s\S]*?<\/think>\s*/, '');
+    const usage = { input: data?.usage?.prompt_tokens || 0, output: data?.usage?.completion_tokens || 0, cacheRead: 0, cacheWrite: 0 };
+    return { data: schema ? parseJson(text) : text, text, usage, model: `local:${data?.model || settings.localModel}`, provider: 'local' };
+  } finally {
+    call.done();
+  }
+}
+
+/** The models the local server offers (doubles as a connection test). */
+export async function listLocalModels(settings) {
+  if (!settings.localUrl) throw new LLMError('config', 'Enter the local model address first');
+  const data = await httpJson(new URL('v1/models', localBase(settings)).href, { headers: await localHeaders(settings) }, { retries: 0 });
+  return (data?.data || data?.models || []).map((m) => m.id || m.name || m.model).filter(Boolean);
 }
 
 /** The provider for a job, falling back to whichever key exists. */
@@ -211,6 +297,9 @@ async function httpJson(url, init, { retries = 2 } = {}) {
       continue;
     }
     if (res.status === 401 || res.status === 403) throw new LLMError('auth', `API key rejected (${res.status}): ${msg}`, res.status);
+    if (res.status === 429 && /free.?tier/i.test(msg)) {
+      throw new LLMError('rate', `This Gemini key is on Google's free tier and its free quota for this model is used up. To use the paid tier, turn on billing for the key's project in Google AI Studio (aistudio.google.com → Get API key → Set up billing), or pick another model. (${msg.slice(0, 160)})`, res.status);
+    }
     if (res.status === 429) throw new LLMError('rate', `Rate limited: ${msg}`, res.status);
     if (res.status >= 500) throw new LLMError('server', `Provider error ${res.status}: ${msg}`, res.status);
     if (/api key not valid|api_key_invalid/i.test(msg)) throw new LLMError('auth', msg, res.status);
@@ -410,7 +499,9 @@ export async function resolveGeminiModel(settings) {
   let models = [];
   try {
     models = await listModels(settings, 'gemini');
-  } catch {
+  } catch (err) {
+    // A wrong key must say so, not carry on silently with a guessed model.
+    if (err.kind === 'auth' || err.kind === 'config') throw err;
     models = [];
   }
   const model = pickGeminiFlash(models) || 'gemini-2.5-flash';
@@ -531,6 +622,10 @@ async function callGemini(settings, { system, parts, schema, effort, maxTokens, 
 /** request: {system, parts: [string], schema, effort?, maxTokens?, cacheParts?, provider?, model?, signal?} */
 export async function callLLM(settings, request) {
   const provider = request.provider || settings.provider;
+  if (provider === 'local') {
+    if (!hasKey(settings, 'local')) throw new LLMError('config', 'The local model is not set up (Settings → AI → Local model)');
+    return callLocal(settings, request);
+  }
   if (!hasKey(settings, provider)) throw new LLMError('config', `No ${provider === 'gemini' ? 'Gemini' : 'Anthropic'} API key set`);
   return provider === 'gemini' ? callGemini(settings, request) : callAnthropic(settings, request);
 }

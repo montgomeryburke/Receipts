@@ -10,7 +10,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const pad = (n) => String(n).padStart(2, '0');
 const hms = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 const money = (c) => (c < 0.01 ? `$${c.toFixed(4)}` : `$${c.toFixed(2)}`);
-const AI_NAME = { gemini: 'Gemini', anthropic: 'Claude' };
+const AI_NAME = { gemini: 'Gemini', anthropic: 'Claude', local: 'your local model' };
 /** "Gemini", or with one key "A second, separate Claude review". */
 const who = (c) => (c.self ? `A second, separate ${AI_NAME[c.by]} review` : AI_NAME[c.by] || 'The second AI');
 

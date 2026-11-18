@@ -25,6 +25,12 @@ One Chrome extension, nothing else to install on the work computer:
   AI check against the same sources: with both a Claude and a Gemini key each checks the other, with one key the
   same AI does a second, separate review. Standards are looked up twice and compared. Free checks on this computer
   verify every quote and number. **⏹ Stop AI** stops everything at once.
+- **To do** — a **priority list** of what you need to do now (from the past month's emails, open drafts, meeting
+  action items, invoices due and your own tasks; it notes what got done), and an **invoice summary** for any month
+  (who, amount, due date, status) as Word and a spreadsheet.
+- **Your own hardware first** — searching, indexing, the email index, transcription and project detection run on
+  this computer or the HP at no cost; a **local model on the HP** (e.g. Ollama) can do the cheap AI jobs for free;
+  **Settings → Background tasks & cost** has a switch for every automatic AI job and shows what you spend.
 - **Learns each project** — decisions, names and facts from meetings and the chat are remembered per project
   and used the next time that project comes up.
 - **Saves on AI cost** — indexing, search, project detection, the "is this worth a prompt?" check and free
@@ -255,8 +261,15 @@ bash setup-drive-copy.sh --key /root/drive-key.json --folder https://drive.googl
 
 ## 5. Email drafts (Outlook)
 
+**It reads the whole chain.** Before drafting, it opens the history Outlook hides behind "…", reads every older
+message in the conversation, and looks for earlier emails about the same thing — the same thread, subject or
+sender, the replies drafted or sent for them, and archived emails. The draft card says what it read ("Read 3 earlier
+messages in this thread and 2 related earlier emails") and sums the thread up in a line. Replies are written to be
+complete and ready to send: every question answered in order, with context, in the thread's tone. Drafts use
+medium thinking effort by default (Settings → Background tasks & cost).
+
 **Outlook on the web:** open the side panel next to it. Open an email and click **Draft reply to open email** (or let it
-draft new mail by itself — Settings → Email). The draft lists what was asked, the answers and the files they came
+draft new mail by itself — Settings → Background tasks & cost). The draft lists what was asked, the answers and the files they came
 from; anything it couldn't find is marked `[MISSING: …]` and shown under **Questions**, where your answer
 rewrites the draft. 👍 / 👎 on a source teaches it which document to use for emails like that one.
 **Insert into Outlook reply** puts the text into the reply box. It never sends anything.
@@ -271,6 +284,19 @@ each archive, newest emails first, and the emails show up in drafts, meetings an
 archive. Two things to know: Windows usually won't let Chrome read a `.pst` while Outlook has it open — the mirror
 then skips it (it never deletes it on the NAS) and copies it next time Outlook is closed; and a changed `.pst` is
 uploaded again in full.
+
+**Emails in the project index.** Every email the assistant reads is indexed with its whole chain and filed under
+its project, so later drafts, meeting prompts and the chat find it. To add many at once: in Outlook on the web
+search for the project number or a person (or open a folder), then side panel → **Files → 📥 Index the emails listed
+in Outlook** — it reads each one and files it, with no AI cost. Which project an email belongs to: the project
+number or name in it, or the **people** and **keywords** you give each project in **Settings → Project emails** (or
+tell the chat: "Dana Lee and @arcticfresh.ca are on the Alert Bridge project").
+
+**Outlook's `.ost` file** (the offline copy of your mailbox) can't be used: Outlook keeps it locked, Chrome can't read
+that folder, and the format Outlook 2013 and later use for it isn't readable by open tools. Everything in it is your
+Exchange mailbox, which "Index the emails listed" reaches through Outlook on the web. Project `.pst` files work as
+above; to get emails out of the desktop app, drag them into a project folder (they become `.msg` files) or export a
+folder to `.pst` (File → Open & Export → Import/Export).
 
 ## 6. Meetings (Teams)
 
@@ -287,9 +313,23 @@ Click **🎙 Meeting** in the side panel. A small window opens:
    it looks it up online and links the source. **Ask now** asks for a prompt; **⧉ Pop out** keeps prompts in a
    small window on top of Teams.
 4. **Ask privately**: type a question (e.g. "what did we agree on the barrier height?") — only you see the answer.
+   Ask it to "look up…" or "search…" and it searches the web. **🔎 Web** researches whatever you typed.
+   **🔎 Research** searches the web about what is being discussed right now: key points with figures, links, and a
+   good question to ask (checked on the web a second time when the second check is on). **Ask now** always gives
+   you something useful — from your files when they have it, otherwise marked *general knowledge*.
+   **📝 Minutes** writes the minutes so far (attendees, purpose, each topic with what was said and decided, action
+   items, next meeting) and saves them as **Word** and text next to the transcript; at **Stop and save** the final
+   minutes are saved too.
 5. **Stop and save**: the transcript, prompts, your private questions and (with a key) a summary with decisions
    and action items are saved to `/Meetings/<project>/` on the NAS (also every minute while it runs), and the key
    facts are remembered for that project.
+
+**The Teams app is silent but Teams in Chrome works?** Chrome hears the Teams app only through what Windows plays on
+its *default* speakers. Share **Entire screen** (a single window has no sound) with **Also share system audio**
+ticked. If you hear Teams in a headset, set Teams → Settings → Devices → **Speaker** to the same device as Windows'
+sound output (Settings → System → Sound → Output), or make the headset the Windows output — Teams can play to a
+different device from everything else, and Chrome can't hear that. The meeting window explains this when it hears
+nothing for 15 s.
 
 Transcription is **free on this computer** (Whisper; the model is downloaded once) or, with a Gemini key, done by
 Gemini (⚙ in the meeting window). **Gemini, checked by the free one** runs both on the same audio and marks a line
@@ -328,6 +368,20 @@ Every change appears under the reply with **Undo** (and under *Changes made from
 taken in the chat. If something needs a change to the extension's code, it says so and saves a change request to
 `/.assistant/change-requests.md` on the NAS — paste that into Claude Code.
 
+## 6c. To do: priorities and invoices
+
+Side panel → **To do**:
+
+- **📋 Make priority list** — reads the past month: emails in the index, open drafts, meeting action items, invoices
+  due and your own tasks (add them in the box), and ranks what to do: **Now**, **Today**, **This week**, **Later**,
+  each with why and the next step. It notes what got done since the last list (a reply sent, a payment confirmed);
+  tick anything you finished yourself. With the local model on the HP set up for it, this costs nothing.
+- **🧾 Invoices** — pick a month and click **Make summary**: every invoice in that month's emails (and payments or
+  reminders in the following two weeks), with who, amount, due date and status (paid, overdue, reminder…). Amounts
+  and invoice numbers are checked against the emails; anything not found there is marked **check**. Saved as
+  **Word** and a **spreadsheet (CSV)** in `/Reports` on the NAS. Bring the emails in first: search "invoice" in
+  Outlook on the web, then Files → Index the emails listed.
+
 ## 7b. Browser agent
 
 Click **🤖 Agent** in the side panel. Type the task, pick the tab to work in (the one you were on is chosen), and
@@ -364,6 +418,26 @@ Chrome's debugger. Chrome shows *"Project Assistant started debugging this brows
   works on that tab with screenshots.
 
 ## 8. AI keys, cost and accuracy
+
+**Choosing the model.** Settings → AI shows the models your key can use in a list (Gemini Pro, Flash, Flash-Lite;
+Claude Opus, Sonnet, Haiku), and the meeting window's ⚙ has the same list. "auto" means the newest stable Gemini
+Flash and says which one that is. Whether Gemini is paid or free depends on the key, not the model: billing must be
+on for the key's project in Google AI Studio; when a free-tier limit is hit, the message says so. **Test web search**
+checks that look-ups work with your key and model.
+
+**Background tasks & cost** (Settings). Every job that runs by itself and calls Claude or Gemini has a switch and its
+cost: drafting new emails, the second check, double look-ups, automatic meeting prompts, look-ups in meetings,
+minutes, Gemini transcription, the thinking effort for drafts, and a daily limit. **💰 Saver** turns everything down
+to "only when I click"; **⚖ Balanced** and **🎯 Best accuracy** turn it up. Spending is shown for today and the month,
+by feature (drafts, checks, meetings, research…), estimated from the token counts.
+
+**Local model on the HP (free).** If you run a model on the HP — for example Ollama in the "llm" container — the
+assistant can use it for the cheap jobs: priority lists, invoice summaries and the second check. Make Ollama listen
+on the network in that container (`systemctl edit ollama`, add `Environment="OLLAMA_HOST=0.0.0.0"`, restart it, and
+`ollama pull qwen2.5:7b`), then re-run the NAS setup script with `--llm-url http://<llm container address>:11434`.
+It becomes reachable at `<your NAS address>/.llm/` behind the NAS login, from work too (your NAS password is not
+passed on to the model). In Settings → AI → **Local model**, enter that address and the model name, click **Test**,
+and tick what it should do.
 
 Paste a Claude (Anthropic) and/or Gemini key in **Settings → AI provider**; they stay in this browser profile and
 go only to that provider. Claude uses `claude-opus-5-5` at low effort by default (Settings lets you pick Sonnet or

@@ -26,6 +26,8 @@
 #    --access proxy --public-url https://files.example.com/
 #                         behind your own reverse proxy (Nginx Proxy Manager, Caddy…)
 #    --local-port N       plain-HTTP port Apache uses behind Funnel / a proxy (default 8090)
+#    --llm-url URL        your own AI model server (e.g. Ollama: http://192.168.1.50:11434) made reachable at
+#                         <NAS address>/.llm/ behind the same login, for Project Assistant's free local jobs
 #    --email ADDR         optional, given to Let's Encrypt
 #    --acme-server URL    certificate authority (default Let's Encrypt); e.g. Let's Encrypt staging for a dry run
 #    --yes                don't ask questions; use defaults
@@ -45,6 +47,7 @@ EMAIL=""
 DUCKDNS_TOKEN=""
 PORT="443"
 LOCAL_PORT="8090"
+LLM_URL=""
 PUBLIC_URL=""
 ASSUME_YES=0
 UNINSTALL=0
@@ -72,7 +75,7 @@ warn() { printf '\033[1;33m !\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m ✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 usage() {
-  if [[ -f "$0" ]]; then sed -n '2,35p' "$0" | sed 's/^# \{0,2\}//'; else echo "See the comments at the top of setup-webdav.sh for options."; fi
+  if [[ -f "$0" ]]; then sed -n '2,37p' "$0" | sed 's/^# \{0,2\}//'; else echo "See the comments at the top of setup-webdav.sh for options."; fi
   exit "${1:-0}"
 }
 
@@ -87,6 +90,7 @@ while [[ $# -gt 0 ]]; do
     --duckdns-token) DUCKDNS_TOKEN="${2:?}"; shift 2 ;;
     --port) PORT="${2:?}"; shift 2 ;;
     --local-port) LOCAL_PORT="${2:?}"; shift 2 ;;
+    --llm-url) LLM_URL="${2:?}"; shift 2 ;;
     --public-url) PUBLIC_URL="${2:?}"; shift 2 ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
@@ -432,6 +436,26 @@ PUBLIC_URL="${PUBLIC_URL%/}/"
 
 # ----------------------------------------------------------------------------- 6. Apache site
 say "Writing the web server configuration"
+LLM_LOCATION=""
+if [[ -n "$LLM_URL" ]]; then
+  [[ "$LLM_URL" =~ ^https?://[A-Za-z0-9.:-]+(/.*)?$ ]] || die "--llm-url must look like http://192.168.1.50:11434"
+  a2enmod -q proxy proxy_http >/dev/null
+  # The local model, behind the same login as the files. The NAS password is not passed on to the model server.
+  LLM_LOCATION=$(cat <<EOF
+    <Location "/.llm/">
+        Dav Off
+        AuthType Basic
+        AuthName "NAS Uploader"
+        AuthBasicProvider file
+        AuthUserFile "$HTPASSWD"
+        Require valid-user
+        RequestHeader unset Authorization
+        ProxyPass "${LLM_URL%/}/" timeout=600
+        ProxyPassReverse "${LLM_URL%/}/"
+    </Location>
+EOF
+)
+fi
 COMMON=$(cat <<EOF
     DocumentRoot "$FOLDER"
     DavLockDB "$LOCK_DIR/DavLock"
@@ -461,6 +485,7 @@ COMMON=$(cat <<EOF
             php_admin_flag engine off
         </IfModule>
     </Directory>
+$LLM_LOCATION
     ErrorLog \${APACHE_LOG_DIR}/nas-uploader-error.log
     CustomLog \${APACHE_LOG_DIR}/nas-uploader-access.log combined
 EOF
@@ -691,6 +716,10 @@ fi
   echo "  username: '$WEB_USER',"
   echo "  password: '$WEB_PASS',"
   echo "  startFolder: '/',"
+  if [[ -n "$LLM_URL" ]]; then
+    echo
+    echo "Local AI model (Project Assistant: Settings, AI, Local model): ${PUBLIC_URL}.llm/ with the NAS login"
+  fi
 } > "$SUMMARY"
 chmod 600 "$SUMMARY"
 

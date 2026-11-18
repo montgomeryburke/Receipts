@@ -63,6 +63,7 @@
     <button role="tab" data-tab="chat">Chat</button>
     <button role="tab" data-tab="drafts" aria-selected="true">Drafts</button>
     <button role="tab" data-tab="questions">Questions <span id="qCount" class="count"></span></button>
+    <button role="tab" data-tab="todo">To do</button>
     <button role="tab" data-tab="files">Files</button>
     <button role="tab" data-tab="mirror">Mirror</button>
     <button role="tab" data-tab="automate">Automate</button>
@@ -117,6 +118,22 @@
   </section>
 
   <!-- Files -->
+  <section id="tab-todo" class="tab stack" hidden>
+    <div class="panel stack">
+      <div class="row"><h2 class="grow">Priorities</h2><button id="prioBtn" class="primary">📋 Make priority list</button></div>
+      <p class="small muted">What you need to do, ranked: from the past month's emails, open drafts, meeting action items, invoices due and your own tasks. Tick what's done; the next list also notes what got done since (a reply sent, a payment confirmed). For emails that never went through the assistant, index them first: Files → Outlook emails.</p>
+      <form id="ownTaskForm" class="row nowrap"><input id="ownTask" class="grow" type="text" placeholder="Add your own task…" autocomplete="off"><input id="ownDue" type="date" title="Due date (optional)"><button type="submit">Add</button></form>
+      <div id="prioMsg" class="small muted"></div>
+      <div id="prioList" class="stack"></div>
+    </div>
+    <div class="panel stack">
+      <div class="row"><h2 class="grow">Invoices</h2><input id="invMonth" type="month" title="Month"><button id="invBtn" class="primary">🧾 Make summary</button></div>
+      <p class="small muted">Every invoice in that month's emails (plus payments and reminders in the following two weeks): who, amount, due date, status. Saved as Word and a spreadsheet (CSV) in /Reports on the NAS. To bring in the emails: search "invoice" in Outlook on the web, then Files → "Index the emails listed in Outlook".</p>
+      <div id="invMsg" class="small muted"></div>
+      <div id="invOut"></div>
+    </div>
+  </section>
+
   <section id="tab-files" class="tab stack" hidden>
     <div class="row">
       <input id="searchBox" type="text" class="grow" placeholder="Search project files (local, no tokens)">
@@ -133,6 +150,12 @@
         <button id="stopBtn" class="danger" hidden>Stop</button>
       </div>
       <details class="small"><summary>Problem files</summary><div id="indexErrors" class="mono"></div></details>
+    </div>
+    <div class="panel stack">
+      <h2>Outlook emails</h2>
+      <p class="small muted">Every email the assistant drafts for is added to the index with its whole chain. To add more, search Outlook on the web for the project number or a person (or open a folder), then click below: each email listed is read and filed under its project. No AI, no cost. Who and what marks a project: Settings → Project emails. Old Outlook archives (.pst) and saved emails (.msg) in a project folder are read by the HP.</p>
+      <div class="row"><button id="mailIndexBtn">📥 Index the emails listed in Outlook</button></div>
+      <div id="mailIndexMsg" class="small muted"></div>
     </div>
   </section>
 

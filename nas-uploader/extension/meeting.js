@@ -6,12 +6,14 @@
 import { getSettings, saveSettings, put, kvGet } from './lib/db.js';
 import { createAudioContext, captureTeamsApp, captureTeamsTab, captureMicrophone, AudioChannel } from './lib/audio.js';
 import { Transcriber } from './lib/stt.js';
-import { makePrompt, answerQuestion, summarize, shouldPrompt, checkResult } from './lib/meeting-ai.js';
-import { detectProjects } from './lib/assistant.js';
+import { makePrompt, answerQuestion, summarize, shouldPrompt, checkResult, researchTopic } from './lib/meeting-ai.js';
+import { docx } from './lib/docx.js';
+import { detectProjects } from './lib/projects.js';
 import { addHint } from './lib/teach.js';
-import { hasKey, pickProvider, stopAllAI, resumeAI } from './lib/llm.js';
+import { hasKey, pickProvider, stopAllAI, resumeAI, listModels, pickGeminiFlash } from './lib/llm.js';
+import { modelChoices, fillModelSelect } from './lib/models.js';
 import { localAI } from './lib/localai.js';
-import { nasClient, writeTextFile, safeFileName } from './lib/nas.js';
+import { nasClient, writeTextFile, safeFileName, ensureDir } from './lib/nas.js';
 import { after } from './lib/util.js';
 import { projectFolders } from './lib/folders.js';
 import { pageLabel, chunkText } from './lib/text.js';
@@ -259,6 +261,7 @@ async function stopAndSave() {
     }
   }
   await save(true);
+  if (state.summary) await makeMinutes({ final: true });
   state.stt?.stop();
   state.stt = null;
   $('clock').hidden = true;
@@ -387,7 +390,7 @@ async function runPrompt(reason, { manual = false } = {}) {
   state.prompts.unshift(card);
   renderPrompts();
   try {
-    const res = await makePrompt(state.entries, { projects: projects(), signal: state.prompting.signal });
+    const res = await makePrompt(state.entries, { projects: projects(), signal: state.prompting.signal, manual });
     Object.assign(card, res, { thinking: false });
     state.cost += (res.cost || 0) + (res.web?.cost || 0);
     if (!res.needed && !res.web?.text) {
@@ -406,7 +409,7 @@ async function runPrompt(reason, { manual = false } = {}) {
 
 // ---- the second check: shown on each card once it is done (it runs after the card appears) ----
 
-const AI_NAME = { gemini: 'Gemini', anthropic: 'Claude' };
+const AI_NAME = { gemini: 'Gemini', anthropic: 'Claude', local: 'your local model' };
 
 function runCheck(obj, render) {
   if (!obj.review || state.aiPaused) {
@@ -448,6 +451,132 @@ function quoteMark(src) {
   return '';
 }
 
+// ---- 🔎 Research: the web, about what is being discussed (or what the user typed) ----
+
+async function runResearch(topic = '') {
+  state.settings = state.settings || (await getSettings());
+  if (state.aiPaused) {
+    toast('AI is stopped. Click ▶ Resume AI first.');
+    return;
+  }
+  if (!topic && !state.entries.length) {
+    toast('Nothing has been said yet — type a topic in "Ask privately" and click 🔎 Web.');
+    return;
+  }
+  const card = { id: `r${Date.now()}`, kind: 'research', at: Date.now(), thinking: true, topicAsked: topic };
+  state.prompts.unshift(card);
+  renderPrompts();
+  try {
+    const res = await researchTopic(state.entries, { projects: projects(), topic });
+    Object.assign(card, res, { thinking: false });
+    state.cost += res.cost || 0;
+  } catch (err) {
+    Object.assign(card, { thinking: false, error: err.message || String(err) });
+    state.errors.push(`research: ${card.error}`);
+  }
+  renderPrompts();
+  renderCost();
+}
+
+// ---- 📝 Minutes: during the meeting (so far) or at the end; Word and text, saved next to the transcript ----
+
+function minutesMarkdown(m) {
+  const start = new Date(state.startedAt || Date.now());
+  const lines = [`# Minutes — ${m.title || 'Meeting'}`, '', `Date: ${start.toLocaleDateString()} ${pad(start.getHours())}:${pad(start.getMinutes())}`];
+  if (projects()[0]) lines.push(`Project: ${projects()[0].split('/').pop()}`);
+  if ((m.attendees || []).length) lines.push(`Attendees: ${m.attendees.join(', ')}`);
+  if (m.purpose) lines.push(`Purpose: ${m.purpose}`);
+  lines.push('', '## Summary', '', m.summary || '', '');
+  (m.topics || []).forEach((t, i) => {
+    lines.push(`## ${i + 1}. ${t.heading}`, '', t.discussion || '');
+    for (const d of t.decisions || []) lines.push(`- **Decision:** ${d}`);
+    lines.push('');
+  });
+  if ((m.decisions || []).length) lines.push('## Decisions', '', ...m.decisions.map((d) => `- ${d}`), '');
+  if ((m.action_items || []).length) {
+    lines.push('## Action items', '', '| Action | Owner | Due |', '|---|---|---|', ...m.action_items.map((a) => `| ${a.what} | ${a.who || ''} | ${a.when || ''} |`), '');
+  }
+  if ((m.open_questions || []).length) lines.push('## Open questions', '', ...m.open_questions.map((q) => `- ${q}`), '');
+  if (m.next_meeting) lines.push(`Next meeting: ${m.next_meeting}`, '');
+  if (m.check?.issues?.length) lines.push('## Points to check', '', ...m.check.issues.map((x) => `- “${x.claim}” — ${x.problem}`), '');
+  return lines.join('\n');
+}
+
+function minutesWord(m) {
+  const start = new Date(state.startedAt || Date.now());
+  const blocks = [{ title: `Minutes — ${m.title || 'Meeting'}` }, { label: 'Date', text: `${start.toLocaleDateString()} ${pad(start.getHours())}:${pad(start.getMinutes())}` }];
+  if (projects()[0]) blocks.push({ label: 'Project', text: projects()[0].split('/').pop() });
+  if ((m.attendees || []).length) blocks.push({ label: 'Attendees', text: m.attendees.join(', ') });
+  if (m.purpose) blocks.push({ label: 'Purpose', text: m.purpose });
+  blocks.push({ h1: 'Summary' }, { p: m.summary || '' });
+  (m.topics || []).forEach((t, i) => {
+    blocks.push({ h2: `${i + 1}. ${t.heading}` }, { p: t.discussion || '' });
+    for (const d of t.decisions || []) blocks.push({ label: 'Decision', text: d });
+  });
+  if ((m.decisions || []).length) blocks.push({ h1: 'Decisions' }, ...m.decisions.map((d) => ({ bullet: d })));
+  if ((m.action_items || []).length) blocks.push({ h1: 'Action items' }, { table: { head: ['Action', 'Owner', 'Due'], rows: m.action_items.map((a) => [a.what, a.who || '', a.when || '']) } });
+  if ((m.open_questions || []).length) blocks.push({ h1: 'Open questions' }, ...m.open_questions.map((q) => ({ bullet: q })));
+  if (m.next_meeting) blocks.push({ label: 'Next meeting', text: m.next_meeting });
+  if (m.check?.issues?.length) blocks.push({ h1: 'Points to check' }, ...m.check.issues.map((x) => ({ bullet: `“${x.claim}” — ${x.problem}` })));
+  blocks.push({ note: 'Written from the meeting transcript by Project Assistant; check before circulating.' });
+  return docx(blocks);
+}
+
+function downloadMinutes(m, kind) {
+  const blob = kind === 'docx' ? minutesWord(m) : new Blob([minutesMarkdown(m)], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${safeFileName(`Minutes ${m.title || 'meeting'}`)}.${kind}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+
+/** Minutes so far (button), or the final minutes at Stop and save. Saved to the NAS next to the transcript. */
+async function makeMinutes({ final = false } = {}) {
+  let m = final ? state.summary : null;
+  if (!m) {
+    if (state.aiPaused) {
+      toast('AI is stopped. Click ▶ Resume AI first.');
+      return null;
+    }
+    if (state.entries.length < 2) {
+      toast('Not enough has been said yet for minutes.');
+      return null;
+    }
+    toast('Writing the minutes…');
+    try {
+      m = await summarize(state.entries, { projects: projects(), remember: false });
+    } catch (err) {
+      toast(`Minutes failed: ${err.message}`, 6000);
+      return null;
+    }
+    if (!m) {
+      toast('Not enough has been said yet for minutes (or no AI key).');
+      return null;
+    }
+    state.cost += m.cost || 0;
+    renderCost();
+  }
+  const card = state.prompts.find((p) => p.kind === 'minutes') || { id: 'minutes', kind: 'minutes', at: Date.now(), pinned: true };
+  Object.assign(card, { minutes: m, final, at: Date.now() });
+  if (!state.prompts.includes(card)) state.prompts.unshift(card);
+  state.minutes = m;
+  try {
+    const client = await nasClient();
+    const base = nasPathFor().replace(/\.md$/, '');
+    await writeTextFile(client, `${base} — Minutes.md`, minutesMarkdown(m));
+    await ensureDir(client, base.slice(0, base.lastIndexOf('/')) || '/');
+    await client.upload(`${base} — Minutes.docx`, minutesWord(m));
+    card.savedTo = `${base} — Minutes.docx`;
+  } catch (err) {
+    state.errors.push(`minutes: ${err.message}`);
+    card.savedTo = '';
+    toast(`Minutes not saved to the NAS (${err.message}) — use ⬇ Word to keep them.`, 6000);
+  }
+  renderPrompts();
+  return m;
+}
+
 function sourceHtml(src) {
   const name = (src.path || '').split('/').pop() || src.ref;
   const where = src.page ? ` · ${pageLabel(src.path, src.page)}` : '';
@@ -477,17 +606,46 @@ function webHtml(web) {
   return `<div class="web">🌐 ${esc(web.text)}${linksHtml(web.sources)}${both}</div>`;
 }
 
+function researchCardHtml(c, i) {
+  if (c.thinking) return `<div class="card research" data-i="${i}"><div class="thinking">Searching the web${c.topicAsked ? ` for “${esc(c.topicAsked)}”` : ' about what is being discussed'}…</div></div>`;
+  if (c.error) return `<div class="card research" data-i="${i}"><div class="err">Research failed: ${esc(c.error)}</div></div>`;
+  const check = c.check ? (c.check.error ? `<div class="chk warn small">Not double-checked: ${esc(c.check.error)}</div>`
+    : c.check.verdict === 'ok' ? `<div class="chk ok small" data-check="ok">✓ ${c.check.self ? `A second ${AI_NAME[c.check.by]} search` : AI_NAME[c.check.by]} checked these points on the web.</div>`
+      : c.check.verdict === 'issues' ? `<div class="chk warn small" data-check="issues">⚠ ${c.check.self ? `A second ${AI_NAME[c.check.by]} search` : AI_NAME[c.check.by]} disagrees:<ul class="plain">${c.check.issues.map((x) => `<li><b>${esc(x.claim)}</b> — ${esc(x.problem)}</li>`).join('')}</ul></div>` : '') : '';
+  return `<div class="card research ${c.pinned ? 'pinned' : ''}" data-i="${i}">
+    <div class="small muted">🔎 Research${c.topic ? `: ${esc(c.topic)}` : ''}</div>
+    <ul class="points">${(c.points || []).map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
+    ${c.ask ? `<div class="say">Ask: ${esc(c.ask)}</div>` : ''}${linksHtml(c.sources)}${check}
+    <div class="meta"><span>${hms(new Date(c.at))}</span><span class="grow"></span><button data-act="pin" title="Keep at the top">${c.pinned ? 'Unpin' : '📌'}</button></div></div>`;
+}
+
+function minutesCardHtml(c, i) {
+  const m = c.minutes;
+  return `<div class="card minutes pinned" data-i="${i}">
+    <div class="small muted">📝 Minutes${c.final ? '' : ' so far'}${m.title ? ` — ${esc(m.title)}` : ''}</div>
+    <div>${esc(m.summary || '')}</div>
+    <div class="small muted">${(m.topics || []).length} topic(s) · ${(m.decisions || []).length} decision(s) · ${(m.action_items || []).length} action item(s)${c.savedTo ? ` · saved to ${esc(c.savedTo)}` : ''}</div>
+    ${checkHtml(m.check ? (m.check.error ? { error: m.check.error } : m.check) : null)}
+    <div class="row" style="margin-top:4px"><button data-act="minutes-docx">⬇ Word</button><button data-act="minutes-md">⬇ Text</button></div></div>`;
+}
+
 function promptCardHtml(c, i) {
+  if (c.kind === 'research') return researchCardHtml(c, i);
+  if (c.kind === 'minutes') return minutesCardHtml(c, i);
   if (c.thinking) return `<div class="card" data-i="${i}"><div class="thinking">Thinking${c.manual ? '' : ` (${esc(c.reason)})`}…</div></div>`;
   if (c.error) return `<div class="card" data-i="${i}"><div class="err">${esc(c.error)}</div></div>`;
   if (c.empty) return `<div class="card" data-i="${i}"><div class="muted small">Nothing useful to add right now${c.topic ? ` about ${esc(c.topic)}` : ''}.</div></div>`;
   const fresh = Date.now() - c.at < 15000;
-  const sug = (c.suggestions || []).map((s) => `<div class="say">${esc(s.say)}</div><div class="why">${esc(s.why)}</div>${(s.sources || []).map(sourceHtml).join('')}`).join('<hr class="sep">');
+  const sug = (c.suggestions || []).map((s) => {
+    const general = !(s.sources || []).length && /^general knowledge/i.test(s.why || '');
+    return `<div class="say">${esc(s.say)}</div><div class="why">${general ? '<span class="tag" title="Not from your files — check it">general knowledge</span> ' : ''}${esc(String(s.why || '').replace(/^general knowledge:\s*/i, ''))}</div>${(s.sources || []).map(sourceHtml).join('')}`;
+  }).join('<hr class="sep">');
   return `<div class="card ${fresh ? 'new' : ''} ${c.pinned ? 'pinned' : ''}" data-i="${i}">
     ${c.topic ? `<div class="small muted">${esc(c.topic)}</div>` : ''}${sug}${checkHtml(c.check)}${webHtml(c.web)}
     <div class="meta"><span>${hms(new Date(c.at))}</span><span class="grow"></span>
       ${c.id === 'summary' ? '' : `<button data-act="good" title="Useful — prefer these documents for this topic">👍</button>
       <button data-act="bad" title="Not useful — avoid these documents for this topic">👎</button>`}
+      ${c.id === 'summary' || !c.topic ? '' : '<button data-act="research" title="Search the web about this topic">🔎</button>'}
       <button data-act="pin" title="Keep at the top">${c.pinned ? 'Unpin' : '📌'}</button></div></div>`;
 }
 
@@ -511,6 +669,14 @@ async function onPromptClick(e) {
   const c = state.prompts[Number(cardEl.dataset.i)];
   if (!c) return;
   if (b.dataset.act === 'pin') c.pinned = !c.pinned;
+  if (b.dataset.act === 'research') {
+    runResearch(c.topic);
+    return;
+  }
+  if (b.dataset.act === 'minutes-docx' || b.dataset.act === 'minutes-md') {
+    downloadMinutes(c.minutes, b.dataset.act === 'minutes-docx' ? 'docx' : 'md');
+    return;
+  }
   if (b.dataset.act === 'good' || b.dataset.act === 'bad') {
     const paths = [...new Set((c.suggestions || []).flatMap((s) => (s.sources || []).map((x) => x.path)).filter(Boolean))];
     const keywords = [c.topic, ...(c.suggestions || []).map((s) => s.say)].join(' ');
@@ -602,6 +768,16 @@ function markdown() {
       if (p.web?.text) lines.push(`- ${hms(new Date(p.at))} — 🌐 ${p.web.text.replace(/\n+/g, ' ')}`);
     }
     lines.push('');
+  }
+  const researched = state.prompts.filter((p) => p.kind === 'research' && !p.thinking && !p.error);
+  if (researched.length) {
+    lines.push('## Research', '');
+    for (const r of [...researched].reverse()) {
+      lines.push(`### ${hms(new Date(r.at))} — ${r.topic || r.topicAsked || 'Research'}`, '', ...(r.points || []).map((x) => `- ${x}`));
+      if (r.ask) lines.push(`- Ask: ${r.ask}`);
+      for (const src of (r.sources || []).filter((x) => /^https?:/.test(x.url || ''))) lines.push(`- [${src.title || src.url}](${src.url})`);
+      lines.push('');
+    }
   }
   const asked = state.answers.filter((a) => !a.thinking);
   if (asked.length) {
@@ -743,7 +919,10 @@ setInterval(() => {
   updateMeter('mMe', state.me, $('chkMic').checked ? 'off' : 'not used');
   if (state.listening && state.them && themQuiet && $('warn').hidden) {
     warn(state.themKind === 'app'
-      ? 'No sound from the meeting for 15 s. If people are talking: share again with <b>Entire screen</b> and tick <b>Also share system audio</b>.'
+      ? `No sound from the meeting for 15 s. Chrome hears the Teams app only through what Windows plays on its <b>default speakers</b>:
+        <ul class="tight"><li>Share again with <b>Entire screen</b> (not a window) and tick <b>Also share system audio</b>.</li>
+        <li>Hearing Teams in a <b>headset</b>? In Teams → Settings → Devices, set <b>Speaker</b> to the same device as Windows' sound output (Windows Settings → System → Sound → Output) — or make the headset the Windows output. Teams can play to a different device from everything else, and Chrome can't hear that.</li>
+        <li>Or open the meeting in Teams in Chrome (teams.microsoft.com) and click <b>Teams in Chrome</b> here — that always works.</li></ul>`
       : 'No sound from the meeting for 15 s. If people are talking: share again, pick the Teams tab, and keep <b>Also share tab audio</b> on.');
   } else if (state.them && !themQuiet && /No sound from the meeting/.test($('warn').textContent)) warn('');
   if (state.recording) renderRecording();
@@ -782,7 +961,7 @@ async function popOut() {
     pip.document.title = 'Prompts';
     pip.document.body.className = 'pip';
     pip.document.body.innerHTML = `<div class="pip-wrap">
-      <div class="pip-meters"><span>Meeting</span><div class="bar meter"><div class="fill" id="pThem"></div></div><span>Me</span><div class="bar meter"><div class="fill" id="pMe"></div></div><button id="pipAskNow">Ask now</button><button id="pipAi" title="Stop / resume AI">⏹ Stop AI</button></div>
+      <div class="pip-meters"><span>Meeting</span><div class="bar meter"><div class="fill" id="pThem"></div></div><span>Me</span><div class="bar meter"><div class="fill" id="pMe"></div></div><button id="pipAskNow">Ask now</button><button id="pipResearch" title="Search the web about this">🔎</button><button id="pipAi" title="Stop / resume AI">⏹ Stop AI</button></div>
       <div class="pip-list" id="pipList"></div>
       <form id="pipAsk" class="row nowrap"><input id="pipQ" class="grow" type="text" placeholder="Ask privately…" autocomplete="off"><button class="primary" type="submit">Ask</button></form>
     </div>`;
@@ -794,6 +973,7 @@ async function popOut() {
     });
     pip.document.getElementById('pipAskNow').addEventListener('click', () => runPrompt('asked', { manual: true }));
     pip.document.getElementById('pipAi').addEventListener('click', toggleAi);
+    pip.document.getElementById('pipResearch').addEventListener('click', () => runResearch());
     renderAi();
     pip.document.getElementById('pipList').addEventListener('click', onPromptClick);
     pip.addEventListener('pagehide', () => {
@@ -827,17 +1007,50 @@ function fillSettings() {
   }
 }
 
+// The model for the meeting's AI (the same setting as in Settings), picked from the models the key can use.
+const MODEL_KEY = { anthropic: 'anthropicModel', gemini: 'geminiModel' };
+async function renderMeetingModel() {
+  const s = state.settings;
+  const provider = pickProvider(s, s.meetingProvider || s.provider);
+  $('mtgModelLabel').textContent = `${provider === 'gemini' ? 'Gemini' : 'Claude'} model (also used for emails and the chat)`;
+  let models = [];
+  if (hasKey(s, provider)) models = await listModels(s, provider).catch(() => []);
+  if (!models.length && provider === 'anthropic') models = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
+  fillModelSelect($('mtgModel'), modelChoices(provider, models, { autoModel: provider === 'gemini' ? pickGeminiFlash(models) || '' : '' }), s[MODEL_KEY[provider]]);
+  $('mtgModel').dataset.provider = provider;
+  $('mtgModelOther').hidden = $('mtgModel').value !== '__other';
+}
+$('mtgModel').addEventListener('change', async () => {
+  const sel = $('mtgModel');
+  if (sel.value === '__other') {
+    $('mtgModelOther').hidden = false;
+    $('mtgModelOther').focus();
+    return;
+  }
+  $('mtgModelOther').hidden = true;
+  state.settings = await saveSettings({ [MODEL_KEY[sel.dataset.provider]]: sel.value });
+  toast(`Model: ${sel.value}`);
+});
+$('mtgModelOther').addEventListener('change', async () => {
+  const v = $('mtgModelOther').value.trim();
+  if (!v) return;
+  state.settings = await saveSettings({ [MODEL_KEY[$('mtgModel').dataset.provider]]: v });
+  await renderMeetingModel();
+});
+
 $('setDlg').addEventListener('change', async (e) => {
   const el = e.target;
   if (!el.dataset.key) return;
   const v = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) || 20 : el.value;
   state.settings = await saveSettings({ [el.dataset.key]: v });
   if (el.dataset.key === 'meetingStt' && state.listening) toast('The new transcription choice applies to the next meeting.');
+  if (el.dataset.key === 'meetingProvider') renderMeetingModel();
 });
 
 $('btnSettings').addEventListener('click', async () => {
   state.settings = await getSettings();
   fillSettings();
+  renderMeetingModel();
   const la = await localAI.check();
   $('localAiNote').textContent = la === 'available' ? "Chrome's built-in AI is available on this computer: it decides when a prompt is worth paying for." : "Chrome's built-in AI isn't available on this computer; simple rules decide when to prompt instead.";
   $('setDlg').showModal();
@@ -884,6 +1097,13 @@ chrome.runtime.onMessage.addListener((m) => {
   return false;
 });
 $('btnAsk').addEventListener('click', () => runPrompt('asked', { manual: true }));
+$('btnResearch').addEventListener('click', () => runResearch());
+$('btnMinutes').addEventListener('click', () => makeMinutes());
+$('btnWeb').addEventListener('click', () => {
+  const q = $('askInput').value.trim();
+  $('askInput').value = '';
+  runResearch(q);
+});
 $('btnPip').addEventListener('click', popOut);
 $('prompts').addEventListener('click', onPromptClick);
 $('answers').addEventListener('click', onPromptClick);

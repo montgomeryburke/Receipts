@@ -49,7 +49,9 @@
   <section class="panel stack" id="promptsBox">
     <div class="row nowrap">
       <h2 class="grow">Prompts</h2>
-      <button id="btnAsk" title="Suggest something to say now">Ask now</button>
+      <button id="btnAsk" title="Suggest something to say or ask right now">Ask now</button>
+      <button id="btnResearch" title="Search the web about what is being discussed: key points and links">🔎 Research</button>
+      <button id="btnMinutes" title="Write the minutes so far (saved to the NAS as Word and text)">📝 Minutes</button>
       <button id="btnPip" title="Keep the prompts in a small window on top of Teams">⧉ Pop out</button>
     </div>
     <div id="prompts" class="stack"><div class="empty small">Prompts appear here when a question or a new topic comes up.</div></div>
@@ -60,6 +62,7 @@
     <form id="askForm" class="row nowrap">
       <input id="askInput" class="grow" type="text" autocomplete="off" placeholder="Only you see this — e.g. what width does our design use?">
       <button class="primary" type="submit">Ask</button>
+      <button type="button" id="btnWeb" title="Search the web for what you typed (key points and links)">🔎 Web</button>
     </form>
     <div id="answers" class="stack"></div>
   </section>
@@ -100,6 +103,8 @@
         <option value="gemini">Gemini</option>
       </select>
     </label>
+    <label class="field"><span id="mtgModelLabel">Model</span><select id="mtgModel"></select></label>
+    <input type="text" id="mtgModelOther" placeholder="Type a model name" spellcheck="false" hidden>
     <label class="field"><span>At most one automatic prompt every (seconds)</span><input type="number" min="5" max="900" data-key="meetingMinGapSec"></label>
     <label class="check small"><input type="checkbox" data-key="meetingWebLookup"> Look standards up online when my files don't have them</label>
     <label class="check small"><input type="checkbox" data-key="meetingSummary"> Summary, decisions and action items at the end</label>

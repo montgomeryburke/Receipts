@@ -659,7 +659,7 @@ export class Agent extends EventTarget {
       }
       this.note({ type: 'info', text: `Working with ${providerName(this.provider)}${this.startTabId ? ` in “${(await chrome.tabs.get(this.startTabId)).title}”` : ''}.` });
       const who = [settings.myName, settings.myRole].filter(Boolean).join(', ') || 'the user';
-      const res = await runChat(settings, {
+      const res = await runChat({ ...settings, _tag: 'agent' }, {
         provider: this.provider,
         system: SYSTEM(who),
         history: [{ role: 'user', text: `<task>\n${this.task}\n</task>${this.startTabId ? '\nThe tab to work in is already open: start with read_page.' : '\nNo tab was chosen: use list_tabs / open_tab as needed.'}` }],

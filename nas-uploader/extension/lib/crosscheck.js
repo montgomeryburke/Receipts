@@ -122,7 +122,7 @@ export function quoteFound(quote, text) {
 // ---------------- the second AI ----------------
 
 export const otherProvider = (p) => (p === 'gemini' ? 'anthropic' : 'gemini');
-export const providerName = (p) => (p === 'gemini' ? 'Gemini' : 'Claude');
+export const providerName = (p) => (p === 'gemini' ? 'Gemini' : p === 'local' ? 'your local model' : 'Claude');
 
 /** The second check runs with any key (the setting on): the other AI with both keys, a separate review with one. */
 export function canCrossCheck(settings) {
@@ -135,11 +135,15 @@ export function crossCheckMode(settings) {
   return hasKey(settings, 'anthropic') && hasKey(settings, 'gemini') ? 'both' : 'self';
 }
 
-/** Who checks `provider`'s work: the other AI if its key is set, else the same AI in a separate call. */
+/**
+ * Who checks `provider`'s work: the other cloud AI if its key is set; else the local model on the HP when the
+ * user gave it the second checks (a different model, and free); else the same AI in a separate call.
+ */
 export function reviewerFor(settings, provider) {
   const other = otherProvider(provider);
-  if (hasKey(settings, other)) return { provider: other, self: false };
-  return { provider, self: true };
+  if (provider !== 'local' && hasKey(settings, other)) return { provider: other, self: false };
+  if (provider !== 'local' && settings.localFor?.check && hasKey(settings, 'local')) return { provider: 'local', self: false };
+  return { provider: provider === 'local' ? settings.provider : provider, self: provider !== 'local' };
 }
 
 // With one key, an optional different model of the same provider for the second review (Settings: selfCheckModel).
@@ -186,7 +190,7 @@ export async function review(settings, { provider, what, sources, text, hints = 
   const { provider: reviewer, self } = reviewerFor(settings, provider);
   const { settings: s, model } = self ? selfSettings(settings, reviewer) : { settings, model: undefined };
   const note = hints.length ? `\n\nA local check also noticed: ${hints.join('; ')}. Confirm or dismiss each.` : '';
-  const res = await callLLM(s, {
+  const res = await callLLM({ ...s, _tag: 'check' }, {
     provider: reviewer,
     ...(model ? { model } : {}),
     system: REVIEWER,
@@ -226,8 +230,10 @@ export function reviewBlock(r) {
  * agree: true|false|null, cost}.
  */
 export async function dualLookUp(settings, { provider, what, system, signal }) {
-  const { provider: secondBy, self } = reviewerFor(settings, provider);
-  const ask = (p, prompt) => generateText(settings, { provider: p, web: true, effort: 'low', maxTokens: 900, signal, system, prompt });
+  const rv = reviewerFor(settings, provider);
+  const secondBy = rv.provider === 'local' ? provider : rv.provider; // the local model can't search the web
+  const self = secondBy === provider;
+  const ask = (p, prompt) => generateText({ ...settings, _tag: 'lookup' }, { provider: p, web: true, effort: 'low', maxTokens: 900, signal, system, prompt });
   const [a, b] = await Promise.allSettled([
     ask(provider, `Look up: ${what}`),
     ask(secondBy, self ? `Find the official source and quote the exact requirement, with its clause number, for: ${what}` : `Look up: ${what}`),

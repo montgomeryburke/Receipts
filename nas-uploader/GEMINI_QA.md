@@ -85,6 +85,13 @@ G. The bash/Python server scripts: idempotency, running as root vs the WebDAV us
    handling, anything unsafe (including parsing untrusted .pst/.msg/.docx files from the user's mailbox).
 H. Recorder: losing data on long recordings, files left half-written, recording continuing after the user thinks
    it stopped, permission prompts, formats that won't play on Windows.
+K. Email chains and the email index (lib/text.js splitThread/threadOf, lib/mailindex.js, lib/projects.js, content/outlook.js
+   expandHistory/indexListed): quoted history split wrongly (other languages, forwarded emails), the wrong project, emails
+   lost or duplicated in the index, the Outlook page being changed by the reader.
+L. To do (lib/todo.js), minutes (lib/docx.js, meeting.js), research (lib/meeting-ai.js researchTopic), model pickers
+   (lib/models.js) and the local model provider (lib/llm.js callLocal, server/setup-webdav.sh --llm-url): wrong numbers
+   or dates in invoice tables, tasks marked done without evidence, invalid Word files, the NAS login leaking to the
+   model server, cost that runs without the user's switch.
 I. Browser agent: any way a web page (its text, its DOM, a dialog, a redirect) can make the agent act without the
    user's Allow: submit or send something, upload a file, type into a password field, go to another site, start a
    desktop flow, or read NAS/local files into a page. Element numbers going stale between snapshot and click.

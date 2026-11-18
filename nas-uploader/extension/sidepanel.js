@@ -237,7 +237,7 @@ function cardNode(it, ver) {
   return el;
 }
 
-const AI_NAME = { gemini: 'Gemini', anthropic: 'Claude' };
+const AI_NAME = { gemini: 'Gemini', anthropic: 'Claude', local: 'your local model' };
 
 /** What the second check found: numbers not in the sources (free, local) and the other AI's review. */
 function checkHtml(c) {
@@ -258,6 +258,12 @@ function checkHtml(c) {
 
 function cardBody(it) {
   const parts = [];
+  // What the drafter read: the thread's history and earlier related emails.
+  const nThread = (it.thread || []).length;
+  const nRelated = (it.related?.tracker || []).length + (it.related?.archive || []).length;
+  if (it.threadSummary || nThread || nRelated) {
+    parts.push(`<h3>Thread</h3>${it.threadSummary ? `<div class="small">${esc(it.threadSummary)}</div>` : ''}<div class="small muted" data-thread-read>Read ${nThread} earlier message${nThread === 1 ? '' : 's'} in this thread${nRelated ? ` and ${nRelated} related earlier email${nRelated === 1 ? '' : 's'}` : ''}.</div>`);
+  }
   if (it.requests?.length) {
     parts.push('<h3>Requests</h3>');
     for (const r of it.requests) {
@@ -470,7 +476,8 @@ async function openLocalFile(rec, path) {
 async function openSource(path, page) {
   const ext = (path.split('.').pop() || '').toLowerCase();
   const rec0 = await get('files', path);
-  if (ext === 'pst') {
+  // Mailboxes (.pst) and emails indexed from Outlook (.eml): their text lives in the index, not in a file here.
+  if (ext === 'pst' || (ext === 'eml' && rec0?.folderId === 'mail')) {
     const chunks = (await Promise.all((rec0?.chunkIds || []).map((id) => get('chunks', id)))).filter((c) => c && (!page || c.page === page));
     $('pvTitle').textContent = `${path.split('/').pop()} · ${pageLabel(path, page) || 'mailbox'}`;
     $('pvText').textContent = chunks.map((c) => c.text).join('\n\n') || '(no text indexed for this email)';
@@ -744,7 +751,8 @@ $('setupSave').addEventListener('click', async () => {
     const s = await getSettings();
     const models = res.models || [];
     const cur = provider === 'gemini' ? s.geminiModel : s.anthropicModel;
-    if (models.length && !models.includes(cur)) {
+    // Keep the user's choice ("auto" included); only a model this key can't use is replaced.
+    if (models.length && cur !== 'auto' && !models.includes(cur)) {
       const pick = provider === 'gemini'
         ? models.find((m) => /flash/.test(m) && !/lite|image|tts|live/.test(m)) || models[0]
         : models.find((m) => m === 'claude-opus-5-5') || models.find((m) => /opus/.test(m)) || models[0];
@@ -794,6 +802,96 @@ $('aiStop').addEventListener('click', async () => {
 });
 $('openRecorder').addEventListener('click', () => bg('recorder.open'));
 $('openAgent').addEventListener('click', () => bg('agent.open'));
+
+// ---- To do: priorities and invoices ----
+
+const URG = { now: 'Now', today: 'Today', 'this week': 'This week', later: 'Later' };
+
+function renderPriorities(list) {
+  if (!list) { $('prioList').innerHTML = ''; return; }
+  const open = list.items.filter((i) => !i.done);
+  const done = list.items.filter((i) => i.done);
+  const row = (i) => `<label class="prio ${i.done ? 'done' : ''}" data-id="${esc(i.id)}"><input type="checkbox" data-prio="${esc(i.id)}" ${i.done ? 'checked' : ''}>
+      <span class="grow"><b>${esc(i.title)}</b>${i.due ? ` <span class="pill ${i.urgency === 'now' ? 'bad' : 'warn'}">${esc(i.due)}</span>` : ''}
+      <div class="small muted">${esc(i.why || '')}${i.next_step ? ` · Next: ${esc(i.next_step)}` : ''}${i.done && i.done_evidence ? ` · ✓ ${esc(i.done_evidence)}` : ''}</div></span></label>`;
+  const groups = Object.keys(URG).map((u) => {
+    const its = open.filter((i) => (i.urgency || 'later') === u);
+    return its.length ? `<h3>${URG[u]}</h3>${its.map(row).join('')}` : '';
+  }).join('');
+  $('prioList').innerHTML = `${list.summary ? `<div class="small">${esc(list.summary)}</div>` : ''}${groups || '<div class="empty small">Nothing to do found.</div>'}${done.length ? `<details class="small"><summary>Done (${done.length})</summary>${done.map(row).join('')}</details>` : ''}<div class="usage">Made ${new Date(list.at).toLocaleString()}${list.cost ? ` · ${money(list.cost)}` : ''}</div>`;
+}
+
+$('prioBtn').addEventListener('click', async () => {
+  $('prioBtn').disabled = true;
+  $('prioMsg').textContent = 'Looking through the past month…';
+  const r = await engine('todo.priorities');
+  $('prioBtn').disabled = false;
+  if (r?.error) { $('prioMsg').textContent = r.error; return; }
+  const c = r.counts || {};
+  $('prioMsg').textContent = `Read ${c.emails || 0} emails, ${c.drafts || 0} open drafts, ${c.meetingActions || 0} meeting actions, ${c.invoices || 0} unpaid invoices, ${c.own || 0} of your tasks.`;
+  renderPriorities(r);
+});
+$('prioList').addEventListener('change', async (e) => {
+  const box = e.target.closest('[data-prio]');
+  if (!box) return;
+  await engine('todo.done', { id: box.dataset.prio, done: box.checked });
+  renderPriorities(await engine('todo.last'));
+});
+$('ownTaskForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const t = $('ownTask').value.trim();
+  if (!t) return;
+  await engine('todo.addTask', { text: t, due: $('ownDue').value });
+  $('ownTask').value = '';
+  $('ownDue').value = '';
+  toast('Added: it will be in the next priority list.');
+});
+
+function renderInvoices(rep) {
+  if (!rep) { $('invOut').innerHTML = ''; return; }
+  const rows = rep.invoices.map((i) => `<tr class="${i.status === 'overdue' ? 'overdue' : ''}"><td>${esc(i.party)}${i.direction === 'to collect' ? ' <span class="pill info">to collect</span>' : ''}</td><td class="mono">${esc(i.invoice_number)}</td><td>${esc(i.amount)}</td><td>${esc(i.due_date)}</td><td><span class="pill ${i.status === 'paid' ? 'ok' : i.status === 'overdue' ? 'bad' : ''}">${esc(i.status)}</span>${i.verified ? '' : ' <span class="pill warn" title="The amount or number wasn\'t found in the email — check it">check</span>'}</td><td class="small">${esc(i.notes)}</td></tr>`).join('');
+  const check = rep.check?.issues?.length ? `<div class="check warn small">⚠ The second check found: ${rep.check.issues.map((x) => esc(`${x.claim} — ${x.problem}`)).join('; ')}</div>` : rep.check?.verdict === 'ok' ? '<div class="check ok small">✓ Checked again against the emails.</div>' : '';
+  $('invOut').innerHTML = `<div class="small">${esc(rep.summary)}</div>${rows ? `<table class="inv"><thead><tr><th>Party</th><th>Invoice</th><th>Amount</th><th>Due</th><th>Status</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table>` : ''}${check}
+    ${rows ? `<div class="row"><button data-inv="csv">⬇ Spreadsheet (CSV)</button><button data-inv="docx">⬇ Word</button></div>` : ''}<div class="usage">${rep.emails} email(s) read${rep.savedTo ? ` · saved to ${esc(rep.savedTo)}` : ''}${rep.cost ? ` · ${money(rep.cost)}` : ''}</div>`;
+}
+
+$('invBtn').addEventListener('click', async () => {
+  const month = $('invMonth').value;
+  if (!month) { $('invMsg').textContent = 'Pick a month.'; return; }
+  $('invBtn').disabled = true;
+  $('invMsg').textContent = `Reading the ${month} emails…`;
+  const r = await engine('todo.invoices', { month });
+  $('invBtn').disabled = false;
+  if (r?.error) { $('invMsg').textContent = r.error; return; }
+  $('invMsg').textContent = '';
+  renderInvoices(r);
+});
+$('invOut').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-inv]');
+  if (!b) return;
+  const { invoiceCsv, invoiceWord } = await import('./lib/todo.js');
+  const rep = await kvGet(`invoices:${$('invMonth').value}`);
+  if (!rep) return;
+  const blob = b.dataset.inv === 'csv' ? new Blob(['\ufeff' + invoiceCsv(rep)], { type: 'text/csv' }) : invoiceWord(rep);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `Invoices ${rep.month}.${b.dataset.inv}`;
+  a.click();
+});
+(() => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 1);
+  $('invMonth').value = d.toISOString().slice(0, 7);
+})();
+engine('todo.last').then((r) => { if (r && !r.error) renderPriorities(r); }).catch(() => {});
+
+// ---- Outlook emails into the project index ----
+$('mailIndexBtn').addEventListener('click', async () => {
+  const r = await bg('outlook.indexListed', { max: 300 });
+  if (r?.error) { $('mailIndexMsg').textContent = r.error; return; }
+  $('mailIndexMsg').textContent = `Reading the ${r.listed}+ emails listed in Outlook… (keep the Outlook tab open; you can keep working elsewhere)`;
+  $('mailIndexBtn').disabled = true;
+});
 
 $('reconnectBtn').addEventListener('click', async () => {
   const bridge = await getRootHandle('bridge');
@@ -1108,6 +1206,16 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.to !== 'ui') return false;
   if (msg.type === 'chat') {
     onChatMessage(msg);
+    return false;
+  }
+  if (msg.type === 'mailIndexProgress') {
+    $('mailIndexMsg').textContent = `Indexed ${msg.indexed} email${msg.indexed === 1 ? '' : 's'}${msg.failed ? ` (${msg.failed} couldn't be read)` : ''}…`;
+    return false;
+  }
+  if (msg.type === 'mailIndexDone') {
+    $('mailIndexBtn').disabled = false;
+    $('mailIndexMsg').textContent = `Done: ${msg.indexed} email${msg.indexed === 1 ? '' : 's'} indexed with their whole chains${msg.failed ? `, ${msg.failed} couldn't be read` : ''}. They're filed under their projects and used for drafts.`;
+    refreshSoon(500);
     return false;
   }
   if (msg.type === 'aiState') {

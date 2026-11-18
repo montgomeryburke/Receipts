@@ -12,11 +12,13 @@
   <nav class="side" aria-label="Sections">
     <h1>Project Assistant</h1>
     <a href="#ai">AI provider &amp; key</a>
+    <a href="#background">Background tasks &amp; cost</a>
     <a href="#accuracy">Accuracy &amp; safety</a>
     <a href="#about">About you</a>
     <a href="#instructions">Instructions</a>
     <a href="#nas">NAS connection</a>
     <a href="#folders">Project folders</a>
+    <a href="#projectmail">Project emails</a>
     <a href="#indexing">Indexing</a>
     <a href="#meetings">Meetings</a>
     <a href="#email">Email</a>
@@ -40,28 +42,41 @@
           <label class="field"><span>API key</span>
             <div class="row nowrap"><input type="password" data-key="anthropicKey" class="grow" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"><button type="button" data-reveal="anthropicKey">Show</button></div>
           </label>
-          <label class="field"><span>Model</span><input type="text" data-key="anthropicModel" list="anthropicModels"></label>
-          <datalist id="anthropicModels">
-            <option value="claude-opus-5-5"></option>
-            <option value="claude-sonnet-5-5"></option>
-            <option value="claude-haiku-5-5"></option>
-          </datalist>
+          <label class="field"><span>Model</span><select id="model-anthropic" data-model="anthropic"></select></label>
+          <input type="text" id="model-other-anthropic" data-model-other="anthropic" placeholder="Type a model name, e.g. claude-opus-5-5" spellcheck="false" hidden>
           <label class="check small"><input type="checkbox" data-key="anthropicFallbacks"> If Claude declines a request, retry it on Anthropic's recommended fallback model</label>
-          <div class="row"><button type="button" data-test="anthropic">Test key &amp; list models</button><span class="small muted" data-testout="anthropic"></span></div>
+          <div class="row"><button type="button" data-test="anthropic">Test key &amp; list models</button><button type="button" data-webtest="anthropic">Test web search</button></div>
+          <div class="small muted" data-testout="anthropic"></div>
         </div>
         <div class="stack">
           <h3>Google Gemini</h3>
           <label class="field"><span>API key</span>
             <div class="row nowrap"><input type="password" data-key="geminiKey" class="grow" autocomplete="off" spellcheck="false" placeholder="AIza…"><button type="button" data-reveal="geminiKey">Show</button></div>
           </label>
-          <label class="field"><span>Model</span><input type="text" data-key="geminiModel" list="geminiModels"></label>
-          <datalist id="geminiModels">
-            <option value="auto"></option>
-          </datalist>
-          <p class="small muted">"auto" picks the newest Gemini Flash model your key can use.</p>
-          <div class="row"><button type="button" data-test="gemini">Test key &amp; list models</button><span class="small muted" data-testout="gemini"></span></div>
+          <label class="field"><span>Model</span><select id="model-gemini" data-model="gemini"></select></label>
+          <input type="text" id="model-other-gemini" data-model-other="gemini" placeholder="Type a model name, e.g. gemini-3.5-pro" spellcheck="false" hidden>
+          <p class="small muted">The list shows the models your key can use. Pro is the most capable; Flash is fast and cheap. Whether you pay or use the free tier depends on the key (billing turned on for its project in Google AI Studio), not on the model.</p>
+          <div class="row"><button type="button" data-test="gemini">Test key &amp; list models</button><button type="button" data-webtest="gemini">Test web search</button></div>
+          <div class="small muted" data-testout="gemini"></div>
         </div>
       </div>
+      <details class="stack" id="localBox">
+        <summary><b>Local model on your HP (free)</b> — e.g. Ollama in your "llm" container</summary>
+        <p class="small muted">Your own model does the cheap jobs for nothing: no API key, nothing leaves home. Run the HP setup script with <code>--llm-url http://&lt;llm container address&gt;:11434</code> so it is reachable at <code>&lt;your NAS address&gt;/.llm/</code> with the NAS login (from work too). Any OpenAI-compatible server works (Ollama, LM Studio, llama.cpp).</p>
+        <div class="grid2">
+          <label class="field"><span>Address</span><input type="text" data-key="localUrl" placeholder="https://nas.your-tailnet.ts.net/.llm/" spellcheck="false"></label>
+          <label class="field"><span>Model</span><input type="text" data-key="localModel" list="localModels" placeholder="qwen2.5:7b" spellcheck="false"></label>
+          <datalist id="localModels"></datalist>
+          <label class="field"><span>Login</span><select data-key="localAuth"><option value="nas">the NAS login (through the NAS address)</option><option value="key">an API key</option><option value="none">none (home network)</option></select></label>
+          <label class="field"><span>API key (only for "an API key")</span><input type="password" data-key="localKey" autocomplete="off"></label>
+        </div>
+        <div class="row small"><b>Use it for:</b>
+          <label class="check"><input type="checkbox" data-local-for="priorities"> priority lists</label>
+          <label class="check"><input type="checkbox" data-local-for="invoices"> invoice summaries</label>
+          <label class="check"><input type="checkbox" data-local-for="check"> second checks (when there's only one cloud key)</label>
+        </div>
+        <div class="row"><button type="button" id="localTest">Test the local model</button><span id="localOut" class="small muted"></span></div>
+      </details>
       <div class="grid3">
         <label class="field"><span>Thinking effort</span>
           <select data-key="effort">
@@ -77,6 +92,36 @@
         <label class="field"><span>Price override, USD / 1M output tokens</span><input type="number" step="0.01" data-key="priceOutPerM" placeholder="auto"></label>
       </div>
       <label class="check small"><input type="checkbox" data-key="refinePass"> When information is missing, search the files once more and re-check (one extra, smaller call)</label>
+    </section>
+
+    <section id="background" class="panel stack">
+      <h2>Background tasks &amp; cost</h2>
+      <p class="small">Everything that runs by itself and calls Claude or Gemini (which costs money) is listed here, with a switch. Searching, indexing, project detection, the free transcription and the email index all run on this computer or the HP and cost nothing.</p>
+      <div id="spendBox" class="spend small"></div>
+      <div class="row"><span class="small"><b>Presets:</b></span>
+        <button type="button" data-preset="saver" title="Only what you click: no automatic drafts or prompts, no second check, free transcription, low effort">💰 Saver</button>
+        <button type="button" data-preset="balanced" title="Drafts when you open a new email, automatic meeting prompts, the second check on, medium effort for drafts">⚖ Balanced</button>
+        <button type="button" data-preset="best" title="Everything on: automatic drafts, the second check and double look-ups, high effort for drafts">🎯 Best accuracy</button>
+        <span id="presetOut" class="small muted"></span>
+      </div>
+      <table class="jobs">
+        <thead><tr><th>Runs by itself</th><th>Cost when it runs</th><th>On / off</th></tr></thead>
+        <tbody>
+          <tr><td>Draft a reply when you open a <b>new</b> email in Outlook</td><td>1 call per email (more when information is missing)</td><td><input type="checkbox" data-key="processOnOpen"></td></tr>
+          <tr><td>Scan the inbox for new emails while you're away, and draft them</td><td>1 call per new email</td><td><input type="checkbox" data-key="autoScan"></td></tr>
+          <tr><td>Thinking effort for email drafts</td><td>low ≈ ½ · medium ≈ 1 · high ≈ 2–3 × the tokens</td><td><select data-key="emailEffort"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></td></tr>
+          <tr><td>Search the files again when a draft is missing information</td><td>sometimes +1 call</td><td><input type="checkbox" data-key="refinePass"></td></tr>
+          <tr><td>Second check of drafts, meeting prompts, answers, minutes, agent results</td><td>+1 call each (≈ double)</td><td><input type="checkbox" data-key="crossCheck"></td></tr>
+          <tr><td>…and correct a draft the check finds a problem in</td><td>+1 call when it does</td><td><input type="checkbox" data-key="crossCheckRevise"></td></tr>
+          <tr><td>Look standards up twice and compare</td><td>+1 web search per look-up</td><td><input type="checkbox" data-key="dualLookUp"></td></tr>
+          <tr><td>Meeting prompts</td><td>automatic: at most one every 20 s, only on a question or technical talk</td><td><select data-key="meetingPrompts"><option value="auto">automatic</option><option value="manual">only when I click</option><option value="off">off</option></select></td></tr>
+          <tr><td>Look things up online in meetings when the files don't have it</td><td>+1 web search when needed</td><td><input type="checkbox" data-key="meetingWebLookup"></td></tr>
+          <tr><td>Minutes and summary when a meeting ends</td><td>1 call per meeting</td><td><input type="checkbox" data-key="meetingSummary"></td></tr>
+          <tr><td>Meeting transcription</td><td>free on this computer; Gemini ≈ a few cents an hour</td><td><select data-key="meetingStt"><option value="whisper">free (this computer)</option><option value="gemini">Gemini</option><option value="both">Gemini + free check</option></select></td></tr>
+          <tr><td>Daily spending limit (USD; 0 = none)</td><td>everything stops for the day when reached</td><td><input type="number" min="0" step="0.5" data-key="dailyBudgetUsd" style="width:6em"></td></tr>
+        </tbody>
+      </table>
+      <p class="small muted">Not listed because they cost nothing: re-indexing the project folders (every <input type="number" min="0" max="1440" data-key="autoIndexMinutes" style="width:4.5em"> minutes; 0 = off), the NAS OCR index, the email index, mirroring.</p>
     </section>
 
     <section id="accuracy" class="panel stack">
@@ -140,6 +185,12 @@
       <h2>Automate bridge folder</h2>
       <div class="folder-row"><div><b>Bridge folder (optional)</b><div class="small muted">A OneDrive-synced folder your Power Automate flows watch (see Power Automate below). Separate from the NAS mirror.</div></div><span id="f-bridge" class="small"></span><button type="button" data-pick="bridge">Choose…</button></div>
     </section>
+    <section id="projectmail" class="panel stack">
+      <h2>Project emails</h2>
+      <p class="small">Which emails belong to which project. An email is filed under a project when it comes from or goes to one of its <b>people</b> (names, addresses or <code>@company.com</code>), or mentions one of its <b>keywords</b> (project number, name, site, client). Filed emails are searched for that project's drafts, meeting prompts and the chat. You can also tell the chat, e.g. "Dana Lee and @arcticfresh.ca are on the Alert Bridge project".</p>
+      <div id="projectMailList" class="stack"></div>
+    </section>
+
     <section id="indexing" class="panel stack">
       <h2>Indexing</h2>
       <label class="field"><span>Read the text of these file types</span><input type="text" data-key="includeExt"></label>

@@ -186,7 +186,7 @@ export async function selectQueryTerms(text, maxTerms = 24, boostText = '') {
 export async function search(query, {
   k = 8, charBudget = 7000, perFile = 2, maxChunkChars = 1200,
   boostPrefixes = [], excludeIds = new Set(), pathPrefix = '',
-  onlyPaths = null, excludePaths = null, preferRecent = false,
+  onlyPaths = null, excludePaths = null, preferRecent = false, pathFilter = null,
 } = {}) {
   const weights = query instanceof Map ? query : new Map([...new Set(tokenize(query))].map((t) => [t, 1]));
   if (!weights.size) return [];
@@ -209,7 +209,7 @@ export async function search(query, {
     }
   });
   // A path filter can discard most top hits, so look deeper when one is set.
-  const depth = onlyPaths || pathPrefix ? 2000 : Math.max(60, k * 8);
+  const depth = onlyPaths || pathPrefix || pathFilter ? 2000 : Math.max(60, k * 8);
   const cands = [...scores].sort((a, b) => b[1] - a[1]).slice(0, depth);
   const cs = t.objectStore('chunks');
   const recs = await Promise.all(cands.map(([id]) => reqP(cs.get(id))));
@@ -228,6 +228,7 @@ export async function search(query, {
     if (pathPrefix && !c.path.startsWith(pathPrefix)) return;
     if (onlyPaths && !onlyPaths.has(c.path)) return;
     if (excludePaths && excludePaths.has(c.path)) return;
+    if (pathFilter && !pathFilter(c.path)) return;
     let score = cands[i][1];
     const lp = c.path.toLowerCase();
     if (boosts.some((b) => lp.startsWith(b + '/') || lp === b)) score *= 1.6;

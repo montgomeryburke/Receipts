@@ -9,13 +9,15 @@ import { search, indexSummary, RECENCY_WORDS } from './lib/index.js';
 import { getRootHandle, permissionState } from './lib/fsutil.js';
 import { processEmail, regenerate, decideRequest, runItemAction, applyFolderResults, teachSource, listItems, summarize } from './lib/assistant.js';
 import { pollFolderResponses } from './lib/automate.js';
-import { listModels, hasKey, activeModel, spentToday, stopAllAI, resumeAI } from './lib/llm.js';
+import { listModels, listLocalModels, hasKey, activeModel, spentToday, spendReport, stopAllAI, resumeAI, pickGeminiFlash, generateText } from './lib/llm.js';
 import { canCrossCheck, crossCheckMode } from './lib/crosscheck.js';
 import { projectFolders } from './lib/folders.js';
 import { nasClient, configProblem, writeTextFile } from './lib/nas.js';
 import { sendChat, chatHistory, clearChat, runPendingTest } from './lib/chat.js';
 import { listChanges, undoChange } from './lib/memory.js';
 import { CONFIG, loadConfig } from './lib/config-store.js';
+import { indexEmail } from './lib/mailindex.js';
+import { invoiceReport, saveInvoiceReport, priorityList, setDone, addOwnTask } from './lib/todo.js';
 
 const ui = (type, data) => chrome.runtime.sendMessage({ to: 'ui', type, ...data }).catch(() => {});
 const bg = (type, data) => chrome.runtime.sendMessage({ to: 'bg', type, ...data }).catch(() => {});
@@ -233,6 +235,7 @@ async function status() {
     ai: {
       paused: !!settings.aiPaused,
       spentToday: await spentToday(),
+      spend: await spendReport(),
       dailyBudgetUsd: Number(settings.dailyBudgetUsd) || 0,
       crossCheck: canCrossCheck(settings),
       crossCheckMode: crossCheckMode(settings),
@@ -300,16 +303,41 @@ const handlers = {
   'item.reprocess': async (m) => {
     const item = (await getAll('items')).find((i) => i.id === m.id);
     if (!item) return { error: 'not found' };
-    queue.push({ email: { ...item, body: item.bodyClean }, force: true });
+    queue.push({ email: { ...item, body: item.bodyRaw || item.bodyClean }, force: true });
     drain();
     return { queued: true };
   },
   'item.decide': async (m) => decideRequest(m.id, m.key, m.approve, { params: m.params, onChange: onItem }),
   'item.action': async (m) => runItemAction(m.id, m.action, m.params || {}, { onChange: onItem }),
   'item.teach': async (m) => teachSource(m.id, m.path, m.kind, { onChange: onItem }),
+  // To do: the priority list and the invoice summary.
+  'todo.priorities': async () => priorityList(),
+  'todo.last': async () => (await kvGet('priorities:last')) || null,
+  'todo.done': async (m) => setDone(m.id, !!m.done),
+  'todo.addTask': async (m) => addOwnTask(m.text, m.due || ''),
+  'todo.invoices': async (m) => {
+    const rep = await invoiceReport(m.month);
+    if (rep.invoices.length) {
+      rep.savedTo = await saveInvoiceReport(rep).catch((err) => `not saved (${err.message})`);
+      await kvSet(`invoices:${rep.month}`, rep);
+    }
+    return rep;
+  },
+  // "Index these emails" in Outlook on the web: one email at a time, no AI.
+  'mail.index': async (m) => indexEmail(m.email),
   'llm.models': async (m) => {
     const settings = { ...(await getSettings()), ...(m.override || {}) };
-    return { models: await listModels(settings, m.provider || settings.provider) };
+    const provider = m.provider || settings.provider;
+    if (provider === 'local') return { models: await listLocalModels(settings), auto: '' };
+    const models = await listModels(settings, provider);
+    return { models, auto: provider === 'gemini' ? pickGeminiFlash(models) || '' : '' };
+  },
+  // Settings → "Test web search": one small search with the chosen model.
+  'llm.webtest': async (m) => {
+    const settings = await getSettings();
+    const provider = m.provider || settings.provider;
+    const r = await generateText(settings, { provider, web: true, effort: 'low', maxTokens: 300, system: 'Answer in one short sentence.', prompt: 'Search the web: what is the latest stable version of Google Chrome?' });
+    return { model: r.model, sources: r.sources.length, text: r.text.trim().slice(0, 140) };
   },
   'chat.send': async (m) => doChat(m.text || ''),
   'chat.stop': async () => {

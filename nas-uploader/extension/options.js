@@ -5,6 +5,8 @@ import { splitList } from './lib/text.js';
 import { projectFolders } from './lib/folders.js';
 import { listInstructions, addInstruction, removeInstruction } from './lib/memory.js';
 import { CONFIG, loadConfig, forgetSavedConfig } from './lib/config-store.js';
+import { modelChoices, fillModelSelect } from './lib/models.js';
+import { suggestKeywords } from './lib/projects.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -28,7 +30,7 @@ function flashSaved() {
 
 // ---------------------------------------------------------------- simple fields
 
-const NUMERIC = new Set(['snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'meetingMinGapSec', 'dailyBudgetUsd']);
+const NUMERIC = new Set(['snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'meetingMinGapSec', 'dailyBudgetUsd', 'maxThreadChars']);
 const NULLABLE = new Set(['priceInPerM', 'priceOutPerM']);
 
 function readField(el) {
@@ -59,12 +61,68 @@ function queueSave(el) {
     const patch = { ...pending };
     for (const k of Object.keys(pending)) delete pending[k];
     settings = await saveSettings(patch);
+    // The same setting can appear in two sections (e.g. Background tasks and Meetings): keep them in step.
+    for (const k of Object.keys(patch)) {
+      document.querySelectorAll(`[data-key="${k}"]`).forEach((other) => {
+        if (other === document.activeElement || other.type === 'radio') return;
+        if (other.type === 'checkbox') other.checked = !!settings[k];
+        else other.value = settings[k] ?? '';
+      });
+    }
     flashSaved();
   }, 300);
 }
 
 document.addEventListener('input', (e) => { if (e.target.dataset?.key) queueSave(e.target); });
 document.addEventListener('change', (e) => { if (e.target.dataset?.key) queueSave(e.target); });
+
+// ---------------------------------------------------------------- the local model on the HP
+
+function renderLocalFor() {
+  const lf = settings.localFor || {};
+  document.querySelectorAll('[data-local-for]').forEach((b) => { b.checked = !!lf[b.dataset.localFor]; });
+}
+document.querySelectorAll('[data-local-for]').forEach((b) => b.addEventListener('change', async () => {
+  settings = await saveSettings({ localFor: { ...(settings.localFor || {}), [b.dataset.localFor]: b.checked } });
+  flashSaved();
+}));
+$('localTest').addEventListener('click', async () => {
+  await new Promise((r) => setTimeout(r, 350));
+  $('localOut').textContent = 'Connecting…';
+  const res = await engine('llm.models', { provider: 'local' }).catch((err) => ({ error: err.message }));
+  if (res?.error) { $('localOut').innerHTML = `<span class="err">${esc(res.error)}</span>`; return; }
+  $('localModels').innerHTML = (res.models || []).map((m) => `<option value="${esc(m)}"></option>`).join('');
+  $('localOut').textContent = `Connected · models: ${(res.models || []).join(', ') || 'none listed'}`;
+});
+
+// ---------------------------------------------------------------- background tasks & cost
+
+const FEATURE = { email: 'Email drafts', check: 'Second checks', meeting: 'Meeting prompts & answers', research: 'Meeting research', minutes: 'Minutes', lookup: 'Web look-ups', transcription: 'Gemini transcription', chat: 'Chat', agent: 'Browser agent', invoices: 'Invoice summaries', priorities: 'Priority lists', other: 'Other' };
+const usd = (n) => (n < 0.01 && n > 0 ? `$${n.toFixed(4)}` : `$${(n || 0).toFixed(2)}`);
+
+async function renderSpend() {
+  let st = null;
+  try { st = await engine('status'); } catch { /* engine starting */ }
+  const sp = st?.ai?.spend;
+  if (!sp) { $('spendBox').textContent = ''; return; }
+  const rows = Object.entries(sp.byFeature || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td>${esc(FEATURE[k] || k)}</td><td>${usd(v)}</td></tr>`).join('');
+  $('spendBox').innerHTML = `<b>Spent (estimated from token counts):</b> today ${usd(sp.today)} · this month ${usd(sp.month)}${rows ? `<table class="jobs"><tbody>${rows}</tbody></table>` : ' · nothing yet this month'}`;
+}
+
+const PRESETS = {
+  saver: { processOnOpen: false, autoScan: false, emailEffort: 'low', refinePass: false, crossCheck: false, crossCheckRevise: false, dualLookUp: false, meetingPrompts: 'manual', meetingWebLookup: false, meetingSummary: true, meetingStt: 'whisper', effort: 'low' },
+  balanced: { processOnOpen: true, autoScan: false, emailEffort: 'medium', refinePass: true, crossCheck: true, crossCheckRevise: true, dualLookUp: false, meetingPrompts: 'auto', meetingWebLookup: true, meetingSummary: true, meetingStt: 'whisper', effort: 'low' },
+  best: { processOnOpen: true, autoScan: true, emailEffort: 'high', refinePass: true, crossCheck: true, crossCheckRevise: true, dualLookUp: true, meetingPrompts: 'auto', meetingWebLookup: true, meetingSummary: true, effort: 'medium' },
+};
+document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', async () => {
+  const patch = { ...PRESETS[b.dataset.preset] };
+  if (b.dataset.preset === 'best') patch.meetingStt = settings.geminiKey ? 'both' : 'whisper';
+  settings = await saveSettings(patch);
+  fillFields();
+  $('presetOut').textContent = `${b.textContent.trim()} applied.`;
+  flashSaved();
+  renderAccuracy();
+}));
 
 // ---------------------------------------------------------------- accuracy & safety
 
@@ -103,17 +161,95 @@ document.querySelectorAll('[data-reveal]').forEach((b) => b.addEventListener('cl
   b.textContent = inp.type === 'password' ? 'Show' : 'Hide';
 }));
 
+// ---------------------------------------------------------------- project emails (people and keywords)
+
+async function renderProjectMail() {
+  const { kvGet } = await import('./lib/db.js');
+  const projects = (await kvGet('projects')) || [];
+  const rules = settings.projectMail || {};
+  $('projectMailList').innerHTML = projects.length ? projects.map((p) => `<div class="pm-row" data-project="${esc(p)}">
+      <b title="${esc(p)}">${esc(p.split('/').pop())}</b>
+      <label class="field"><span>People</span><input type="text" data-pm="people" value="${esc(rules[p]?.people || '')}" placeholder="Dana Lee, pm@arcticfresh.ca, @client.ca"></label>
+      <label class="field"><span>Keywords</span><input type="text" data-pm="keywords" value="${esc(rules[p]?.keywords || '')}" placeholder="${esc(suggestKeywords(p) || 'project number, name, site')}"></label>
+    </div>`).join('') : '<p class="small muted">No projects yet: they appear once a project folder is mirrored and indexed.</p>';
+}
+
+$('projectMailList').addEventListener('change', async (e) => {
+  const inp = e.target.closest('[data-pm]');
+  const row = e.target.closest('[data-project]');
+  if (!inp || !row) return;
+  const rules = { ...(settings.projectMail || {}) };
+  rules[row.dataset.project] = { ...(rules[row.dataset.project] || {}), [inp.dataset.pm]: inp.value.trim() };
+  settings = await saveSettings({ projectMail: rules });
+  flashSaved();
+});
+
+// ---------------------------------------------------------------- model pickers
+
+const MODEL_KEY = { anthropic: 'anthropicModel', gemini: 'geminiModel' };
+const DEFAULT_MODELS = { anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], gemini: [] };
+const modelLists = {};
+
+/** Fills a provider's model picker from the models its key can use (or a short default list without a key). */
+async function renderModelPicker(provider, { reload = false } = {}) {
+  const s = settings || (await getSettings());
+  const sel = $(`model-${provider}`);
+  let list = modelLists[provider];
+  if ((!list || reload) && s[provider === 'gemini' ? 'geminiKey' : 'anthropicKey']) {
+    const res = await engine('llm.models', { provider }).catch((err) => ({ error: err.message }));
+    if (!res?.error) list = modelLists[provider] = { models: res.models || [], auto: res.auto || '' };
+    else if (reload) throw new Error(res.error);
+  }
+  const choices = modelChoices(provider, list?.models?.length ? list.models : DEFAULT_MODELS[provider], { autoModel: list?.auto });
+  fillModelSelect(sel, choices, s[MODEL_KEY[provider]]);
+  $(`model-other-${provider}`).hidden = sel.value !== '__other';
+  return list;
+}
+
+document.querySelectorAll('[data-model]').forEach((sel) => sel.addEventListener('change', async () => {
+  const provider = sel.dataset.model;
+  const other = $(`model-other-${provider}`);
+  if (sel.value === '__other') {
+    other.hidden = false;
+    other.focus();
+    return;
+  }
+  other.hidden = true;
+  settings = await saveSettings({ [MODEL_KEY[provider]]: sel.value });
+  flashSaved();
+}));
+document.querySelectorAll('[data-model-other]').forEach((inp) => inp.addEventListener('change', async () => {
+  const provider = inp.dataset.modelOther;
+  const v = inp.value.trim().replace(/^models\//, '');
+  if (!v) return;
+  settings = await saveSettings({ [MODEL_KEY[provider]]: v });
+  flashSaved();
+  await renderModelPicker(provider);
+}));
+
 document.querySelectorAll('[data-test]').forEach((b) => b.addEventListener('click', async () => {
   const provider = b.dataset.test;
   const out = document.querySelector(`[data-testout="${provider}"]`);
   await new Promise((r) => setTimeout(r, 350)); // let a just-typed key save
+  settings = await getSettings();
   out.textContent = 'Testing…';
-  const res = await engine('llm.models', { provider });
-  if (res?.error) { out.innerHTML = `<span class="err">${esc(res.error)}</span>`; return; }
-  const models = res.models || [];
-  out.textContent = `Key works · ${models.length} models`;
-  const dl = $(provider === 'gemini' ? 'geminiModels' : 'anthropicModels');
-  dl.innerHTML = models.map((m) => `<option value="${esc(m)}"></option>`).join('');
+  try {
+    const list = await renderModelPicker(provider, { reload: true });
+    out.textContent = `Key works · ${list?.models?.length || 0} models — pick one above.`;
+  } catch (err) {
+    out.innerHTML = `<span class="err">${esc(err.message)}</span>`;
+  }
+}));
+
+// One tiny search, so you can see whether web look-ups work with this key and model.
+document.querySelectorAll('[data-webtest]').forEach((b) => b.addEventListener('click', async () => {
+  const provider = b.dataset.webtest;
+  const out = document.querySelector(`[data-testout="${provider}"]`);
+  out.textContent = 'Searching the web…';
+  const res = await engine('llm.webtest', { provider }).catch((err) => ({ error: err.message }));
+  out.innerHTML = res?.error
+    ? `<span class="err">Web search failed: ${esc(res.error)}</span>`
+    : `✓ Web search works with ${esc(res.model)}: ${res.sources} source${res.sources === 1 ? '' : 's'} found (“${esc(res.text)}”).`;
 }));
 
 // ---------------------------------------------------------------- folders
@@ -491,6 +627,11 @@ $('importSetup').addEventListener('click', () => {
   renderRules();
   renderInstructions();
   renderAccuracy();
+  renderSpend();
+  renderLocalFor();
+  renderModelPicker('anthropic');
+  renderProjectMail();
+  renderModelPicker('gemini');
   $('nasFolders').value = (settings.nasFolders || []).join('\n');
   if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
 })();

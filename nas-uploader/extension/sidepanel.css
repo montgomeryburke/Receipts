@@ -46,6 +46,11 @@ textarea.draft { min-height: 160px; font-size: 13px; line-height: 1.5; }
 .dreq { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin: 4px 0; font-size: 12px; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .usage { margin-top: 8px; font-size: 11px; color: var(--muted); }
+.prio { display: flex; gap: 8px; align-items: flex-start; padding: 5px 2px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.prio.done b { text-decoration: line-through; color: var(--muted); }
+.inv { width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0; }
+.inv th, .inv td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.inv tr.overdue td { background: var(--bad-bg); }
 .check { border-radius: var(--radius); padding: 6px 8px; margin: 0 0 6px; }
 .check.ok { background: var(--ok-bg); }
 .check.fixed { background: var(--info-bg); }

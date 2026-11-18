@@ -125,6 +125,118 @@ export function cleanEmailBody(body, maxChars = 6000) {
   return text;
 }
 
+// ---- the whole email chain ----
+
+const HEADER_KEYS = {
+  from: /^\s*\*?(from|de)\s*\*?\s*:\s*(.*)$/i,
+  date: /^\s*\*?(sent|date|envoy[ée]|re[çc]u)\s*\*?\s*:\s*(.*)$/i,
+  to: /^\s*\*?(to|[àa])\s*\*?\s*:\s*(.*)$/i,
+  cc: /^\s*\*?cc\s*\*?\s*:\s*(.*)$/i,
+  subject: /^\s*\*?(subject|objet)\s*\*?\s*:\s*(.*)$/i,
+};
+const WROTE = /^\s*(?:On|Le)\s+(.{6,240}?)\s+(?:wrote|a écrit)\s?:\s*$/i;
+// "Fri, Nov 6, 2026 at 4:00 PM Arctic Fresh <pm@x.ca>" → date up to the time, then the sender.
+const WHEN_WHO = /^(.*?\d{1,2}[:h]\d{2}(?:\s*[AaPp]\.?\s?[Mm]\.?)?)\s*,?\s*(.+)$/;
+
+/** Lines of a quoted message without "> " prefixes, signatures' disclaimers and extra blank lines. */
+function cleanQuoted(text, maxChars) {
+  let t = String(text).split('\n').map((l) => l.replace(/^\s*(>\s?)+/, '')).join('\n');
+  const d = DISCLAIMER.exec(t);
+  if (d && d.index > 40) t = t.slice(0, d.index);
+  t = t.replace(/[ \t]+/g, ' ').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return t.length > maxChars ? `${t.slice(0, maxChars)}\n[…shortened]` : t;
+}
+
+/**
+ * Splits an email (as read from Outlook or copied from it) into the newest message and the earlier messages
+ * quoted below it, newest first: {latest, earlier: [{from, date, to, subject, text}]}. Works with Outlook's
+ * "From: … Sent: …" blocks (English and French), "-----Original Message-----" and "On … wrote:" quotes.
+ */
+export function splitThread(body, { perMessage = 2500 } = {}) {
+  const text = String(body || '').replace(/\r\n?/g, '\n').replace(/ /g, ' ');
+  const starts = [];
+  for (const re of QUOTE_MARKERS) for (const m of text.matchAll(new RegExp(re.source, 'gim'))) if (m.index > 20) starts.push(m.index);
+  starts.sort((a, b) => a - b);
+  const cuts = starts.filter((x, i) => i === 0 || x - starts[i - 1] > 4);
+  const latest = cuts.length ? text.slice(0, cuts[0]) : text;
+  const earlier = [];
+  cuts.forEach((start, i) => {
+    const seg = text.slice(start, cuts[i + 1] ?? text.length);
+    const lines = seg.split('\n');
+    const msg = { from: '', date: '', to: '', subject: '' };
+    let k = 0;
+    // The header block: an optional "Original Message" / underline line, then From/Sent/To/Cc/Subject lines.
+    if (/^\s*(-{2,}\s*Original Message|_{10,})/i.test(lines[0])) k = 1;
+    const wrote = WROTE.exec(lines[k] || '');
+    if (wrote) {
+      const inner = wrote[1].trim();
+      const ww = WHEN_WHO.exec(inner);
+      const c = inner.lastIndexOf(',');
+      msg.date = (ww ? ww[1] : c > 0 ? inner.slice(0, c) : '').trim();
+      msg.from = (ww ? ww[2] : c > 0 ? inner.slice(c + 1) : inner).trim();
+      k += 1;
+    } else {
+      for (let n = 0; k < lines.length && n < 10; k++, n++) {
+        const line = lines[k];
+        if (!line.trim()) {
+          if (msg.from) {
+            k++;
+            break;
+          }
+          continue;
+        }
+        const hit = Object.entries(HEADER_KEYS).find(([, re]) => re.test(line));
+        if (!hit) break;
+        const [key, re] = hit;
+        const m = re.exec(line);
+        msg[key] = (m[2] ?? m[1] ?? '').trim();
+      }
+    }
+    const t = cleanQuoted(lines.slice(k).join('\n'), perMessage);
+    if (t) earlier.push({ ...msg, text: t });
+  });
+  return { latest, earlier };
+}
+
+/**
+ * The earlier messages of this email's thread, newest first and without repeats: the history quoted below the
+ * newest message, plus the other messages Outlook showed in the conversation (each with its own quoted history).
+ */
+export function threadOf(email, settings = {}) {
+  const budget = settings.maxThreadChars || 12000;
+  const seen = new Set();
+  const all = [];
+  const key = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 200);
+  const add = (m) => {
+    const k = key(m.text);
+    if (k.length < 8 || seen.has(k)) return;
+    seen.add(k);
+    all.push(m);
+  };
+  for (const m of splitThread(email.body).earlier) add(m);
+  for (const t of email.conversation || []) {
+    add({ from: t.from || '', date: t.date || '', to: '', subject: '', text: cleanEmailBody(t.body, 2500) });
+    for (const q of splitThread(t.body).earlier) add(q);
+  }
+  // Newest first when the dates can be read; otherwise the order they were found in (already newest first).
+  const when = (m) => Date.parse(String(m.date).replace(/\bat\b/i, '')) || NaN;
+  if (all.length > 1 && all.every((m) => !Number.isNaN(when(m)))) all.sort((a, b) => when(b) - when(a));
+  const out = [];
+  let used = 0;
+  for (const m of all) {
+    if (used >= budget) break;
+    const text = used + m.text.length > budget ? `${m.text.slice(0, Math.max(300, budget - used))}…` : m.text;
+    out.push({ ...m, text });
+    used += text.length;
+  }
+  return out;
+}
+
+export function emailId(email) {
+  if (email.id) return String(email.id);
+  return 'm' + hashString(`${email.from}|${email.subject}|${email.receivedAt}|${String(email.body || '').slice(0, 300)}`);
+}
+
 export function splitList(s) {
   return String(s || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
 }

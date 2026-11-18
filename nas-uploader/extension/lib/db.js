@@ -113,7 +113,17 @@ export const DEFAULT_SETTINGS = {
   geminiBaseUrl: 'https://generativelanguage.googleapis.com',
   snippetCount: 8,
   snippetCharBudget: 7000,
-  maxEmailChars: 6000,
+  maxEmailChars: 6000,                // the newest message
+  maxThreadChars: 12000,              // the earlier messages of its thread (newest first)
+  projectMail: {},
+  // Your own model on the HP (e.g. Ollama in the "llm" container), reached through the NAS address
+  // (setup-webdav.sh --llm-url) with the NAS login, or directly at home. Free: used for the jobs ticked here.
+  localUrl: '',                       // e.g. https://nas.example.ts.net/.llm/
+  localModel: '',                     // e.g. qwen2.5:7b
+  localAuth: 'nas',                   // 'nas' = send the NAS login | 'key' = localKey as a bearer token | 'none'
+  localKey: '',
+  localFor: { priorities: true, invoices: false, check: true },                    // {[project]: {people, keywords}} — what files an email under a project
+  emailEffort: 'medium',              // thinking effort for email drafts (complete, professional replies)
   refinePass: true,                   // one extra local search + call when info is missing
   priceInPerM: null,                  // override estimated price, USD per 1M input tokens
   priceOutPerM: null,

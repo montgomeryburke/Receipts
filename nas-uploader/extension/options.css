@@ -20,3 +20,11 @@ code { font-family: var(--mono); font-size: 12px; background: var(--surface-2); 
   .grid2, .grid3 { grid-template-columns: 1fr; }
   .folder-row { grid-template-columns: 1fr; }
 }
+
+.jobs { width: 100%; border-collapse: collapse; font-size: 13px; }
+.jobs th, .jobs td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.jobs th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.jobs td:last-child { white-space: nowrap; }
+.spend table { margin-top: 4px; max-width: 420px; }
+.pm-row { display: grid; grid-template-columns: minmax(120px, 1fr) 2fr 2fr; gap: 8px; align-items: end; }
+@media (max-width: 700px) { .pm-row { grid-template-columns: 1fr; } }

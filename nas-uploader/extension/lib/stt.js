@@ -231,7 +231,7 @@ export class Transcriber extends EventTarget {
     };
     let data;
     try {
-      data = await geminiRequest(this.settings, this.model, body);
+      data = await geminiRequest({ ...this.settings, _tag: 'transcription' }, this.model, body);
     } catch (err) {
       if (!noThinking && thinking.thinkingConfig && err.kind === 'bad-request' && /thinking/i.test(err.message)) return this.gemini(samples, true);
       err.message = `Gemini transcription: ${err.message}`;

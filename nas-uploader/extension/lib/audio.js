@@ -12,15 +12,22 @@ export async function createAudioContext() {
 /** Keep only the audio of a screen/tab share. Throws a friendly error if the share has no sound. */
 function audioOnly(stream, howToFix) {
   const audio = stream.getAudioTracks();
+  const surface = stream.getVideoTracks()[0]?.getSettings?.().displaySurface || '';
   for (const v of stream.getVideoTracks()) v.stop(); // we only listen; nothing is recorded from the screen
   if (!audio.length) {
     for (const t of stream.getTracks()) t.stop();
-    const err = new Error(`That share has no sound. ${howToFix}`);
+    // Say which mistake it was: a window has no sound option; a screen needs the box ticked.
+    const why = surface === 'window' ? 'A single window can\'t share its sound. ' : surface === 'monitor' ? '"Also share system audio" wasn\'t ticked. ' : '';
+    const err = new Error(`That share has no sound. ${why}${howToFix}`);
     err.code = 'no-audio';
     throw err;
   }
   return new MediaStream(audio);
 }
+
+// The meeting's own sound, untouched: echo cancellation, noise suppression and automatic gain are for
+// microphones and can thin out or cut what Teams plays.
+const RAW_AUDIO = { suppressLocalAudioPlayback: false, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 
 /**
  * Teams desktop app (Windows): Chrome can only hear other programs through a screen share with
@@ -29,8 +36,9 @@ function audioOnly(stream, howToFix) {
 export async function captureTeamsApp() {
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: { displaySurface: 'monitor' },
-    audio: { suppressLocalAudioPlayback: false },
+    audio: RAW_AUDIO,
     systemAudio: 'include',
+    windowAudio: 'system', // where Chrome supports it, a window share may carry the computer's sound too
     monitorTypeSurfaces: 'include',
     selfBrowserSurface: 'exclude',
     surfaceSwitching: 'exclude',
@@ -42,7 +50,7 @@ export async function captureTeamsApp() {
 export async function captureTeamsTab() {
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: { displaySurface: 'browser' },
-    audio: { suppressLocalAudioPlayback: false },
+    audio: RAW_AUDIO,
     preferCurrentTab: false,
     selfBrowserSurface: 'exclude',
     surfaceSwitching: 'include',

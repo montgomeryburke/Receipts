@@ -65,6 +65,8 @@ export const EDITABLE = {
   agentAskSite: [BOOL, "Browser agent asks before going to a site the task didn't name (off: a web page could steer it elsewhere)"],
   agentAskUpload: [BOOL, 'Browser agent asks before putting files into an upload on a web page'],
   agentAskOverwrite: [BOOL, 'Browser agent asks before replacing a file on the NAS'],
+  emailEffort: [STR, "Thinking effort for email drafts: 'low' (cheapest), 'medium' (default: complete, careful replies) or 'high'", { enum: ['low', 'medium', 'high'] }],
+  maxThreadChars: [INT, 'How much of the earlier messages in an email thread the drafter reads (characters)', { min: 2000, max: 60000 }],
   dailyBudgetUsd: [INT, 'Stop all AI calls for the day once this many dollars are spent (0 = no limit)', { min: 0, max: 1000 }],
   meetingPrompts: [STR, "Meeting prompts: 'auto' = when a question or new topic comes up; 'manual' = only when the user clicks Ask now; 'off'", { enum: ['auto', 'manual', 'off'] }],
   meetingProvider: [STR, "Which AI writes meeting prompts ('' = same as provider)", { enum: ['', 'anthropic', 'gemini'] }],
@@ -379,6 +381,29 @@ function makeTools(ctx) {
       },
     },
     {
+      name: 'set_project_people_keywords',
+      description: 'Who and what identifies a project in emails: people (names, email addresses or @domains) and keywords (project number, name, site, client). Emails from or to those people, or mentioning those words, are filed under that project and used for its drafts. Replaces the lists given.',
+      input_schema: obj({
+        project: { type: 'string', description: 'the project (its folder name or path, as get_status lists it)' },
+        people: { type: 'string', description: 'comma-separated; omit to keep' },
+        keywords: { type: 'string', description: 'comma-separated; omit to keep' },
+      }, ['project']),
+      run: async ({ project, people, keywords }) => {
+        const all = (await kvGet('projects')) || [];
+        const p = all.find((x) => x === project) || all.find((x) => x.split('/').pop().toLowerCase() === String(project).toLowerCase()) || all.find((x) => x.toLowerCase().includes(String(project).toLowerCase()));
+        if (!p) return { error: `no project called "${project}"`, projects: all.map((x) => x.split('/').pop()) };
+        const s = await getSettings();
+        const rules = { ...(s.projectMail || {}) };
+        const cur = { ...(rules[p] || {}) };
+        if (people != null) cur.people = String(people);
+        if (keywords != null) cur.keywords = String(keywords);
+        rules[p] = cur;
+        await saveSettings({ projectMail: rules });
+        await change(`Project ${p.split('/').pop()}: people “${cur.people || ''}”, keywords “${cur.keywords || ''}”`, { settings: { projectMail: s.projectMail || {} } }, 'set_project_people_keywords');
+        return { ok: true, project: p, ...cur, note: 'New emails are filed with these. Emails indexed before keep their project until they are indexed again.' };
+      },
+    },
+    {
       name: 'reindex',
       description: 'Re-read the project folders now (only changed files are read).',
       input_schema: obj({}),
@@ -571,7 +596,7 @@ export async function sendChat(text, { onUpdate = () => {}, signal } = {}) {
     const history = [...t0.filter((m) => m.text), userMsg].map((m) => ({ role: m.role, text: m.text.length > 3000 ? `${m.text.slice(0, 3000)}…` : m.text }));
     // The API wants the conversation to start with the user.
     while (history.length && history[0].role !== 'user') history.shift();
-    const res = await runChat(settings, {
+    const res = await runChat({ ...settings, _tag: 'chat' }, {
       provider,
       system: await systemPrompt(settings),
       history,

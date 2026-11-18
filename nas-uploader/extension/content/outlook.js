@@ -111,6 +111,22 @@
     return pick ? pick.textContent.trim() : '';
   }
 
+  // Outlook hides the quoted history behind "…" and folds older messages of a conversation. Opening them (view
+  // only, nothing is sent or changed) lets the assistant read the whole chain.
+  const EXPAND_RE = /^(show|see) (the )?(message )?history$|^show (more|original message|trimmed content|quoted text|full message)\b|^see more$|^expand (all|conversation)\b|^show all messages|^afficher l.historique|^afficher (plus|le message d.origine|tous les messages)|^voir plus|^développer/i;
+  function expandHistory(pane = readingPane()) {
+    let n = 0;
+    for (const el of qa('button, [role="button"]', pane)) {
+      if (!visible(el) || el.dataset.paExpanded) continue;
+      const label = (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '').trim();
+      if (!label || label.length > 60 || !EXPAND_RE.test(label)) continue;
+      el.dataset.paExpanded = '1';
+      el.click();
+      n++;
+    }
+    return n;
+  }
+
   function readOpenEmail() {
     const pane = readingPane();
     const bodies = messageBodies(pane);
@@ -124,7 +140,13 @@
     if (!text) return null;
     const subject = subjectOf(pane, body) || (li?.getAttribute('aria-label') || '').slice(0, 120);
     const convId = li?.getAttribute('data-convid') || '';
+    // The other messages of the conversation shown in the reading pane (older ones), with their senders.
+    const conversation = bodies.slice(1, 16).map((b) => {
+      const c = messageContainer(b);
+      return { from: senderOf(c), date: dateOf(c), body: (b.innerText || '').trim() };
+    }).filter((c) => c.body);
     return {
+      conversation,
       id: itemIdFromUrl() || '',
       convId,
       subject,
@@ -180,7 +202,8 @@
     const key = email.id || `${email.convId}|${email.subject}|${email.body.slice(0, 120)}`;
     if (auto && key === lastKey) return null;
     lastKey = key;
-    // Let Outlook finish rendering (images, expanding) before reading for real.
+    // Open the hidden history, then let Outlook finish rendering before reading for real.
+    if (expandHistory()) await sleep(700);
     await sleep(500);
     const again = readOpenEmail();
     const final = again && again.body.length >= email.body.length ? again : email;
@@ -252,6 +275,7 @@
         }, 8000);
         seen.add(id);
         if (opened) {
+          if (expandHistory()) await sleep(700);
           await sleep(600);
           const email = readOpenEmail() || opened;
           email.convId = email.convId || id;
@@ -266,6 +290,59 @@
       await saveSeen(seen);
     }
     return n;
+  }
+
+  // ---------------- "Index these emails" ----------------
+  // Opens each email listed (a folder, or Outlook's own search results), reads its whole chain and adds it to the
+  // project index. Scrolls the list to load more. No AI and no drafts.
+
+  const ui = (type, data) => chrome.runtime.sendMessage({ to: 'ui', type, ...data }).catch(() => {});
+
+  async function indexListed(max) {
+    busy = true;
+    const done = new Set();
+    let indexed = 0;
+    let failed = 0;
+    try {
+      for (let round = 0; round < 60 && done.size < max; round++) {
+        const todo = qa('[role="option"][data-convid]').filter(visible).filter((li) => !done.has(li.getAttribute('data-convid')));
+        if (!todo.length) {
+          // Load more: scroll the message list, then look again.
+          const list = qa('[role="listbox"]').find(visible) || qa('[role="option"][data-convid]')[0]?.parentElement;
+          const before = list?.scrollTop;
+          if (list) list.scrollTop += list.clientHeight || 600;
+          await sleep(900);
+          if (!list || list.scrollTop === before) break;
+          continue;
+        }
+        for (const li of todo) {
+          if (done.size >= max) break;
+          const id = li.getAttribute('data-convid');
+          done.add(id);
+          const before = readOpenEmail();
+          li.click();
+          const opened = await waitFor(() => {
+            const sel = selectedListItem();
+            const e = readOpenEmail();
+            return sel && sel.getAttribute('data-convid') === id && e && (!before || e.body !== before.body || e.subject !== before.subject) ? e : null;
+          }, 8000);
+          if (opened) {
+            if (expandHistory()) await sleep(700);
+            await sleep(300);
+            const email = readOpenEmail() || opened;
+            email.convId = email.convId || id;
+            const r = await engine({ type: 'mail.index', email });
+            if (r?.error) failed++;
+            else indexed++;
+          } else failed++;
+          ui('mailIndexProgress', { done: done.size, indexed, failed });
+          await sleep(250);
+        }
+      }
+    } finally {
+      busy = false;
+      ui('mailIndexDone', { indexed, failed, seen: done.size });
+    }
   }
 
   // ---------------- inserting drafts ----------------
@@ -344,6 +421,20 @@
     if (msg.type === 'getOpenEmail') {
       captureOpen(false).then((email) => sendResponse(email ? { email } : { error: 'No open message found in the reading pane.' }));
       return true;
+    }
+    if (msg.type === 'indexListed') {
+      if (busy) {
+        sendResponse({ error: 'Busy with another email — try again in a moment.' });
+        return false;
+      }
+      const listed = qa('[role="option"][data-convid]').filter(visible).length;
+      if (!listed) {
+        sendResponse({ error: 'No emails are listed. Open a folder or search Outlook first (for example for the project number).' });
+        return false;
+      }
+      indexListed(msg.max || 300);
+      sendResponse({ started: true, listed });
+      return false;
     }
     if (msg.type === 'insertDraft') {
       insertDraft(msg.text, msg.convId).then(sendResponse).catch((err) => sendResponse({ ok: false, error: err.message }));
