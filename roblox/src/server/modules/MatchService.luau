@@ -536,6 +536,26 @@ end
 	Only the tests use this: kills are deliberately ignored outside a round,
 	so without it a test would have to wait out the real loop to score one.
 ]]
+--[[
+	Shout about a landed trick.
+
+	Tricks come out of VehicleService, which has no idea the HUD exists, so
+	the announcement is wired up here where the kill feed and the medals
+	already live.
+]]
+VehicleService.TrickLanded.Connect(function(player: Player, name: string, points: number, airtime: number)
+	Remotes.Event("Medal"):FireClient(player, `{name}  +{points}`)
+	Remotes.Event("PlaySound"):FireClient(player, "Medal")
+
+	local team = player.Team
+	if team then
+		Remotes.Event("KillFeed"):FireAllClients(
+			`{player.DisplayName} landed a {name} ({string.format("%.1f", airtime)}s air)`,
+			false
+		)
+	end
+end)
+
 function MatchService.ForceRoundForTests()
 	phase = "Playing"
 	phaseEndsAt = os.clock() + Config.Match.RoundDuration

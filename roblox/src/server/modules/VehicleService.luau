@@ -62,6 +62,14 @@ local VehicleService = {}
 ]]
 VehicleService.Wrecked = Signal.new()
 
+--[[
+	A trick was landed: (player, name, points, airtime).
+
+	Announced so the HUD and the match feed can shout about it without this
+	module needing to know either of them exists.
+]]
+VehicleService.TrickLanded = Signal.new()
+
 local WHEEL_DIAMETER = 7
 local WHEEL_WIDTH = 4
 local CHASSIS_HEIGHT = 4
@@ -1009,6 +1017,194 @@ function VehicleService.SpawnGlider(position: Vector3): Model
 	return model
 end
 
+--[[
+	Skis.
+
+	These cannot be a seat. A Roblox seat puts the character into a sitting
+	pose and there is no way round that, and the whole point of the ski run
+	is that you come down it standing up, shooting at people. So the rider is
+	welded to the board instead with PlatformStand set, which holds them
+	upright and stops the walk controller fighting the slope.
+
+	The upshot is that skiing is a shooting posture. Guns, grenades, the
+	mega-detonate key -- all of it works on the way down, which is the rule
+	for every sport on this map.
+]]
+local SKI_SLOPE_SPEED = 185
+local SKI_CARVE_RATE = 2.3
+
+function VehicleService.SpawnSkis(position: Vector3): Model
+	local model = Instance.new("Model")
+	model.Name = "Skis"
+
+	-- The board: invisible, and the thing everything else is welded to. Two
+	-- visible skis sit on top of it.
+	local board = Util.Part({
+		Name = "Chassis",
+		Size = Vector3.new(4.5, 0.6, 13),
+		CFrame = CFrame.new(position),
+		Transparency = 1,
+		Anchored = false,
+		-- Slippery and light, so it carries speed down snow.
+		CustomPhysicalProperties = PhysicalProperties.new(0.2, 0.04, 0.3, 1, 1),
+		Parent = model,
+	})
+	model.PrimaryPart = board
+
+	for _, side in { -1, 1 } do
+		local ski = Util.Part({
+			Name = "Ski",
+			Size = Vector3.new(1.3, 0.4, 13),
+			CFrame = CFrame.new(position + Vector3.new(side * 1.5, 0, 0)),
+			Color = if side < 0 then Color3.fromRGB(240, 70, 60) else Color3.fromRGB(255, 200, 50),
+			Material = Enum.Material.SmoothPlastic,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		-- The turned-up tip, which is most of what makes it read as a ski.
+		local tip = Util.Part({
+			Name = "SkiTip",
+			Size = Vector3.new(1.3, 0.4, 2.2),
+			CFrame = CFrame.new(position + Vector3.new(side * 1.5, 0.45, -7))
+				* CFrame.Angles(math.rad(-24), 0, 0),
+			Color = ski.Color,
+			Material = Enum.Material.SmoothPlastic,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, ski)
+		Util.Weld(board, tip)
+	end
+
+	-- Steering, and something to hold the board the right way up so it does
+	-- not simply topple over the first time it is nudged.
+	local turn = Instance.new("AngularVelocity")
+	turn.Name = "TurnVelocity"
+	turn.Attachment0 = Util.Attachment(board, Vector3.new())
+	turn.RelativeTo = Enum.ActuatorRelativeTo.World
+	turn.MaxTorque = 160000
+	turn.AngularVelocity = Vector3.new()
+	turn.Enabled = true
+	turn.Parent = board
+
+	local upright = Instance.new("AlignOrientation")
+	upright.Name = "Upright"
+	upright.Attachment0 = Util.Attachment(board, Vector3.new(), "UprightAnchor")
+	upright.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	-- NOT rigid: a rigid board cannot be tipped, and tipping it is how you
+	-- do a trick.
+	upright.MaxTorque = 42000
+	upright.Responsiveness = 22
+	upright.CFrame = board.CFrame.Rotation
+	upright.Enabled = true
+	upright.Parent = board
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "SkiPrompt"
+	prompt.ActionText = "Grab the skis"
+	prompt.ObjectText = "Skis"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 16
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = board
+
+	prompt.Triggered:Connect(function(player)
+		VehicleService.MountSkis(player, model)
+	end)
+
+	addVehicleLabel(board, "Skis", Color3.fromRGB(255, 230, 140))
+
+	model:SetAttribute("Health", 30)
+	model:SetAttribute("MaxHealth", 30)
+	model:SetAttribute("VehicleKind", "Skis")
+	model.Parent = workspace
+
+	active[model] = {
+		kind = "Skis",
+		chassis = board,
+		turn = turn,
+		upright = upright,
+		rider = nil,
+		-- Trick bookkeeping, filled in by the drive loop.
+		airborneSince = nil,
+		spin = 0,
+		lastFacing = nil,
+	}
+	return model
+end
+
+--[[ Strap a player onto a pair of skis. ]]
+function VehicleService.MountSkis(player: Player, model: Model)
+	local state = active[model]
+	if not state or state.rider then
+		return
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
+		return
+	end
+	-- Not while sitting in something else.
+	if humanoid.SeatPart then
+		return
+	end
+
+	local board = state.chassis :: BasePart
+	root.CFrame = board.CFrame * CFrame.new(0, 3.2, 0)
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "SkiWeld"
+	weld.Part0 = board
+	weld.Part1 = root
+	weld.Parent = board
+
+	-- Upright, and the walk controller out of the way.
+	humanoid.PlatformStand = true
+
+	state.rider = player
+	local playerState = PlayerState.Get(player)
+	-- Reusing the vehicle slot on purpose: everything that already knows
+	-- about "the thing you are riding" -- the eject key, the aim reference,
+	-- the mounted-weapon rules -- then works for skis with no special cases.
+	playerState.vehicle = model
+	playerState.seatRole = "Skier"
+	PlayerState.Changed.Fire(player)
+end
+
+--[[ Let go of the skis. Harmless if the player is not on any. ]]
+function VehicleService.DismountSkis(player: Player)
+	for model, state in active do
+		if state.kind == "Skis" and state.rider == player then
+			local board = state.chassis :: BasePart
+			local weld = board:FindFirstChild("SkiWeld")
+			if weld then
+				weld:Destroy()
+			end
+
+			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				humanoid.PlatformStand = false
+			end
+
+			state.rider = nil
+			local playerState = PlayerState.Get(player)
+			if playerState.vehicle == model then
+				playerState.vehicle = nil
+				playerState.seatRole = nil
+				PlayerState.Changed.Fire(player)
+			end
+			return true
+		end
+	end
+	return false
+end
+
 function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 	if kind == "TurretTruck" then
 		return VehicleService.SpawnTurretTruck(position)
@@ -1022,6 +1218,8 @@ function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 		return VehicleService.SpawnTube(position)
 	elseif kind == "Glider" then
 		return VehicleService.SpawnGlider(position)
+	elseif kind == "Skis" then
+		return VehicleService.SpawnSkis(position)
 	end
 	return nil
 end
@@ -1231,6 +1429,10 @@ end
 	Steering only points you. Nothing here fights gravity, so the tube still
 	falls off a cliff like an object rather than hovering like a vehicle.
 ]]
+-- Declared ahead of driveTube, which uses it: the trick scorer itself needs
+-- Util.AngleBetween and PlayerState, so it is defined further down.
+local stepTricks: (Model, any, Player?, boolean, number) -> ()
+
 local TUBE_FLOW_SPEED = 46
 local TUBE_SLOPE_SPEED = 118
 
@@ -1291,6 +1493,13 @@ local function driveTube(model: Model, state: any, deltaTime: number)
 		-- Eased, so it accelerates into the current instead of snapping.
 		hub.AssemblyLinearVelocity = current + Vector3.new(wanted.X, 0, wanted.Z) * math.min(1, deltaTime * 3.2)
 	end
+
+	-- Tricks off the table tops count on a tube too.
+	local rider = if seat.Occupant and seat.Occupant.Parent
+		then Players:GetPlayerFromCharacter(seat.Occupant.Parent)
+		else nil
+	local grounded = workspace:Raycast(hub.Position, Vector3.new(0, -6, 0), params) ~= nil
+	stepTricks(model, state, rider, grounded, deltaTime)
 end
 
 --[[
@@ -1356,6 +1565,179 @@ local function driveGlider(model: Model, state: any, deltaTime: number)
 	-- Always sinking a little, so a glide is a glide and not a hover.
 	local sink = -GLIDE_SINK * (1 - math.clamp(state.airspeed / GLIDE_MAX_SPEED, 0, 1) * 0.55)
 	lift.VectorVelocity = look * state.airspeed + Vector3.new(0, sink, 0)
+end
+
+--[[
+	Tricks, SSX-style.
+
+	What counts as a trick is measured rather than declared: the server
+	watches how long you were off the ground and how far the board turned
+	while you were up there, and pays out on the landing. Nothing is reported
+	by the client, so there is nothing to lie about -- a trick you did not do
+	cannot be claimed, and a trick you did cannot be denied.
+
+	Rotation is accumulated per frame from the board's own facing, so a slow
+	720 and a fast 720 score the same, which is as it should be.
+]]
+local TRICK_MIN_AIRTIME = 0.45
+local TRICK_SPIN_POINTS = 0.55 -- per degree turned
+local TRICK_AIR_POINTS = 26 -- per second airborne
+
+local TRICK_NAMES = {
+	{ spin = 1080, name = "TRIPLE CORK" },
+	{ spin = 720, name = "DOUBLE SPIN" },
+	{ spin = 480, name = "BIG SPIN" },
+	{ spin = 270, name = "SEVEN-TWENTY" },
+	{ spin = 160, name = "SPINNER" },
+	{ spin = 0, name = "BIG AIR" },
+}
+
+local function trickName(spin: number): string
+	for _, entry in TRICK_NAMES do
+		if spin >= entry.spin then
+			return entry.name
+		end
+	end
+	return "BIG AIR"
+end
+
+--[[
+	Watch a ride for airtime and spin, and pay out when it lands.
+
+	Shared by skis and tubes, because the brief was tricks off the table tops
+	and you can take either down the run.
+]]
+function stepTricks(model, state, rider, grounded, deltaTime)
+	local board = state.chassis :: BasePart
+	local facing = board.CFrame.LookVector
+	local flat = Vector3.new(facing.X, 0, facing.Z)
+
+	if state.lastFacing and flat.Magnitude > 0.01 then
+		state.spin = (state.spin or 0) + Util.AngleBetween(state.lastFacing, flat.Unit)
+	end
+	state.lastFacing = if flat.Magnitude > 0.01 then flat.Unit else state.lastFacing
+
+	if not grounded then
+		if not state.airborneSince then
+			state.airborneSince = os.clock()
+			state.spin = 0
+		end
+		return
+	end
+
+	local launched = state.airborneSince
+	state.airborneSince = nil
+	if not launched or not rider then
+		state.spin = 0
+		return
+	end
+
+	local airtime = os.clock() - launched
+	state.spin = state.spin or 0
+	if airtime < TRICK_MIN_AIRTIME then
+		-- A bump in the piste is not a trick.
+		state.spin = 0
+		return
+	end
+
+	-- Taken into a local BEFORE the reset. Reading state.spin after zeroing
+	-- it meant every trick, however far it turned, came out named "BIG AIR"
+	-- while being paid for the spin -- the score was right and the shout was
+	-- wrong, which is the kind of thing nobody notices for months.
+	local spun = state.spin
+	state.spin = 0
+
+	local points = math.floor(airtime * TRICK_AIR_POINTS + spun * TRICK_SPIN_POINTS)
+	if points <= 0 then
+		return
+	end
+
+	local awarded = PlayerState.AwardPoints(rider, points)
+	VehicleService.TrickLanded.Fire(rider, trickName(spun), awarded, airtime)
+
+	local _ = deltaTime
+end
+
+--[[
+	Ski down a mountain.
+
+	Same idea as the tube -- gravity does the work, the slope decides how
+	much -- but faster, and it carves: steering turns the board, and the
+	board's own facing is what you accelerate along, so you can traverse
+	across a slope instead of only straight down it.
+]]
+local function driveSkis(model: Model, state: any, deltaTime: number)
+	local board = state.chassis :: BasePart
+	local turn = state.turn :: AngularVelocity
+	local upright = state.upright :: AlignOrientation
+	local rider = state.rider :: Player?
+
+	-- Nobody aboard: let it lie still rather than skidding off on its own.
+	if not rider or not rider.Parent then
+		if rider then
+			VehicleService.DismountSkis(rider)
+		end
+		turn.AngularVelocity = Vector3.new()
+		return
+	end
+
+	local character = rider.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		VehicleService.DismountSkis(rider)
+		return
+	end
+
+	-- Steering comes off the move keys. There is no seat, so the inputs
+	-- arrive as the humanoid's own walk direction.
+	local steer = 0
+	local wish = humanoid.MoveDirection
+	if wish.Magnitude > 0.1 then
+		local across = Vector3.new(-board.CFrame.LookVector.Z, 0, board.CFrame.LookVector.X)
+		steer = math.clamp(wish:Dot(across) * 1.6, -1, 1)
+	end
+	turn.AngularVelocity = Vector3.new(0, -steer * SKI_CARVE_RATE, 0)
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = if character then { model, character } else { model }
+
+	local ground = workspace:Raycast(board.Position, Vector3.new(0, -6, 0), params)
+	local grounded = ground ~= nil
+
+	if ground and ground.Material == Enum.Material.Snow then
+		local normal = ground.Normal
+		local downhill = Vector3.new(normal.X, 0, normal.Z)
+		if downhill.Magnitude > 0.02 then
+			-- Accelerate along the board's own facing, biased downhill, so
+			-- carving across the fall line actually works.
+			local steepness = downhill.Magnitude
+			local heading = board.CFrame.LookVector
+			local flatHeading = Vector3.new(heading.X, 0, heading.Z)
+			local blend = if flatHeading.Magnitude > 0.01
+				then (flatHeading.Unit * 0.55 + downhill.Unit * 0.45).Unit
+				else downhill.Unit
+
+			local target = blend * (steepness * SKI_SLOPE_SPEED)
+			local current = board.AssemblyLinearVelocity
+			local wanted = target - Vector3.new(current.X, 0, current.Z)
+			board.AssemblyLinearVelocity = current
+				+ Vector3.new(wanted.X, 0, wanted.Z) * math.min(1, deltaTime * 2.6)
+		end
+	end
+
+	-- Hold the board level when it is on the ground, and let it tumble
+	-- freely in the air so a trick looks like a trick.
+	upright.Enabled = grounded
+	if grounded then
+		local heading = board.CFrame.LookVector
+		local flatHeading = Vector3.new(heading.X, 0, heading.Z)
+		if flatHeading.Magnitude > 0.01 then
+			upright.CFrame = CFrame.lookAt(Vector3.new(), flatHeading.Unit)
+		end
+	end
+
+	stepTricks(model, state, rider, grounded, deltaTime)
 end
 
 local function drivePlane(model: Model, state: any, deltaTime: number)
@@ -1530,7 +1912,14 @@ function VehicleService.Eject(player: Player)
 	if not humanoid or not root or not root:IsA("BasePart") then
 		return
 	end
+	--[[
+		Skis are not a seat, so the bail key has to know about them
+		separately -- and PlatformStand means you cannot simply jump off.
+	]]
 	if not humanoid.SeatPart then
+		if VehicleService.DismountSkis(player) then
+			return
+		end
 		return
 	end
 	-- Already under a canopy, or already on the way to one.
@@ -1730,6 +2119,8 @@ local function step(deltaTime: number)
 			driveTube(model, state, deltaTime)
 		elseif state.kind == "Glider" then
 			driveGlider(model, state, deltaTime)
+		elseif state.kind == "Skis" then
+			driveSkis(model, state, deltaTime)
 		else
 			driveWheeled(model, state, deltaTime)
 		end

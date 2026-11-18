@@ -1057,11 +1057,12 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		table.insert(vehiclePads, { position = at, kind = "Tube" })
 	end
 	for index, at in resort.skiPads do
-		-- A glider beside the skis at the summit; the lower station gets one
-		-- too, so being shot down is not the end of flying for the round.
+		-- Skis at the summit, and a glider beside them. The lower lift
+		-- station gets a glider too, so being shot down is not the end of
+		-- flying for the whole round.
 		table.insert(vehiclePads, {
 			position = at + Vector3.new(0, 2, 0),
-			kind = if index == 1 then "Glider" else "Tube",
+			kind = if index == 2 then "Glider" else "Skis",
 		})
 	end
 
