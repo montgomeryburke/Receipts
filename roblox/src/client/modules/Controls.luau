@@ -406,6 +406,17 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
+	if input.KeyCode == Enum.KeyCode.G then
+		-- The grenade key. Throws where you are aiming without changing what
+		-- is in your hands, the way Halo's did.
+		local _, direction = currentAimDirection()
+		if direction then
+			Remotes.Event("ThrowGrenade"):FireServer(direction)
+			Feel.Kick(1.2)
+		end
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.Tab then
 		-- Held, not toggled. Ask for fresh numbers at the moment it opens,
 		-- rather than streaming a scoreboard to everyone continuously.
@@ -446,6 +457,17 @@ local function onInputBegan(input: InputObject, processed: boolean)
 end
 
 local function onInputEnded(input: InputObject)
+	if input.KeyCode == Enum.KeyCode.G then
+		-- The grenade key. Throws where you are aiming without changing what
+		-- is in your hands, the way Halo's did.
+		local _, direction = currentAimDirection()
+		if direction then
+			Remotes.Event("ThrowGrenade"):FireServer(direction)
+			Feel.Kick(1.2)
+		end
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.Tab then
 		Hud.ShowScoreboard(false)
 		return

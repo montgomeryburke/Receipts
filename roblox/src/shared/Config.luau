@@ -548,6 +548,14 @@ Config.CivilianLines = {
 	Deliberately short-sighted, the way Halo's was: far enough that nobody
 	walks up behind you, short enough that it never replaces looking.
 ]]
+--[[
+	What the dedicated grenade key throws.
+
+	Halo had a grenade button separate from the weapon in your hands, so you
+	could throw one mid-fight without giving up your rifle for it.
+]]
+Config.GrenadeKeyWeapon = "Grenade"
+
 Config.Radar = {
 	Range = 170,
 	-- Contacts further above or below than this are off the dial entirely.
@@ -886,6 +894,7 @@ export type ConfigType = {
 		PoopInterval: number, PoopLifetime: number, PoopPerPile: number,
 		MaxPoopPiles: number, SplatDuration: number,
 	},
+	GrenadeKeyWeapon: string,
 	Radar: {
 		Range: number,
 		VerticalRange: number,

@@ -588,6 +588,14 @@ Config.CivilianLines = {
 	Deliberately short-sighted, the way Halo's was: far enough that nobody
 	walks up behind you, short enough that it never replaces looking.
 ]]
+--[[
+	What the dedicated grenade key throws.
+
+	Halo had a grenade button separate from the weapon in your hands, so you
+	could throw one mid-fight without giving up your rifle for it.
+]]
+Config.GrenadeKeyWeapon = "Grenade"
+
 Config.Radar = {
 	Range = 170,
 	-- Contacts further above or below than this are off the dial entirely.
@@ -926,6 +934,7 @@ export type ConfigType = {
 		PoopInterval: number, PoopLifetime: number, PoopPerPile: number,
 		MaxPoopPiles: number, SplatDuration: number,
 	},
+	GrenadeKeyWeapon: string,
 	Radar: {
 		Range: number,
 		VerticalRange: number,
@@ -1028,6 +1037,7 @@ local EVENT_NAMES = {
 	-- The scoreboard is pulled, not pushed: streaming everyone's score to
 	-- everyone continuously costs bandwidth all match for a panel that is on
 	-- screen a few seconds at a time.
+	"ThrowGrenade",
 	"RequestScoreboard",
 	"Scoreboard",
 }
@@ -7835,7 +7845,15 @@ end
 	The trigger. Everything the client asked for is treated as a request, not
 	an instruction — the checks below are what actually decide.
 ]]
-local function handleFire(player: Player, requestedDirection: any)
+--[[
+	Fire one named weapon.
+
+	Split out from the fire handler so the dedicated grenade key can throw a
+	grenade without the player having to switch weapons for it -- which is
+	how Halo's grenade button worked, and the reason you could throw one
+	mid-fight without giving up your rifle.
+]]
+local function fireWeapon(player: Player, weaponName: string, requestedDirection: any)
 	if typeof(requestedDirection) ~= "Vector3" then
 		return
 	end
@@ -7849,7 +7867,6 @@ local function handleFire(player: Player, requestedDirection: any)
 		return
 	end
 
-	local weaponName = equippedWeaponName(player)
 	local spec = Config.Weapons[weaponName]
 	if not spec then
 		return
@@ -7934,6 +7951,39 @@ local function handleFire(player: Player, requestedDirection: any)
 end
 
 --[[ Swap guns. In free mode every gun in the config is yours from the start. ]]
+local function handleFire(player: Player, requestedDirection: any)
+	fireWeapon(player, equippedWeaponName(player), requestedDirection)
+end
+
+--[[
+	The dedicated grenade key.
+
+	Throws without changing what is in your hands, and shares the grenade's
+	own cooldown with the slot, so holding the key cannot out-throw equipping
+	the grenade and spamming fire.
+]]
+local function handleThrowGrenade(player: Player, requestedDirection: any)
+	local weaponName = Config.GrenadeKeyWeapon
+
+	-- A dedicated key has to work whatever is in your loadout. Picking up a
+	-- weapon can take the grenade's slot, and a grenade button that silently
+	-- stops working is worse than not having one.
+	local state = PlayerState.Get(player)
+	if not state.weapons[weaponName] then
+		local spec = Config.Weapons[weaponName]
+		if not spec then
+			return
+		end
+		state.weapons[weaponName] = {
+			ammo = spec.MagSize,
+			reloadingUntil = 0,
+			nextFireAt = 0,
+		}
+	end
+
+	fireWeapon(player, weaponName, requestedDirection)
+end
+
 local function handleEquip(player: Player, weaponName: any)
 	if typeof(weaponName) ~= "string" then
 		return
@@ -8079,6 +8129,10 @@ function WeaponService.Start()
 		handleFire(player, direction)
 	end)
 
+	Remotes.Event("ThrowGrenade").OnServerEvent:Connect(function(player, direction)
+		handleThrowGrenade(player, direction)
+	end)
+
 	Remotes.Event("EquipWeapon").OnServerEvent:Connect(function(player, weaponName)
 		handleEquip(player, weaponName)
 	end)
@@ -8138,6 +8192,11 @@ function WeaponService.Start()
 end
 
 --[[ Unused for now, but kept so the origin check has a home when we tighten it. ]]
+--[[ What a player currently has in their hands, for tests. ]]
+function WeaponService.EquippedForTests(player: Player): string
+	return equippedWeaponName(player)
+end
+
 function WeaponService.MaxOriginDrift(): number
 	return MAX_ORIGIN_DRIFT
 end
@@ -9681,6 +9740,17 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
+	if input.KeyCode == Enum.KeyCode.G then
+		-- The grenade key. Throws where you are aiming without changing what
+		-- is in your hands, the way Halo's did.
+		local _, direction = currentAimDirection()
+		if direction then
+			Remotes.Event("ThrowGrenade"):FireServer(direction)
+			Feel.Kick(1.2)
+		end
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.Tab then
 		-- Held, not toggled. Ask for fresh numbers at the moment it opens,
 		-- rather than streaming a scoreboard to everyone continuously.
@@ -9721,6 +9791,17 @@ local function onInputBegan(input: InputObject, processed: boolean)
 end
 
 local function onInputEnded(input: InputObject)
+	if input.KeyCode == Enum.KeyCode.G then
+		-- The grenade key. Throws where you are aiming without changing what
+		-- is in your hands, the way Halo's did.
+		local _, direction = currentAimDirection()
+		if direction then
+			Remotes.Event("ThrowGrenade"):FireServer(direction)
+			Feel.Kick(1.2)
+		end
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.Tab then
 		Hud.ShowScoreboard(false)
 		return
@@ -10210,6 +10291,8 @@ local scoreLabel: TextLabel
 local crosshair: Frame
 local votePanel: Frame
 local deathOverlay: Frame
+local respawnLabel: TextLabel? = nil
+local respawnToken = 0
 local wienerOverlay: TextLabel
 local toastHolder: Frame
 
@@ -10407,6 +10490,19 @@ function Hud.Build()
 		TextSize = 64,
 		Font = Enum.Font.LuckiestGuy,
 		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 21,
+	})
+
+	-- The countdown. A death screen with no clock on it leaves you guessing
+	-- whether the game has stopped responding, and the guess is always that
+	-- it has.
+	respawnLabel = makeLabel(deathOverlay, {
+		Size = UDim2.fromScale(1, 0.2),
+		Position = UDim2.fromScale(0, 0.58),
+		Text = "",
+		TextSize = 34,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(255, 230, 180),
 		ZIndex = 21,
 	})
 
@@ -10902,6 +10998,28 @@ function Hud.ShowDeath(duration: number, killerName: string?)
 	deathOverlay.Visible = true
 	deathOverlay.BackgroundTransparency = 1
 	TweenService:Create(deathOverlay, TweenInfo.new(0.25), { BackgroundTransparency = 0.25 }):Play()
+
+	-- Count it down, a tenth of a second at a time. The token guards against
+	-- dying again before the last countdown finished, which would otherwise
+	-- leave two of them fighting over the same label.
+	respawnToken += 1
+	local token = respawnToken
+	task.spawn(function()
+		local endsAt = os.clock() + duration
+		while respawnToken == token do
+			local left = endsAt - os.clock()
+			if left <= 0 then
+				break
+			end
+			if respawnLabel then
+				respawnLabel.Text = string.format("RESPAWNING IN %.1f", left)
+			end
+			task.wait(0.1)
+		end
+		if respawnToken == token and respawnLabel then
+			respawnLabel.Text = "GO"
+		end
+	end)
 
 	task.delay(duration, function()
 		local fade = TweenService:Create(deathOverlay, TweenInfo.new(0.4), { BackgroundTransparency = 1 })

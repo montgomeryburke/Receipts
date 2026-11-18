@@ -39,6 +39,7 @@ local EVENT_NAMES = {
 	-- The scoreboard is pulled, not pushed: streaming everyone's score to
 	-- everyone continuously costs bandwidth all match for a panel that is on
 	-- screen a few seconds at a time.
+	"ThrowGrenade",
 	"RequestScoreboard",
 	"Scoreboard",
 }

@@ -174,6 +174,39 @@ for _, child in shooterChar:GetChildren() do
 end
 check("only ever one weapon held", heldCount == 1, string.format("%d models", heldCount))
 
+-- ------------------------------------------------------- the grenade key
+-- Halo's grenade button threw without changing what was in your hands, and
+-- that is the whole point of it: you can throw one mid-fight and still have
+-- your rifle. So the key must throw, must NOT change the equipped weapon,
+-- and must keep working even when the grenade is not in the loadout at all.
+DUMP("")
+DUMP("The dedicated grenade key:")
+do
+	local grenadeRemote = Remotes.Event("ThrowGrenade")
+	check("ThrowGrenade has a server listener", grenadeRemote._props.OnServerEvent ~= nil, "")
+
+	local heldBefore = WeaponService.EquippedForTests(shooter)
+	local projectilesBefore = liveProjectiles()
+	grenadeRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0.4, -1))
+	RUN_SPAWNED()
+
+	check("the key throws something", liveProjectiles() > projectilesBefore,
+		string.format("%d in flight, was %d", liveProjectiles(), projectilesBefore))
+	check("it does not change what you are holding",
+		WeaponService.EquippedForTests(shooter) == heldBefore,
+		string.format("%s, was %s", WeaponService.EquippedForTests(shooter), heldBefore))
+
+	-- Now take the grenade out of the loadout entirely, the way a weapon
+	-- pickup can. The key has to carry on working.
+	local state = PlayerState.Get(shooter)
+	state.weapons[Config.GrenadeKeyWeapon] = nil
+	local without = liveProjectiles()
+	grenadeRemote._props.OnServerEvent._fire(shooter, Vector3.new(0, 0.4, -1))
+	RUN_SPAWNED()
+	check("it still works with no grenade in the loadout", liveProjectiles() > without,
+		string.format("%d in flight, was %d", liveProjectiles(), without))
+end
+
 -- ------------------------------------------------------------------ melee
 DUMP("")
 DUMP("Melee and turbo remotes:")

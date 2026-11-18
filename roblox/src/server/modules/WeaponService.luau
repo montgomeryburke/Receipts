@@ -379,7 +379,15 @@ end
 	The trigger. Everything the client asked for is treated as a request, not
 	an instruction — the checks below are what actually decide.
 ]]
-local function handleFire(player: Player, requestedDirection: any)
+--[[
+	Fire one named weapon.
+
+	Split out from the fire handler so the dedicated grenade key can throw a
+	grenade without the player having to switch weapons for it -- which is
+	how Halo's grenade button worked, and the reason you could throw one
+	mid-fight without giving up your rifle.
+]]
+local function fireWeapon(player: Player, weaponName: string, requestedDirection: any)
 	if typeof(requestedDirection) ~= "Vector3" then
 		return
 	end
@@ -393,7 +401,6 @@ local function handleFire(player: Player, requestedDirection: any)
 		return
 	end
 
-	local weaponName = equippedWeaponName(player)
 	local spec = Config.Weapons[weaponName]
 	if not spec then
 		return
@@ -478,6 +485,39 @@ local function handleFire(player: Player, requestedDirection: any)
 end
 
 --[[ Swap guns. In free mode every gun in the config is yours from the start. ]]
+local function handleFire(player: Player, requestedDirection: any)
+	fireWeapon(player, equippedWeaponName(player), requestedDirection)
+end
+
+--[[
+	The dedicated grenade key.
+
+	Throws without changing what is in your hands, and shares the grenade's
+	own cooldown with the slot, so holding the key cannot out-throw equipping
+	the grenade and spamming fire.
+]]
+local function handleThrowGrenade(player: Player, requestedDirection: any)
+	local weaponName = Config.GrenadeKeyWeapon
+
+	-- A dedicated key has to work whatever is in your loadout. Picking up a
+	-- weapon can take the grenade's slot, and a grenade button that silently
+	-- stops working is worse than not having one.
+	local state = PlayerState.Get(player)
+	if not state.weapons[weaponName] then
+		local spec = Config.Weapons[weaponName]
+		if not spec then
+			return
+		end
+		state.weapons[weaponName] = {
+			ammo = spec.MagSize,
+			reloadingUntil = 0,
+			nextFireAt = 0,
+		}
+	end
+
+	fireWeapon(player, weaponName, requestedDirection)
+end
+
 local function handleEquip(player: Player, weaponName: any)
 	if typeof(weaponName) ~= "string" then
 		return
@@ -623,6 +663,10 @@ function WeaponService.Start()
 		handleFire(player, direction)
 	end)
 
+	Remotes.Event("ThrowGrenade").OnServerEvent:Connect(function(player, direction)
+		handleThrowGrenade(player, direction)
+	end)
+
 	Remotes.Event("EquipWeapon").OnServerEvent:Connect(function(player, weaponName)
 		handleEquip(player, weaponName)
 	end)
@@ -682,6 +726,11 @@ function WeaponService.Start()
 end
 
 --[[ Unused for now, but kept so the origin check has a home when we tighten it. ]]
+--[[ What a player currently has in their hands, for tests. ]]
+function WeaponService.EquippedForTests(player: Player): string
+	return equippedWeaponName(player)
+end
+
 function WeaponService.MaxOriginDrift(): number
 	return MAX_ORIGIN_DRIFT
 end

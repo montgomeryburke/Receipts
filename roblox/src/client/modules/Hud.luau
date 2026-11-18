@@ -52,6 +52,8 @@ local scoreLabel: TextLabel
 local crosshair: Frame
 local votePanel: Frame
 local deathOverlay: Frame
+local respawnLabel: TextLabel? = nil
+local respawnToken = 0
 local wienerOverlay: TextLabel
 local toastHolder: Frame
 
@@ -249,6 +251,19 @@ function Hud.Build()
 		TextSize = 64,
 		Font = Enum.Font.LuckiestGuy,
 		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 21,
+	})
+
+	-- The countdown. A death screen with no clock on it leaves you guessing
+	-- whether the game has stopped responding, and the guess is always that
+	-- it has.
+	respawnLabel = makeLabel(deathOverlay, {
+		Size = UDim2.fromScale(1, 0.2),
+		Position = UDim2.fromScale(0, 0.58),
+		Text = "",
+		TextSize = 34,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(255, 230, 180),
 		ZIndex = 21,
 	})
 
@@ -744,6 +759,28 @@ function Hud.ShowDeath(duration: number, killerName: string?)
 	deathOverlay.Visible = true
 	deathOverlay.BackgroundTransparency = 1
 	TweenService:Create(deathOverlay, TweenInfo.new(0.25), { BackgroundTransparency = 0.25 }):Play()
+
+	-- Count it down, a tenth of a second at a time. The token guards against
+	-- dying again before the last countdown finished, which would otherwise
+	-- leave two of them fighting over the same label.
+	respawnToken += 1
+	local token = respawnToken
+	task.spawn(function()
+		local endsAt = os.clock() + duration
+		while respawnToken == token do
+			local left = endsAt - os.clock()
+			if left <= 0 then
+				break
+			end
+			if respawnLabel then
+				respawnLabel.Text = string.format("RESPAWNING IN %.1f", left)
+			end
+			task.wait(0.1)
+		end
+		if respawnToken == token and respawnLabel then
+			respawnLabel.Text = "GO"
+		end
+	end)
 
 	task.delay(duration, function()
 		local fade = TweenService:Create(deathOverlay, TweenInfo.new(0.4), { BackgroundTransparency = 1 })
