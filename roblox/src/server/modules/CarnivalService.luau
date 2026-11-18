@@ -57,12 +57,19 @@ local STRIKER_POINTS = 35
 local lastCannonFirer: Player? = nil
 local nextCannonAt = 0
 
+--[[
+	Score a stall, with the stall's own wording as the reason.
+
+	The toast used to be fired here as well, which now means two toasts for
+	one prize: the single Scored handler in MatchService announces every
+	award. So the message goes in as the REASON instead -- same words on
+	screen, one place deciding how a score is announced.
+]]
 local function award(player: Player?, points: number, message: string)
 	if not player then
 		return
 	end
-	local earned = PlayerState.AwardPoints(player, points)
-	Remotes.Event("Notify"):FireClient(player, `{message} +{earned}`)
+	PlayerState.AwardPoints(player, points, message)
 end
 
 local function sign(parent: Instance, position: Vector3, text: string, colour: Color3)

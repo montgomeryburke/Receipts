@@ -270,7 +270,7 @@ function BotService.RegisterHit(part: BasePart, damage: number, attacker: Player
 	bot.humanoid.Health = 0
 
 	if attacker then
-		PlayerState.AwardPoints(attacker, Config.Bots.Points)
+		PlayerState.AwardPoints(attacker, Config.Bots.Points, "bot down")
 	end
 	BotService.Killed.Fire(bot, attacker)
 

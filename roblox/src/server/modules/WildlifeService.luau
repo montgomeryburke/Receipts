@@ -521,8 +521,8 @@ local function kill(dweller: Dweller, attacker: Player?)
 		else Config.Population.TargetPoints
 
 	if attacker then
-		local earned = PlayerState.AwardPoints(attacker, points)
-		Remotes.Event("Notify"):FireClient(attacker, `+{earned} — {dweller.kind}`)
+		-- The kind is the reason; MatchService announces it.
+		PlayerState.AwardPoints(attacker, points, string.lower(dweller.kind))
 	end
 
 	-- A burst of whatever colour suits.

@@ -392,6 +392,25 @@ local function runIntermission()
 	EffectService.CelebrateWinner(winnerName)
 	fanfare("RoundEnd")
 
+	--[[
+		The MVP, named with what they did it at.
+
+		"Won the round by dominating the minigames" is only a real claim if
+		the game can point at the minigames, so the shout says what they
+		scored most of their points doing -- a round won at the carnival and
+		a round won by shooting people produce the same number and are not
+		the same round.
+	]]
+	local mvpName, mvpPoints, mvpAt = ScoreboardService.Mvp()
+	if mvpName then
+		Remotes.Event("KillFeed"):FireAllClients(
+			if mvpAt
+				then `MVP: {mvpName} — {mvpPoints} pts, mostly {mvpAt}`
+				else `MVP: {mvpName} — {mvpPoints} pts`,
+			false
+		)
+	end
+
 	-- Put the final standings up without anybody having to reach for Tab.
 	-- It is the one moment everyone wants to see them.
 	pcall(ScoreboardService.PushAll)
@@ -446,6 +465,34 @@ function MatchService.Start()
 	pointsByWeapon.Trampled = 15
 	pointsByWeapon.Explosion = 15
 
+	--[[
+		Everything that scores, scoring for the team.
+
+		One subscription instead of a signal per activity. Before this the
+		round was decided by the four things MatchService happened to be
+		wired to -- kills, flag captures, hockey goals, tricks -- so a
+		carnival stall, a bot kill, a won hockey fight and a flag grab all
+		gave personal points that could not win the round. Nobody would ever
+		notice from playing: the number on your own scoreboard went up.
+
+		The point of doing it here rather than in each service is that the
+		next activity added gets this for free. A new minigame that calls
+		AwardPoints is part of the round whether or not whoever wrote it
+		knew this file existed.
+	]]
+	PlayerState.Scored.Connect(function(player: Player, earned: number, reason: string)
+		if phase ~= "Playing" or not player.Parent then
+			return
+		end
+		local teamIndex = TeamService.IndexOf(player)
+		if teamIndex ~= 1 and teamIndex ~= 2 then
+			return
+		end
+		scores[teamIndex] += earned
+		Remotes.Event("Notify"):FireClient(player, `+{earned} — {reason}`)
+		broadcast()
+	end)
+
 	DamageService.Killed.Connect(function(victim: Player, killer: Player?, cause: string)
 		local character = victim.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -462,28 +509,42 @@ function MatchService.Start()
 
 		if killer and killer ~= victim and killer.Parent and phase == "Playing" then
 			local base = pointsByWeapon[cause] or Config.Match.PointsPerKill
-			local earned = PlayerState.AwardPoints(killer, base)
-
-			local teamIndex = TeamService.IndexOf(killer)
-			scores[teamIndex] += earned
-
-			Remotes.Event("Notify"):FireClient(killer, `+{earned} — {cause}`)
+			-- The team score moves in the Scored handler below, which every
+			-- award goes through. Adding it here as well would count a kill
+			-- twice for the round and once for the player.
+			PlayerState.AwardPoints(killer, base, cause)
 			Remotes.Event("PlaySound"):FireClient(killer, "KillConfirm")
 			awardMedals(killer)
-			broadcast()
 		end
 	end)
 
-	FlagService.Captured.Connect(function(_player: Player, teamIndex: number, points: number)
+	--[[
+		A capture already scored through AwardPoints inside FlagService, so
+		this only exists for what the capture SAYS. The sum used to be here
+		too, which meant a capture moved the team score twice.
+	]]
+	FlagService.Captured.Connect(function(_player: Player, _teamIndex: number, _points: number)
 		if phase == "Playing" then
-			scores[teamIndex] += points
 			broadcast()
 		end
 	end)
 
 	HockeyService.Goal.Connect(function(scorer: Player?, teamIndex: number, points: number)
 		if phase == "Playing" then
-			scores[teamIndex] += points
+			--[[
+				An own goal, or a goal nobody can be blamed for, still has
+				to count for the team that benefits.
+
+				A scorer on the right side already scored through
+				AwardPoints, which moves the team total in the Scored
+				handler. With no scorer -- a deflection off a car, a puck
+				that drifted in -- there is nobody to award, so the goal is
+				credited straight to the team here. Without this a goal with
+				no clear scorer was simply not a goal.
+			]]
+			if not (scorer and scorer.Parent and TeamService.IndexOf(scorer) == teamIndex) then
+				scores[teamIndex] += points
+			end
 			broadcast()
 		end
 		if scorer and scorer.Parent then
@@ -597,9 +658,8 @@ VehicleService.TrickLanded.Connect(function(player: Player, name: string, points
 	if not player.Parent then
 		return
 	end
+	-- Scored through AwardPoints in VehicleService; this is the celebration.
 	if phase == "Playing" then
-		local teamIndex = TeamService.IndexOf(player)
-		scores[teamIndex] += points
 		broadcast()
 	end
 	Remotes.Event("Medal"):FireClient(player, `{name}  +{points}`)
@@ -625,6 +685,23 @@ end
 --[[ Which phase the game is in, for anything that needs to care. ]]
 function MatchService.Phase(): string
 	return phase
+end
+
+--[[
+	The team totals, for tests.
+
+	Exposed because the claim worth testing is not "AwardPoints adds up" --
+	it is that scoring at a carnival stall moves the number that ENDS the
+	round. Without a way to read it, the only proof of that would be reading
+	the code and believing it.
+]]
+function MatchService.ScoresForTests(): { number }
+	return { scores[1], scores[2] }
+end
+
+--[[ Force the phase, so the between-rounds guard can be tested at all. ]]
+function MatchService.SetPhaseForTests(next: string)
+	phase = next
 end
 
 return MatchService

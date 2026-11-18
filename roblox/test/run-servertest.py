@@ -122,8 +122,8 @@ check("dying resets the multikill window", #medalsSent() == 0,
 -- A game scored by points is unplayable without one, and it has to survive
 -- the awkward cases: a player with no team, and a request arriving before
 -- anybody has scored anything.
-PlayerState.AwardPoints(killer, 250)
-PlayerState.AwardPoints(prey, 90)
+PlayerState.AwardPoints(killer, 250, "Rifle")
+PlayerState.AwardPoints(prey, 90, "balloon pop")
 
 FIRED = {}
 ScoreboardService.Send(killer)
@@ -150,6 +150,159 @@ if #sent == 1 then
 		check("points reach the panel", found == 2, string.format("%d rows scored", found))
 		check("your own row is marked", marked == 1, string.format("%d marked", marked))
 	end
+end
+
+--[[
+	One award path, and it decides the ROUND.
+
+	Every activity already called AwardPoints for its personal points, but
+	the team score -- the thing that actually ends a round -- was moved by
+	four signals MatchService happened to be wired to: kills, flag captures,
+	hockey goals and tricks. So a carnival stall, a bot kill, a won hockey
+	fight and a flag grab gave you points that could not win the round, and
+	nothing about playing would tell you: the number on your own scoreboard
+	went up exactly as it should.
+
+	These check the inversion: scoring anything at all reaches the team, and
+	it reaches it exactly once.
+]]
+do
+	local told = {}
+	PlayerState.Scored.Connect(function(who, earned, reason)
+		table.insert(told, { who = who, earned = earned, reason = reason })
+	end)
+
+	PlayerState.AwardPoints(killer, 40, "whack-a-mole")
+	RUN_SPAWNED()
+	check("scoring anything announces itself", #told == 1,
+		string.format("%d announcements", #told))
+	if #told == 1 then
+		check("with the reason it was scored for", told[1].reason == "whack-a-mole",
+			tostring(told[1].reason))
+		check("and the amount actually awarded", told[1].earned == 40,
+			tostring(told[1].earned))
+	end
+
+	-- A zero award is not an event. Firing one would put "+0" on screen and
+	-- redraw the scoreboard for nothing.
+	told = {}
+	PlayerState.AwardPoints(killer, 0, "nothing")
+	RUN_SPAWNED()
+	check("scoring nothing announces nothing", #told == 0,
+		string.format("%d announcements", #told))
+end
+
+--[[
+	THE CLAIM: a carnival stall can win a round.
+
+	This is the whole point of unifying the scoring, and it is the one thing
+	that could not be checked before -- the team total was moved by four
+	hand-wired signals, so anything not on that list added to your personal
+	score and nothing else. Reading MatchService and noticing the absence
+	was the only way to find it.
+]]
+do
+	MatchService.ForceRoundForTests()
+	local before = MatchService.ScoresForTests()
+	local mine = TeamService.IndexOf(killer)
+
+	-- Something with no signal of its own, scored through the one path.
+	PlayerState.AwardPoints(killer, 120, "milk bottles")
+	RUN_SPAWNED()
+
+	local after = MatchService.ScoresForTests()
+	check("winning a fairground stall moves the team score",
+		after[mine] == before[mine] + 120,
+		string.format("%d -> %d", before[mine], after[mine]))
+
+	local other = if mine == 1 then 2 else 1
+	check("and only that team's score", after[other] == before[other],
+		string.format("%d -> %d", before[other], after[other]))
+
+	--[[
+		Exactly once.
+
+		A hockey goal both awards the scorer AND fires its own Goal signal.
+		With the team sum in both places a goal counted twice for the round
+		and once for the player, which is the kind of thing that looks like
+		a scoring bug nobody can reproduce.
+	]]
+	local goalBefore = MatchService.ScoresForTests()
+	local points = Config.Hockey.GoalPoints
+	PlayerState.AwardPoints(killer, points, "hockey goal")
+	HockeyService.Goal.Fire(killer, mine, points)
+	RUN_SPAWNED()
+	local goalAfter = MatchService.ScoresForTests()
+	check("a hockey goal counts once, not twice",
+		goalAfter[mine] == goalBefore[mine] + points,
+		string.format("%d -> %d for a %d point goal",
+			goalBefore[mine], goalAfter[mine], points))
+
+	--[[
+		A goal nobody can be credited for still counts.
+
+		With no scorer -- a deflection off a car, a puck that drifted in --
+		there is nobody to award, so it has to be credited to the team
+		directly or it is simply not a goal.
+	]]
+	local ownBefore = MatchService.ScoresForTests()
+	HockeyService.Goal.Fire(nil, mine, points)
+	RUN_SPAWNED()
+	local ownAfter = MatchService.ScoresForTests()
+	check("a goal with no scorer still counts for the team",
+		ownAfter[mine] == ownBefore[mine] + points,
+		string.format("%d -> %d", ownBefore[mine], ownAfter[mine]))
+
+	--[[
+		Nothing scores between rounds.
+
+		Mattering because the scoreboard is pushed to everybody at the
+		whistle and stays up through the intermission: a stall still being
+		shot at while the final standings are on screen must not change
+		them under everyone.
+	]]
+	MatchService.SetPhaseForTests("Intermission")
+	local idleBefore = MatchService.ScoresForTests()
+	PlayerState.AwardPoints(killer, 999, "after the whistle")
+	RUN_SPAWNED()
+	check("scoring between rounds does not count",
+		MatchService.ScoresForTests()[mine] == idleBefore[mine],
+		string.format("%d -> %d", idleBefore[mine], MatchService.ScoresForTests()[mine]))
+	MatchService.SetPhaseForTests("Playing")
+end
+
+--[[
+	The MVP, and what they did it at.
+
+	Nobody is MVP on zero: at the start of a round that would crown whoever
+	happens to sort first, which is worse than crowning nobody.
+]]
+do
+	local name, points, at = ScoreboardService.Mvp()
+	check("the top scorer is the MVP", name == killer._props.DisplayName,
+		string.format("%s with %d", tostring(name), points))
+	check("and it says what they did it at", at ~= nil, tostring(at))
+
+	-- The marker is on exactly one row, and it is that one -- read from the
+	-- same Build the panel uses, so the shout and the row cannot disagree.
+	local rows = ScoreboardService.Build(killer)
+	local marked, markedName = 0, nil
+	for _, row in rows do
+		if row.isMvp then
+			marked += 1
+			markedName = row.name
+		end
+	end
+	check("exactly one row carries the marker", marked == 1,
+		string.format("%d marked", marked))
+	check("and it is the same player the shout names", markedName == name,
+		string.format("%s vs %s", tostring(markedName), tostring(name)))
+
+	-- What somebody scored most of their points doing. prey only ever
+	-- scored at the balloons here.
+	check("the panel knows what each player scored at",
+		ScoreboardService.BestAt(prey) == "balloon pop",
+		tostring(ScoreboardService.BestAt(prey)))
 end
 
 -- The end of a round pushes it to everybody unasked.

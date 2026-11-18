@@ -37,6 +37,15 @@ export type State = {
 	nextMeleeAt: number,
 	-- Points scored this round, and the multiplier ticking down on them.
 	points: number,
+	--[[
+		Points by reason: "hockey goal", "won the fight", "Rifle", a trick
+		name, a carnival stall's own wording.
+
+		This is what lets the end of a round say HOW somebody won it rather
+		than only that they did. "Won the round by dominating minigames" is
+		only a real claim if the game can point at the minigames.
+	]]
+	scoredBy: { [string]: number },
 	multiplierUntil: number,
 	multiplierAmount: number,
 	kills: number,
@@ -50,6 +59,15 @@ local states: { [Player]: State } = {}
 
 --[[ Fired whenever anything changes that the player's screen should show. ]]
 PlayerState.Changed = Signal.new()
+
+--[[
+	Fired as (player, earned, reason) whenever anybody scores anything.
+
+	MatchService listens to this to move the team score, so the round is
+	decided by the same number the player sees on their own scoreboard. One
+	subscriber, one truth.
+]]
+PlayerState.Scored = Signal.new()
 
 local function freshWeapons(): { [string]: WeaponSlotState }
 	local weapons = {}
@@ -91,6 +109,7 @@ function PlayerState.Reset(player: Player, keepProgress: boolean)
 		-- Points, kills and deaths are per ROUND, so they survive a respawn
 		-- but are wiped when a new round deploys everybody fresh.
 		points = if keepProgress and previous then previous.points else 0,
+		scoredBy = if keepProgress and previous then previous.scoredBy else {},
 		multiplierUntil = if keepProgress and previous then previous.multiplierUntil else 0,
 		multiplierAmount = if keepProgress and previous then previous.multiplierAmount else 1,
 		kills = if keepProgress and previous then previous.kills else 0,
@@ -124,6 +143,7 @@ function PlayerState.Get(player: Player): State
 			spawnProtectedUntil = 0,
 			nextMeleeAt = 0,
 			points = 0,
+			scoredBy = {},
 			multiplierUntil = 0,
 			multiplierAmount = 1,
 			kills = 0,
@@ -165,12 +185,38 @@ function PlayerState.PointMultiplier(player: Player): number
 	return 1
 end
 
---[[ Score, with whatever multiplier is running applied. ]]
-function PlayerState.AwardPoints(player: Player, base: number): number
+--[[
+	Score, with whatever multiplier is running applied.
+
+	THIS IS THE ONLY WAY TO SCORE, and the Scored signal is what makes that
+	worth anything. Every activity on the map already called this for its
+	personal points, but the ROUND was decided by four signals MatchService
+	happened to be wired to -- kills, flag captures, hockey goals, tricks.
+	So winning a carnival stall, killing a bot, winning a hockey fight or
+	grabbing a flag gave you points that could never win the round, and the
+	only way to tell was to read MatchService and notice what was missing.
+
+	Inverting it means anything that awards a point moves the team score by
+	construction, including the next activity somebody adds without reading
+	this comment.
+
+	The reason string is not decoration: it is what the kill feed says, what
+	the medal check reads, and the only record of WHY a point was given --
+	which is the thing you want when a score looks wrong.
+]]
+function PlayerState.AwardPoints(player: Player, base: number, reason: string?): number
 	local state = PlayerState.Get(player)
 	local earned = math.floor(base * PlayerState.PointMultiplier(player))
+	if earned == 0 then
+		-- A zero award still fires Changed below in the old code, but there
+		-- is nothing to tell the match about and no reason to redraw.
+		return 0
+	end
+	local why = reason or "scored"
 	state.points += earned
+	state.scoredBy[why] = (state.scoredBy[why] or 0) + earned
 	PlayerState.Changed.Fire(player)
+	PlayerState.Scored.Fire(player, earned, why)
 	return earned
 end
 

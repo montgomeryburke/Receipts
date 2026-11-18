@@ -1416,7 +1416,19 @@ end
 	team game the question is not who is top but which half is winning.
 ]]
 function Hud.SetScoreboard(
-	rows: { { name: string, team: string?, teamColor: Color3?, points: number, kills: number, deaths: number, isYou: boolean? } },
+	rows: {
+		{
+			name: string,
+			team: string?,
+			teamColor: Color3?,
+			points: number,
+			kills: number,
+			deaths: number,
+			isYou: boolean?,
+			isMvp: boolean?,
+			bestAt: string?,
+		}
+	},
 	heading: string?
 )
 	local rowHolder = scoreboardRows
@@ -1454,19 +1466,37 @@ function Hud.SetScoreboard(
 		end
 
 		order += 1
+
+		--[[
+			The MVP's row says what they are doing it at.
+
+			A number alone does not distinguish a round won at the carnival
+			from a round won by shooting people, and those are the two ways
+			this game is meant to be winnable. Only the top row carries it:
+			a reason beside every name would be a column of noise.
+		]]
+		local label = string.sub(tostring(row.name or "Player"), 1, 30)
+		if row.isMvp then
+			local at = if typeof(row.bestAt) == "string" then row.bestAt else nil
+			label = if at
+				then string.sub(`★ {row.name} ({at})`, 1, 30)
+				else string.sub(`★ {row.name}`, 1, 30)
+		end
+
 		local line = makeLabel(rowHolder, {
 			Size = UDim2.new(1, 0, 0, 20),
 			Text = string.format(
 				"%-30s %6d %7d %8d",
-				string.sub(tostring(row.name or "Player"), 1, 30),
+				label,
 				tonumber(row.points) or 0,
 				tonumber(row.kills) or 0,
 				tonumber(row.deaths) or 0
 			),
 			TextSize = 15,
 			Font = Enum.Font.Code, -- monospaced, or the columns do not line up
-			TextColor3 = if row.isYou
-				then Color3.fromRGB(255, 240, 150)
+			TextColor3 = if row.isMvp
+				then Color3.fromRGB(255, 215, 90)
+				elseif row.isYou then Color3.fromRGB(255, 240, 150)
 				else Color3.fromRGB(215, 225, 235),
 			TextXAlignment = Enum.TextXAlignment.Left,
 		})

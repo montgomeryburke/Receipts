@@ -649,7 +649,7 @@ local function checkGoals()
 			local points = Config.Hockey.GoalPoints
 
 			if scorer and TeamService.IndexOf(scorer) == scoringTeam then
-				PlayerState.AwardPoints(scorer, points)
+				PlayerState.AwardPoints(scorer, points, "hockey goal")
 			end
 			HockeyService.Goal.Fire(scorer, scoringTeam, points)
 
@@ -828,7 +828,7 @@ function HockeyService.EndFight(fight: Fight, winner: Player, loser: Player)
 	releaseFighter(winner)
 	releaseFighter(loser)
 
-	PlayerState.AwardPoints(winner, Config.Hockey.FightWinPoints)
+	PlayerState.AwardPoints(winner, Config.Hockey.FightWinPoints, "won the fight")
 
 	-- The loser goes down, then serves time. Not killed -- knocked over and
 	-- benched, which is both funnier and leaves them in the game.

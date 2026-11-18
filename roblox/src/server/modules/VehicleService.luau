@@ -2457,8 +2457,9 @@ function stepTricks(model, state, rider, grounded, deltaTime)
 		return
 	end
 
-	local awarded = PlayerState.AwardPoints(rider, points)
-	VehicleService.TrickLanded.Fire(rider, trickName(spun), awarded, airtime)
+	local name = trickName(spun)
+	local awarded = PlayerState.AwardPoints(rider, points, name)
+	VehicleService.TrickLanded.Fire(rider, name, awarded, airtime)
 
 	local _ = deltaTime
 end

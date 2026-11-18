@@ -226,7 +226,7 @@ local function pickUp(flag: Flag, player: Player)
 	setLabel(flag, "TAKEN")
 	setCarrierSpeed(player, true)
 
-	PlayerState.AwardPoints(player, Config.CTF.FlagTakenPoints)
+	PlayerState.AwardPoints(player, Config.CTF.FlagTakenPoints, "flag taken")
 	Sound.At("FlagTaken", flag.pole.Position)
 	local team = TeamService.Get(flag.teamIndex)
 	announce(`{player.DisplayName} has the {if team then team.Name else ""} flag!`)
@@ -234,7 +234,7 @@ end
 
 --[[ Somebody made it home with the other team's flag. ]]
 local function capture(flag: Flag, player: Player, scorerIndex: number)
-	local earned = PlayerState.AwardPoints(player, Config.CTF.CapturePoints)
+	local earned = PlayerState.AwardPoints(player, Config.CTF.CapturePoints, "flag captured")
 	FlagService.Captured.Fire(player, scorerIndex, earned)
 
 	announce(`{player.DisplayName} CAPTURED THE FLAG! +{earned}`)
@@ -261,7 +261,7 @@ local function onFlagTouched(flag: Flag, player: Player)
 
 	if flag.teamIndex == playerTeam then
 		if flag.state == "Dropped" then
-			PlayerState.AwardPoints(player, Config.CTF.FlagReturnPoints)
+			PlayerState.AwardPoints(player, Config.CTF.FlagReturnPoints, "flag returned")
 			sendHome(flag)
 		end
 		return

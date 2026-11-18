@@ -29,6 +29,10 @@ type Row = {
 	kills: number,
 	deaths: number,
 	isYou: boolean?,
+	-- Top scorer in the server, either side. Exactly one row, or none.
+	isMvp: boolean?,
+	-- The activity they scored most of it doing.
+	bestAt: string?,
 }
 
 --[[
@@ -37,6 +41,29 @@ type Row = {
 	Teams first so the two sides read as two sides, then points within a team,
 	because points are what decides the round.
 ]]
+--[[
+	What this player scored most of their points doing.
+
+	Returned as the activity's own wording -- "hockey goal", "won the
+	fight", a trick name -- because that is the interesting half of a score.
+	A round won at the carnival and a round won by shooting people produce
+	the same number and are not the same round.
+]]
+function ScoreboardService.BestAt(player: Player): string?
+	local state = PlayerState.Get(player)
+	local bestReason: string? = nil
+	local bestPoints = 0
+	for reason, points in state.scoredBy do
+		-- Ties break on the name so the answer is stable between openings
+		-- rather than following table order.
+		if points > bestPoints or (points == bestPoints and bestReason and reason < bestReason) then
+			bestPoints = points
+			bestReason = reason
+		end
+	end
+	return bestReason
+end
+
 function ScoreboardService.Build(viewer: Player?): { Row }
 	local rows: { Row } = {}
 
@@ -52,7 +79,27 @@ function ScoreboardService.Build(viewer: Player?): { Row }
 			kills = state.kills,
 			deaths = state.deaths,
 			isYou = player == viewer,
+			isMvp = false,
+			bestAt = ScoreboardService.BestAt(player),
 		})
+	end
+
+	--[[
+		The MVP: most points in the server, either side.
+
+		Marked on the row rather than announced separately so the panel and
+		the end-of-round shout cannot disagree about who it was. Nobody is
+		MVP on zero -- at the start of a round that would crown whoever
+		happens to sort first, which is worse than crowning nobody.
+	]]
+	local best: Row? = nil
+	for _, row in rows do
+		if row.points > 0 and (best == nil or row.points > best.points) then
+			best = row
+		end
+	end
+	if best then
+		best.isMvp = true
 	end
 
 	table.sort(rows, function(a, b)
@@ -131,6 +178,21 @@ function ScoreboardService.Start()
 	Players.PlayerRemoving:Connect(function(player)
 		nextAllowedAt[player] = nil
 	end)
+end
+
+--[[
+	Who was the best, and at what.
+
+	Read from the same Build the panel uses, so the shout at the whistle and
+	the row with the marker on it can never name different people.
+]]
+function ScoreboardService.Mvp(): (string?, number, string?)
+	for _, row in ScoreboardService.Build(nil) do
+		if row.isMvp then
+			return row.name, row.points, row.bestAt
+		end
+	end
+	return nil, 0, nil
 end
 
 --[[ Send it to everyone, unasked. Used at the end of a round. ]]
