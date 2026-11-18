@@ -24,6 +24,7 @@ local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
+local FireService = require(script.Parent:WaitForChild("FireService"))
 local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local WeaponService = {}
@@ -207,6 +208,12 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	-- perfectly good stick and there is no stick-handling simulation to get
 	-- in the way of it.
 	if HockeyService.RegisterHit(result.Instance, player, direction) then
+		return
+	end
+
+	-- A gas can. Shootable by every weapon in the game, including by
+	-- accident, which is most of the fun of it.
+	if FireService.RegisterHit(result.Instance, player) then
 		return
 	end
 
@@ -781,6 +788,34 @@ function WeaponService.Start()
 		if typeof(value) == "number" and value == value and math.abs(value) < math.huge then
 			VehicleService.SetPedal(player, value)
 		end
+	end)
+
+	--[[
+		The off-road fittings.
+
+		Each one checks the vehicle actually has the fitting rather than
+		trusting the client to only send what it was offered: the action bar
+		hides a key the vehicle has no fitting for, but a hidden key is a
+		presentation choice, not a permission.
+	]]
+	Remotes.Event("CycleDriveMode").OnServerEvent:Connect(function(player)
+		VehicleService.CycleDriveMode(player)
+	end)
+
+	Remotes.Event("ToggleDiffLock").OnServerEvent:Connect(function(player)
+		VehicleService.ToggleDiffLock(player)
+	end)
+
+	Remotes.Event("ToggleWinch").OnServerEvent:Connect(function(player)
+		VehicleService.ToggleWinch(player)
+	end)
+
+	Remotes.Event("ReelWinch").OnServerEvent:Connect(function(player, on)
+		VehicleService.ReelWinch(player, on == true)
+	end)
+
+	Remotes.Event("ShoveBoost").OnServerEvent:Connect(function(player)
+		VehicleService.ShoveBoost(player)
 	end)
 
 	-- The client asks once at join for the full gun list, so the weapon wheel

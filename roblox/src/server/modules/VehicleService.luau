@@ -829,7 +829,25 @@ function VehicleService.SpawnCar(
 		torque = tier.Torque,
 		turnSpeed = tier.TurnSpeed,
 		offRoad = body.OffRoad == true,
+		driveMode = Config.Driving.StartingMode,
+		diffLocked = false,
 	}
+
+	--[[
+		Only the off-roaders get the off-road fittings.
+
+		Advertised as attributes because the client's action bar reads them
+		to decide which keys to offer -- there is no point telling somebody
+		in a Lamborghini about a winch, and a key shown but not wired is
+		worse than a key not shown.
+	]]
+	if body.OffRoad == true then
+		model:SetAttribute("HasDriveModes", true)
+		model:SetAttribute("HasDiffLock", true)
+		model:SetAttribute("HasWinch", true)
+		model:SetAttribute("DriveMode", Config.Driving.Modes[Config.Driving.StartingMode].label)
+	end
+
 	return model
 end
 
@@ -1759,6 +1777,231 @@ end
 	gives the thing mass: it winds up, it carries momentum into a corner, and
 	it does not turn on a coin at walking pace.
 ]]
+-- ================================================= OFF-ROAD FITTINGS ==
+
+--[[ Which vehicle is this player driving, if any? ]]
+local function drivenBy(player: Player): (Model?, any)
+	for model, state in active do
+		local seat = state.seat
+		if seat and seat.Occupant and seat.Occupant.Parent then
+			local occupant = Players:GetPlayerFromCharacter(seat.Occupant.Parent)
+			if occupant == player then
+				return model, state
+			end
+		end
+	end
+	return nil, nil
+end
+
+--[[
+	Cycle 2WD -> 4H -> 4L.
+
+	The mode is pushed back as an attribute rather than only kept in the
+	state table, so the HUD can say which gear you are in without another
+	remote. One source of truth, read by both sides.
+]]
+function VehicleService.CycleDriveMode(player: Player)
+	local model, state = drivenBy(player)
+	if not model or not state or model:GetAttribute("HasDriveModes") ~= true then
+		return
+	end
+	local modes = Config.Driving.Modes
+	state.driveMode = (state.driveMode % #modes) + 1
+	local mode = modes[state.driveMode]
+	model:SetAttribute("DriveMode", mode.label)
+	Remotes.Event("Notify"):FireClient(player, `DRIVETRAIN: {mode.label}`)
+	Sound.At("WeaponSwitch", (state.chassis :: BasePart).Position, 0.5)
+end
+
+function VehicleService.ToggleDiffLock(player: Player)
+	local model, state = drivenBy(player)
+	if not model or not state or model:GetAttribute("HasDiffLock") ~= true then
+		return
+	end
+	state.diffLocked = not state.diffLocked
+	model:SetAttribute("DiffLocked", state.diffLocked)
+	Remotes.Event("Notify"):FireClient(
+		player,
+		if state.diffLocked then "DIFF LOCKED" else "DIFF OPEN"
+	)
+end
+
+--[[
+	Hook the winch to the nearest thing worth pulling against, or let go.
+
+	Anchored parts only, and that is the whole test: an unanchored one would
+	simply be dragged towards you, which is not a recovery, and a Humanoid
+	would be flung across the map. Trees, rocks, buildings and barricades all
+	qualify without any of them needing to be marked up as winch points.
+]]
+function VehicleService.ToggleWinch(player: Player)
+	local model, state = drivenBy(player)
+	if not model or not state or model:GetAttribute("HasWinch") ~= true then
+		return
+	end
+
+	if state.winch then
+		state.winch:Destroy()
+		state.winch = nil
+		state.reeling = false
+		model:SetAttribute("WinchAttached", false)
+		Remotes.Event("Notify"):FireClient(player, "WINCH RELEASED")
+		return
+	end
+
+	local chassis = state.chassis :: BasePart
+	local from = chassis.Position + chassis.CFrame.LookVector * 6
+
+	local best: BasePart? = nil
+	local bestDistance = Config.Driving.WinchRange
+	for _, candidate in workspace:GetPartBoundsInRadius(from, Config.Driving.WinchRange) do
+		if not candidate:IsA("BasePart") or not candidate.Anchored then
+			continue
+		end
+		if candidate:IsDescendantOf(model) then
+			continue
+		end
+		-- Not the ground. Pulling against the floor you are standing on
+		-- just winds the rope in and moves nothing.
+		if candidate.Size.X > 200 or candidate.Size.Z > 200 then
+			continue
+		end
+		local distance = (candidate.Position - from).Magnitude
+		if distance < bestDistance then
+			bestDistance = distance
+			best = candidate
+		end
+	end
+
+	if not best then
+		Remotes.Event("Notify"):FireClient(player, "NOTHING IN WINCH RANGE")
+		return
+	end
+
+	local hook = Instance.new("Attachment")
+	hook.Name = "WinchHook"
+	hook.Position = Vector3.new(0, 0, -chassis.Size.Z * 0.5)
+	hook.Parent = chassis
+
+	local anchorPoint = Instance.new("Attachment")
+	anchorPoint.Name = "WinchAnchor"
+	anchorPoint.Parent = best
+
+	local rope = Instance.new("RopeConstraint")
+	rope.Name = "WinchCable"
+	rope.Attachment0 = hook
+	rope.Attachment1 = anchorPoint
+	rope.Length = math.max(bestDistance, Config.Driving.WinchMinLength)
+	rope.Visible = true
+	rope.Thickness = 0.18
+	rope.Color = BrickColor.new("Dark stone grey")
+	rope.Parent = chassis
+
+	state.winch = rope
+	state.reeling = false
+	model:SetAttribute("WinchAttached", true)
+	Remotes.Event("Notify"):FireClient(player, `WINCH HOOKED — HOLD X TO REEL`)
+	Sound.At("Pickup", chassis.Position, 0.6)
+end
+
+function VehicleService.ReelWinch(player: Player, on: boolean)
+	local _, state = drivenBy(player)
+	if not state or not state.winch then
+		return
+	end
+	state.reeling = on == true
+end
+
+--[[ Shortening the cable is what actually drags you out. ]]
+local function stepWinch(state: any, deltaTime: number)
+	local rope = state.winch
+	if not rope then
+		return
+	end
+	if not rope.Parent or not rope.Attachment1 or not rope.Attachment1.Parent then
+		-- Whatever we were hooked to is gone. Drop the cable rather than
+		-- leaving a constraint pointing at nothing.
+		rope:Destroy()
+		state.winch = nil
+		state.reeling = false
+		return
+	end
+	if state.reeling then
+		rope.Length = math.max(
+			Config.Driving.WinchMinLength,
+			rope.Length - Config.Driving.WinchReelSpeed * deltaTime
+		)
+	end
+end
+
+--[[
+	E on skis, a board, a tube or a bike: boost, and shove anyone beside you.
+
+	One key doing both is the right shape for a downhill race. It is always
+	worth pressing, so there is no decision to agonise over at 80 studs a
+	second -- but it is worth MORE if you time it next to somebody, which is
+	the thing that makes two people going down the same hill a race rather
+	than two solo runs.
+
+	The shove is deliberately sideways and upwards rather than forwards: the
+	point is to put them off their line and into a tree, not to murder them.
+	Shooting them is already available and always was.
+]]
+function VehicleService.ShoveBoost(player: Player)
+	local model, state = drivenBy(player)
+	if not model or not state then
+		return
+	end
+	-- Only the gravity-driven rigs. A shove button in a Hummer is just a
+	-- worse version of driving into someone.
+	if state.kind ~= "Skis" and state.kind ~= "Tube" then
+		return
+	end
+
+	local now = os.clock()
+	if now < (state.nextShoveAt or 0) then
+		return
+	end
+	state.nextShoveAt = now + Config.Riding.ShoveCooldown
+	state.boostUntil = now + Config.Riding.BoostSeconds
+
+	local board = state.chassis :: BasePart
+	Sound.At("Boost", board.Position, 0.7)
+
+	-- Anyone else riding anything, close enough to reach.
+	for otherModel, otherState in active do
+		if otherModel == model then
+			continue
+		end
+		local otherBoard = otherState.chassis
+		if not otherBoard or not otherBoard.Parent then
+			continue
+		end
+		local offset = otherBoard.Position - board.Position
+		if offset.Magnitude > Config.Riding.ShoveRange then
+			continue
+		end
+		if not Util.IsSaneVector(offset) or offset.Magnitude < 0.01 then
+			continue
+		end
+
+		local away = Vector3.new(offset.X, 0, offset.Z)
+		if away.Magnitude < 0.01 then
+			continue
+		end
+		otherBoard.AssemblyLinearVelocity = otherBoard.AssemblyLinearVelocity
+			+ away.Unit * Config.Riding.ShoveForce
+			+ Vector3.new(0, Config.Riding.ShoveLift, 0)
+
+		local victimSeat = otherState.seat
+		local occupant = victimSeat and victimSeat.Occupant
+		local victim = occupant and Players:GetPlayerFromCharacter(occupant.Parent)
+		if victim then
+			Remotes.Event("Notify"):FireClient(victim, "SHOVED!")
+		end
+	end
+end
+
 local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local chassis = state.chassis :: BasePart
 	local seat = state.seat :: VehicleSeat
@@ -1847,8 +2090,48 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		speedFactor = math.max(speedFactor, Config.Boost.Speed / math.max(state.maxSpeed, 1))
 	end
 
+	--[[
+		The drivetrain mode, if this thing has one.
+
+		2WD is faster and weaker and drives the rear only; 4L is a crawler
+		gear with over twice the torque and half the speed. Anything without
+		the fitting behaves exactly as it did before.
+	]]
+	local mode = if model:GetAttribute("HasDriveModes") == true
+		then driving.Modes[state.driveMode or driving.StartingMode]
+		else nil
+	if mode then
+		speedFactor *= mode.speedBias
+	end
+
 	local topSpeed = state.maxSpeed * speedFactor
 	local speedRatio = math.clamp(math.abs(roadSpeed) / math.max(topSpeed, 1), 0, 1)
+
+	--[[
+		Grip, which mud takes away and the diff lock gives back.
+
+		Written only when it changes: this is four CustomPhysicalProperties
+		assignments per vehicle, and doing them every frame for every car on
+		the map is real cost for a value that changes when you drive into
+		mud and not otherwise.
+	]]
+	local grip = driving.WheelFriction
+	if state.groundIsMud then
+		grip *= driving.MudGripFactor
+	end
+	if state.diffLocked then
+		grip *= driving.DiffLockGripBias
+	end
+	if state.wheelGrip ~= grip then
+		state.wheelGrip = grip
+		for _, wheel in state.wheels do
+			local part = wheel.part
+			if part then
+				part.CustomPhysicalProperties =
+					PhysicalProperties.new(1.2, grip, 0.1, driving.WheelFrictionWeight, 1)
+			end
+		end
+	end
 
 	--[[
 		Steering: less lock the faster you go, and Ackermann on top.
@@ -1881,23 +2164,40 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	]]
 	local braking = (throttle < 0 and roadSpeed > 2) or (throttle > 0 and roadSpeed < -2)
 
+	local torqueBias = 1
+	if mode then
+		torqueBias *= mode.torqueBias
+	end
+	if state.diffLocked then
+		torqueBias *= driving.DiffLockTorqueBias
+	end
+
 	for _, wheel in state.wheels do
 		local axle = wheel.axle
 		if not axle then
 			continue
 		end
+
+		-- In 2WD the front wheels are along for the ride. Braking still
+		-- uses all four, because brakes are not the drivetrain.
+		local driven = mode == nil or mode.allWheel or not wheel.front
+
 		if braking then
 			axle.AngularVelocity = 0
 			axle.MotorMaxTorque = driving.BrakeTorque
-		elseif math.abs(throttle) > 0.05 then
+		elseif driven and math.abs(throttle) > 0.05 then
 			-- Linear studs/sec to angular radians/sec at the tire.
 			axle.AngularVelocity = -(throttle * topSpeed) / wheel.radius
-			axle.MotorMaxTorque = driving.MotorTorque * (if boosted then 1.6 else 1)
+			axle.MotorMaxTorque = driving.MotorTorque
+				* torqueBias
+				* (if boosted then 1.6 else 1)
 		else
 			axle.AngularVelocity = 0
 			axle.MotorMaxTorque = driving.MotorTorque * 0.1
 		end
 	end
+
+	stepWinch(state, deltaTime)
 
 	-- Kept for anything that still asks, and for the engine note below.
 	state.currentSpeed = roadSpeed
@@ -2223,7 +2523,12 @@ local function driveSkis(model: Model, state: any, deltaTime: number)
 				then (flatHeading.Unit * 0.55 + downhill.Unit * 0.45).Unit
 				else downhill.Unit
 
-			local target = blend * (steepness * (state.slopeSpeed or SKI_SLOPE_SPEED))
+			-- A boost is a window rather than an impulse, so it still feels
+			-- like going faster downhill rather than being thrown.
+			local boost = if os.clock() < (state.boostUntil or 0)
+				then Config.Riding.BoostMultiplier
+				else 1
+			local target = blend * (steepness * (state.slopeSpeed or SKI_SLOPE_SPEED) * boost)
 			local current = board.AssemblyLinearVelocity
 			local wanted = target - Vector3.new(current.X, 0, current.Z)
 			board.AssemblyLinearVelocity = current

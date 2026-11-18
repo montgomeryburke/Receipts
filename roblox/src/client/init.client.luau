@@ -24,6 +24,14 @@ local Visuals = require(modules:WaitForChild("Visuals"))
 local player = Players.LocalPlayer
 
 local hudOk = pcall(Hud.Build)
+
+-- A travel row is the same join the walk-in prompt and the B menu use, so
+-- arriving by teleport fills the teams out with bots exactly as walking in
+-- would. A travel button that dropped you at an empty rink would be a worse
+-- answer than making you walk there.
+Hud.OnTravel(function(id)
+	Remotes.Event("JoinArcade"):FireServer(id)
+end)
 if not hudOk then
 	warn("[Nuclear Mud Arena] HUD failed to build.")
 end
@@ -265,6 +273,93 @@ Remotes.Event("FightStarted").OnClientEvent:Connect(function(payload)
 	Controls.SetFighting(true)
 	Hud.ShowFight(tostring(payload.opponent or "SOMEBODY"), payload.duration or 4)
 	Sound.Flat("MeleeSwing")
+end)
+
+--[[
+	The sub-games, which were sending into the void.
+
+	Every one of these four was fired by the server and listened to by
+	nobody: ArcadeMenu, ArcadeOffer, ArcadeJoined and ArcadeLeft. Hud had a
+	menu panel, an offer banner and a join toast all built and ready;
+	Controls had SetMenuOrder and SetPendingOffer sitting there with no
+	callers. So pressing B asked for the menu, the server answered, and
+	nothing happened -- which is the literal cause of not being able to
+	figure out how to play the different games. The pieces were all written.
+	They were never connected.
+]]
+--[[
+	What is in your hands.
+
+	This is what flips the control context: holding a gas can claims F for
+	lighting the trail, which would otherwise set off a diamond round at
+	your own feet while standing in petrol. The server is the one that knows,
+	so the server is the one that says.
+]]
+Remotes.Event("CarryItem").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local item = if typeof(payload.item) == "string" then payload.item else nil
+	Controls.SetTool(item)
+	if item and typeof(payload.fuel) == "number" then
+		Hud.Toast(`GAS CAN — {math.floor(payload.fuel)}%  ·  HOLD LMB TO POUR, F TO LIGHT`)
+	end
+end)
+
+Remotes.Event("HockeyScore").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Hud.SetPuck(payload.carrying == true)
+end)
+
+Remotes.Event("ArcadeMenu").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" or typeof(payload.games) ~= "table" then
+		return
+	end
+
+	local ids = {}
+	for _, game in payload.games do
+		table.insert(ids, tostring(game.id))
+	end
+	-- The number keys pick from this list, so the order has to be the one
+	-- that was drawn rather than whatever order it arrives in next time.
+	Controls.SetMenuOrder(ids)
+	Hud.ShowArcadeMenu(payload.games)
+	-- The travel tab lists the same activities with the same counts, so the
+	-- two ways in never disagree about what is out there.
+	Hud.SetTravelList(payload.games)
+end)
+
+Remotes.Event("ArcadeOffer").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Controls.SetPendingOffer(tostring(payload.id))
+	Hud.ShowArcadeOffer(
+		tostring(payload.name or "A GAME"),
+		tostring(payload.objective or ""),
+		"Y"
+	)
+end)
+
+Remotes.Event("ArcadeJoined").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Controls.SetPendingOffer(nil)
+	Hud.HideArcadeOffer()
+	Hud.HideArcadeMenu()
+	Hud.HideHelp()
+	Controls.SetMouseFree(false)
+	-- The objective is the whole of the game's instructions, so it is worth
+	-- putting on screen at the moment somebody arrives in one.
+	Hud.Toast(`{string.upper(tostring(payload.name or "GAME"))} — {tostring(payload.objective or "")}`)
+end)
+
+Remotes.Event("ArcadeLeft").OnClientEvent:Connect(function()
+	Controls.SetPendingOffer(nil)
+	Hud.HideArcadeOffer()
 end)
 
 Remotes.Event("FightUpdate").OnClientEvent:Connect(function(payload)

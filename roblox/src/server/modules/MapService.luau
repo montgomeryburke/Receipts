@@ -19,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
 local ResortService = require(script.Parent:WaitForChild("ResortService"))
+local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
 local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local MapService = {}
@@ -1149,6 +1150,18 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	table.insert(pickupPads, { position = resort.summit + Vector3.new(0, 3, -14), kind = "Multiplier" })
 
 	model.Parent = workspace
+
+	--[[
+		Light pillars over every activity, last of all.
+
+		It has to be last: the beacons are generated from the venue
+		registry, and the registry is only complete once every builder above
+		has had its say. Calling this earlier gave beacons to whichever
+		venues happened to have registered by then, which is a bug that
+		looks like a missing beacon rather than like an ordering mistake.
+	]]
+	ArcadeService.BuildBeacons()
+
 	return {
 		model = model,
 		teamSpawns = teamSpawns,

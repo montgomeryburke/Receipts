@@ -152,7 +152,32 @@ service("Players", {
 	GetPlayers = function() return {} end,
 	PlayerAdded = signal(),
 	PlayerRemoving = signal(),
-	GetPlayerFromCharacter = function() return nil end,
+	--[[
+		Find the player who owns a character.
+
+		This returned nil unconditionally, which quietly disabled a large
+		part of the game inside every test. Anything that identifies somebody
+		by their character took the "not a player" branch every single time:
+		burn damage went to the bot path instead of the player path, and the
+		vehicle code that works out who is in the driver's seat could never
+		find anybody, so the whole off-road fitting layer was untestable
+		while looking perfectly well tested.
+
+		Searches PLAYERS_FOR_TEAMS, which is the harness's list of who is in
+		the game -- the same list Team:GetPlayers uses, so the two cannot
+		disagree about who exists.
+	]]
+	GetPlayerFromCharacter = function(_, character)
+		if not character then
+			return nil
+		end
+		for _, player in (PLAYERS_FOR_TEAMS or {}) do
+			if rawget(player, "_props").Character == character then
+				return player
+			end
+		end
+		return nil
+	end,
 	GetPlayerByUserId = function() return nil end,
 	CharacterAutoLoads = true,
 })

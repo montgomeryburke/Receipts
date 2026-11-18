@@ -89,6 +89,14 @@ local arcadePick: ((string) -> ())? = nil
 local wienerOverlay: TextLabel
 local toastHolder: Frame
 local actionBar: Frame? = nil
+local helpPanel: Frame? = nil
+local helpBody: ScrollingFrame? = nil
+local helpTravel: ScrollingFrame? = nil
+local helpSearch: TextBox? = nil
+local helpTabButtons: { [string]: TextButton } = {}
+local helpTab = "play"
+local helpTravelHandler: ((string) -> ())? = nil
+local puckLabel: TextLabel? = nil
 
 -- ================================================================ BUILDING ==
 
@@ -705,6 +713,128 @@ function Hud.Build()
 		Visible = false,
 		ZIndex = 9,
 	})
+
+	puckLabel = makeLabel(screen, {
+		Name = "PuckCarry",
+		Size = UDim2.new(1, 0, 0, 28),
+		Position = UDim2.new(0, 0, 0.22, 0),
+		Text = "",
+		TextSize = 20,
+		Font = Enum.Font.GothamBlack,
+		TextColor3 = Color3.fromRGB(150, 230, 255),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = false,
+		ZIndex = 12,
+	})
+
+	-- ------------------------------------------------- the help panel
+	--
+	-- Two tabs because there are two different questions a lost player
+	-- asks, and they want different answers: "what do I do" wants reading,
+	-- "take me there" wants one click. Putting travel behind the same key
+	-- as the instructions means there is exactly one thing to remember.
+	do
+		local panel = makeFrame(screen, {
+			Name = "HelpPanel",
+			Size = UDim2.fromOffset(560, 470),
+			Position = UDim2.new(0.5, -280, 0.5, -235),
+			BackgroundColor3 = Color3.fromRGB(14, 18, 24),
+			BackgroundTransparency = 0.06,
+			Visible = false,
+			ZIndex = 30,
+		})
+		helpPanel = panel
+
+		makeLabel(panel, {
+			Name = "Title",
+			Size = UDim2.new(1, -140, 0, 46),
+			Position = UDim2.fromOffset(20, 8),
+			Text = "WHAT DO I DO?",
+			TextSize = 24,
+			Font = Enum.Font.GothamBlack,
+			TextColor3 = Color3.fromRGB(185, 255, 50),
+			ZIndex = 31,
+		})
+
+		makeLabel(panel, {
+			Name = "CloseHint",
+			Size = UDim2.fromOffset(110, 46),
+			Position = UDim2.new(1, -124, 0, 8),
+			Text = "H  CLOSE",
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(150, 160, 175),
+			TextXAlignment = Enum.TextXAlignment.Right,
+			ZIndex = 31,
+		})
+
+		local tabs = { { id = "play", label = "HOW TO PLAY" }, { id = "travel", label = "TAKE ME THERE" } }
+		for index, tab in tabs do
+			local button = Instance.new("TextButton")
+			button.Name = `Tab_{tab.id}`
+			button.Size = UDim2.fromOffset(170, 32)
+			button.Position = UDim2.fromOffset(20 + (index - 1) * 180, 56)
+			button.BackgroundColor3 = Color3.fromRGB(26, 32, 42)
+			button.BorderSizePixel = 0
+			button.Font = Enum.Font.GothamBold
+			button.TextSize = 14
+			button.TextColor3 = Color3.fromRGB(226, 232, 240)
+			button.Text = tab.label
+			button.ZIndex = 31
+			button.Parent = panel
+			helpTabButtons[tab.id] = button
+
+			local id = tab.id
+			button.Activated:Connect(function()
+				Hud.SetHelpTab(id)
+			end)
+		end
+
+		local search = Instance.new("TextBox")
+		search.Name = "HelpSearch"
+		search.Size = UDim2.new(1, -40, 0, 32)
+		search.Position = UDim2.fromOffset(20, 94)
+		search.BackgroundColor3 = Color3.fromRGB(26, 32, 42)
+		search.BorderSizePixel = 0
+		search.Font = Enum.Font.Gotham
+		search.TextSize = 14
+		search.TextColor3 = Color3.fromRGB(226, 232, 240)
+		search.PlaceholderText = "Type a question -- skis, stuck, sniper, fight..."
+		search.Text = ""
+		search.ClearTextOnFocus = false
+		search.ZIndex = 31
+		search.Parent = panel
+		helpSearch = search
+		search:GetPropertyChangedSignal("Text"):Connect(function()
+			if helpTab == "play" then
+				Hud.FilterHelp(search.Text)
+			end
+		end)
+
+		local body = Instance.new("ScrollingFrame")
+		body.Name = "HelpBody"
+		body.Size = UDim2.new(1, -40, 1, -146)
+		body.Position = UDim2.fromOffset(20, 136)
+		body.BackgroundTransparency = 1
+		body.BorderSizePixel = 0
+		body.ScrollBarThickness = 6
+		body.CanvasSize = UDim2.new()
+		body.ZIndex = 31
+		body.Parent = panel
+		helpBody = body
+
+		local travel = Instance.new("ScrollingFrame")
+		travel.Name = "HelpTravel"
+		travel.Size = UDim2.new(1, -40, 1, -146)
+		travel.Position = UDim2.fromOffset(20, 136)
+		travel.BackgroundTransparency = 1
+		travel.BorderSizePixel = 0
+		travel.ScrollBarThickness = 6
+		travel.CanvasSize = UDim2.new()
+		travel.Visible = false
+		travel.ZIndex = 31
+		travel.Parent = panel
+		helpTravel = travel
+	end
 
 	-- ------------------------------------------------- the sub-game menu
 	local panel = makeFrame(screen, {
@@ -1520,6 +1650,248 @@ function Hud.ActionBarForTests(): { { key: string, label: string } }
 		local action = slot:FindFirstChild("Action")
 		if key and action and key:IsA("TextLabel") and action:IsA("TextLabel") then
 			table.insert(out, { key = key.Text, label = action.Text })
+		end
+	end
+	return out
+end
+
+--[[
+	You have the puck.
+
+	Worth its own line on screen because carrying it changes what left click
+	does -- it shoots the puck rather than the gun -- and that is not
+	something a player can be expected to infer.
+]]
+function Hud.SetPuck(carrying: boolean)
+	local label = puckLabel
+	if not label then
+		return
+	end
+	label.Visible = carrying
+	label.Text = "YOU HAVE THE PUCK — CLICK TO SHOOT"
+end
+
+function Hud.PuckShownForTests(): boolean
+	return puckLabel ~= nil and puckLabel.Visible
+end
+
+-- ==================================================================== HELP ==
+
+--[[
+	Does this entry answer that question?
+
+	Deliberately forgiving. Somebody typing into a help box is already
+	confused, and a search that only matches exact words punishes them for
+	not knowing the vocabulary -- which is the thing they came to find out.
+	So it matches on the question text, the answer text and a keyword list
+	written to include the words a player would type rather than the words
+	the code uses: "stuck" for the winch, "gun" for the weapon list.
+]]
+local function helpMatches(entry: { question: string, answer: string, keywords: { string } }, query: string): boolean
+	local needle = string.lower((string.gsub(query, "^%s*(.-)%s*$", "%1")))
+	if needle == "" then
+		return true
+	end
+	if string.find(string.lower(entry.question), needle, 1, true) then
+		return true
+	end
+	if string.find(string.lower(entry.answer), needle, 1, true) then
+		return true
+	end
+	for _, keyword in entry.keywords do
+		-- Either direction: "snow" should find "snowboard", and typing
+		-- "snowboarding" should still find it.
+		if string.find(keyword, needle, 1, true) or string.find(needle, keyword, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+--[[ Which entries answer a query, in Config order. ]]
+function Hud.HelpMatches(query: string): { { question: string, answer: string, keywords: { string } } }
+	local out = {}
+	for _, entry in Config.Help do
+		if helpMatches(entry, query) then
+			table.insert(out, entry)
+		end
+	end
+	return out
+end
+
+--[[ Redraw the how-to list for a query. ]]
+function Hud.FilterHelp(query: string)
+	local body = helpBody
+	if not body then
+		return
+	end
+	for _, old in body:GetChildren() do
+		old:Destroy()
+	end
+
+	local matches = Hud.HelpMatches(query)
+	local y = 0
+
+	if #matches == 0 then
+		makeLabel(body, {
+			Name = "NoMatch",
+			Size = UDim2.new(1, -12, 0, 40),
+			Position = UDim2.fromOffset(0, 0),
+			Text = `Nothing about "{query}" yet.`,
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(150, 160, 175),
+			ZIndex = 32,
+		})
+		body.CanvasSize = UDim2.fromOffset(0, 40)
+		return
+	end
+
+	for index, entry in matches do
+		local question = makeLabel(body, {
+			Name = `Q{index}`,
+			Size = UDim2.new(1, -12, 0, 24),
+			Position = UDim2.fromOffset(0, y),
+			Text = entry.question,
+			TextSize = 16,
+			Font = Enum.Font.GothamBold,
+			TextColor3 = Color3.fromRGB(185, 255, 50),
+			TextWrapped = true,
+			ZIndex = 32,
+		})
+		local _ = question
+		y += 26
+
+		makeLabel(body, {
+			Name = `A{index}`,
+			Size = UDim2.new(1, -12, 0, 58),
+			Position = UDim2.fromOffset(0, y),
+			Text = entry.answer,
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(214, 222, 232),
+			TextWrapped = true,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			ZIndex = 32,
+		})
+		y += 70
+	end
+
+	body.CanvasSize = UDim2.fromOffset(0, y)
+end
+
+--[[
+	The travel list: one row per activity, one click to go.
+
+	This reuses the same join the walk-in prompt and the B menu use, so
+	arriving by teleport fills the teams out with bots exactly as walking in
+	would. A travel button that dropped you at an empty rink would be a
+	worse answer than making you walk.
+]]
+function Hud.SetTravelList(games: { { id: string, name: string, objective: string, players: number } })
+	local list = helpTravel
+	if not list then
+		return
+	end
+	for _, old in list:GetChildren() do
+		old:Destroy()
+	end
+
+	local y = 0
+	for _, game in games do
+		local row = Instance.new("TextButton")
+		row.Name = `Travel_{game.id}`
+		row.Size = UDim2.new(1, -12, 0, 52)
+		row.Position = UDim2.fromOffset(0, y)
+		row.BackgroundColor3 = Color3.fromRGB(26, 32, 42)
+		row.BorderSizePixel = 0
+		row.Font = Enum.Font.GothamBold
+		row.TextSize = 15
+		row.TextColor3 = Color3.fromRGB(226, 232, 240)
+		row.TextXAlignment = Enum.TextXAlignment.Left
+		row.Text = `  {string.upper(game.name)}      {game.players} there`
+		row.ZIndex = 32
+		row.Parent = list
+
+		local id = game.id
+		row.Activated:Connect(function()
+			if helpTravelHandler then
+				helpTravelHandler(id)
+			end
+		end)
+
+		y += 58
+	end
+	list.CanvasSize = UDim2.fromOffset(0, y)
+end
+
+--[[ Controls hands us the thing to call when somebody picks a destination. ]]
+function Hud.OnTravel(handler: (string) -> ())
+	helpTravelHandler = handler
+end
+
+function Hud.SetHelpTab(tab: string)
+	helpTab = tab
+	if helpBody then
+		helpBody.Visible = tab == "play"
+	end
+	if helpTravel then
+		helpTravel.Visible = tab == "travel"
+	end
+	if helpSearch then
+		-- The search only applies to the reading tab, so it would be a
+		-- dead box on the other one.
+		helpSearch.Visible = tab == "play"
+	end
+	for id, button in helpTabButtons do
+		button.BackgroundColor3 = if id == tab
+			then Color3.fromRGB(46, 58, 74)
+			else Color3.fromRGB(26, 32, 42)
+	end
+end
+
+function Hud.ShowHelp()
+	local panel = helpPanel
+	if not panel then
+		return
+	end
+	panel.Visible = true
+	Hud.SetHelpTab(helpTab)
+	Hud.FilterHelp(if helpSearch then helpSearch.Text else "")
+end
+
+function Hud.HideHelp()
+	if helpPanel then
+		helpPanel.Visible = false
+	end
+end
+
+function Hud.HelpOpen(): boolean
+	return helpPanel ~= nil and helpPanel.Visible
+end
+
+--[[ For tests. ]]
+function Hud.HelpTabForTests(): string
+	return helpTab
+end
+
+function Hud.TravelRowsForTests(): { string }
+	local out = {}
+	local list = helpTravel
+	if list then
+		for _, row in list:GetChildren() do
+			table.insert(out, row.Name)
+		end
+	end
+	return out
+end
+
+function Hud.HelpQuestionsForTests(): { string }
+	local out = {}
+	local body = helpBody
+	if body then
+		for _, child in body:GetChildren() do
+			if string.sub(child.Name, 1, 1) == "Q" then
+				table.insert(out, (child :: any).Text)
+			end
 		end
 	end
 	return out

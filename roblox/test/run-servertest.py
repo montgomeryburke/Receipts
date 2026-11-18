@@ -390,6 +390,196 @@ end
 -- prompt if you walk into one. And a venue is filled out with bots, because
 -- an empty rink is worse than no rink.
 DUMP("")
+DUMP("Petrol and fire:")
+do
+	--[[
+		The interesting part of a gas can is the SETUP, not the fire. A
+		flamethrower is a gun that does damage in a cone; a can of petrol is
+		a plan -- pour a trail across the doorway somebody keeps using, back
+		off, wait. So these check the plan can actually be laid and then
+		followed through, and that the fire travels rather than just
+		existing.
+	]]
+	FireService.Build(1900)
+	check("gas cans are out on the map", FireService.CanCount() > 0,
+		string.format("%d cans", FireService.CanCount()))
+
+	-- Pouring. The raycast needs ground under the player, and the harness
+	-- stubs Raycast to find nothing, so give it something to find.
+	local ground = { Position = Vector3.new(0, 0, 0), Instance = Instance.new("Part") }
+	rawget(workspace, "_props").Raycast = function()
+		return ground
+	end
+
+	-- The stubbed raycast reports the origin, so every puddle lands there.
+	-- The killer's stand-in spawns 4950 studs away, which is a long way to
+	-- throw a match: put them next to their own petrol.
+	local killerRoot = killer._props.Character:FindFirstChild("HumanoidRootPart")
+	killerRoot._props.CFrame = CFrame.new(0, 3, 0)
+
+	FireService.GiveCan(killer)
+	check("picking up a can fills it", FireService.FuelOf(killer) == Config.Fire.CanFuel,
+		tostring(FireService.FuelOf(killer)))
+
+	local poured = 0
+	for _ = 1, 4 do
+		ADVANCE(Config.Fire.PourInterval + 0.01)
+		FireService.Pour(killer)
+		poured += 1
+	end
+	check("pouring leaves puddles", FireService.PuddleCount() == poured,
+		string.format("%d puddles from %d pours", FireService.PuddleCount(), poured))
+	check("and costs fuel", (FireService.FuelOf(killer) or Config.Fire.CanFuel)
+		< Config.Fire.CanFuel,
+		string.format("%s left", tostring(FireService.FuelOf(killer))))
+
+	-- Pouring is paced. Without the interval a held key would be sixty
+	-- puddles a second, which is a different game and a dead server.
+	local before = FireService.PuddleCount()
+	FireService.Pour(killer)
+	FireService.Pour(killer)
+	check("pouring is rate limited", FireService.PuddleCount() == before,
+		string.format("%d extra from two instant pours", FireService.PuddleCount() - before))
+
+	-- Lighting it. The puddles are all at the stubbed raycast position, so
+	-- they are within reach of each other and of the player.
+	check("nothing is burning yet", FireService.BurningCount() == 0, "")
+	FireService.Light(killer)
+	check("lighting it sets the petrol alight", FireService.BurningCount() > 0,
+		string.format("%d burning", FireService.BurningCount()))
+
+	--[[
+		Fire SPREADS, which is the thing that makes a trail a fuse.
+
+		Without it a trail would have to be lit from inside itself, and the
+		whole point is lighting it from somewhere safe and watching it
+		travel towards somebody. The spread is a task.delay, so it needs
+		the delayed queue flushed.
+	]]
+	RUN_DELAYED()
+	check("and the fire spreads along the trail",
+		FireService.BurningCount() == FireService.PuddleCount(),
+		string.format("%d of %d puddles alight",
+			FireService.BurningCount(), FireService.PuddleCount()))
+
+	--[[
+		Standing in it hurts, through DamageService so the kill is attributed.
+
+		The hockey section above put prey on killer's team to prove you
+		cannot fight a team-mate, and friendly fire is off -- so without
+		putting them back on opposite sides the burn correctly does nothing
+		and this reads as a broken fire rather than a working rule.
+	]]
+	prey._props.Team = Instance.new("Team")
+	prey._props.Team._props.Name = "Blue"
+	PlayerState.Get(prey).shield = 0
+	local victimHumanoid = prey._props.Character:FindFirstChildOfClass("Humanoid")
+	victimHumanoid._props.Health = 100
+	rawget(workspace, "_props").GetPartBoundsInRadius = function()
+		return { prey._props.Character:FindFirstChild("HumanoidRootPart") }
+	end
+
+	ADVANCE(Config.Fire.BurnInterval + 0.01)
+	FireService.StepForTests()
+	local burned = 100 - victimHumanoid._props.Health
+	check("standing in fire burns you", burned > 0,
+		string.format("%.0f damage", burned))
+
+	--[[
+		Once per character per tick, not once per part.
+
+		A ragdoll has a dozen parts and all of them are inside the radius, so
+		charging per-part would burn a player twelve times as fast as
+		intended -- and twelve times as fast as the number in Config claims,
+		which is the sort of mismatch nobody finds by playing.
+	]]
+	local root = prey._props.Character:FindFirstChild("HumanoidRootPart")
+	rawget(workspace, "_props").GetPartBoundsInRadius = function()
+		return { root, root, root, root, root, root }
+	end
+	victimHumanoid._props.Health = 100
+	ADVANCE(Config.Fire.BurnInterval + 0.01)
+	FireService.StepForTests()
+	local once = 100 - victimHumanoid._props.Health
+	-- Has to actually burn AND be capped. Asserting only the cap passes
+	-- happily on zero damage, which is how this check sat green while the
+	-- fire was doing nothing at all.
+	check("and only once per tick however many limbs are in it",
+		once > 0 and once <= Config.Fire.BurnDamage + 0.001,
+		string.format("%.0f damage for 6 overlapping parts, cap %d",
+			once, Config.Fire.BurnDamage))
+
+	rawget(workspace, "_props").GetPartBoundsInRadius = function()
+		return {}
+	end
+
+	--[[
+		A can is a bomb anybody can set off, including whoever placed it.
+
+		Asserted on the can RECORDS rather than on a count: a detonated can
+		schedules its own respawn, and the delayed queue in this harness runs
+		every pending callback regardless of its deadline -- so a count would
+		show the can coming straight back and read as if nothing had
+		happened.
+
+		The cluster is what makes this testable at all. Cans used to be
+		spread evenly on a ring 310 studs apart, so no two were ever within
+		the 18-stud chain radius and this whole path was dead code.
+	]]
+	local target = FireService.CansForTests()[1]
+	check("there is a can to shoot", target ~= nil, "")
+	if target then
+		-- Its cluster-mates: the ones close enough to go with it.
+		local neighbours = {}
+		for _, other in FireService.CansForTests() do
+			if other ~= target and not other.gone then
+				if (other.part.Position - target.part.Position).Magnitude
+					<= Config.Fire.CanChainRadius
+				then
+					table.insert(neighbours, other)
+				end
+			end
+		end
+		check("a can has cluster-mates within chain range", #neighbours > 0,
+			string.format("%d within %d studs", #neighbours, Config.Fire.CanChainRadius))
+
+		local handled = FireService.RegisterHit(target.part, killer)
+		check("shooting a gas can sets it off", handled and target.gone,
+			string.format("handled=%s gone=%s", tostring(handled), tostring(target.gone)))
+
+		-- Staggered, so a row reads as a chain rather than one bang -- and
+		-- so the second one can catch somebody running from the first.
+		local wentEarly = 0
+		for _, other in neighbours do
+			if other.gone then
+				wentEarly += 1
+			end
+		end
+		check("the neighbours do not go at the same instant", wentEarly == 0,
+			string.format("%d went immediately", wentEarly))
+
+		RUN_DELAYED()
+		local chained = 0
+		for _, other in neighbours do
+			if other.gone then
+				chained += 1
+			end
+		end
+		-- Non-vacuous on purpose: "0 of 0 chained" is not a chain working,
+		-- it is a chain that could never have happened.
+		check("and it takes its cluster with it",
+			#neighbours > 0 and chained == #neighbours,
+			string.format("%d of %d chained", chained, #neighbours))
+	end
+
+	FireService.Clear()
+	check("clearing takes the petrol with it",
+		FireService.PuddleCount() == 0 and FireService.CanCount() == 0,
+		string.format("%d puddles, %d cans",
+			FireService.PuddleCount(), FireService.CanCount()))
+end
+
+DUMP("")
 DUMP("Sub-games:")
 do
 	local menu = ArcadeService.Menu()
@@ -450,6 +640,73 @@ do
 
 	ArcadeService.Leave(killer)
 	check("and you can leave", ArcadeService.VenueOf(killer) == nil, "")
+
+	--[[
+		Light pillars over every activity.
+
+		A menu solves discoverability for a player who thinks to open a
+		menu. A pillar of light solves it for everyone else, including at
+		speed from the far side of the map -- which is the case that
+		actually matters, because the map is 2000 studs across and you
+		cannot see any of its contents from where you spawn.
+	]]
+	ArcadeService.BuildBeacons()
+	check("every activity gets a beacon",
+		ArcadeService.BeaconCount() == #ArcadeService.Menu(),
+		string.format("%d beacons for %d activities",
+			ArcadeService.BeaconCount(), #ArcadeService.Menu()))
+
+	local holder = workspace:FindFirstChild("ActivityBeacons")
+	check("the beacons are in the world", holder ~= nil, "")
+
+	if holder then
+		local pillars = holder:GetChildren()
+		local solid, opaque, short, unnamed = {}, {}, {}, {}
+		local colours = {}
+		for _, pillar in pillars do
+			local props = pillar._props
+			-- A solid pillar through the middle of a rink is a wall in the
+			-- way of the game it is advertising.
+			if props.CanCollide ~= false then
+				table.insert(solid, props.Name)
+			end
+			-- And one a bullet stops dead against is worse: every shot
+			-- fired through it would die in mid-air on scenery.
+			if props.CanQuery ~= false then
+				table.insert(opaque, props.Name)
+			end
+			-- Tall enough to clear the towers, or it is not visible from
+			-- anywhere useful and there was no point building it.
+			if props.Size.Y < 200 then
+				table.insert(short, props.Name)
+			end
+			if not pillar:FindFirstChild("BeaconName") then
+				table.insert(unnamed, props.Name)
+			end
+			local c = props.Color
+			if c then
+				local key = string.format("%.2f,%.2f,%.2f", c.R, c.G, c.B)
+				colours[key] = (colours[key] or 0) + 1
+			end
+		end
+
+		check("no beacon blocks the game it advertises", #solid == 0,
+			table.concat(solid, ", "))
+		check("and none of them stops a bullet", #opaque == 0,
+			table.concat(opaque, ", "))
+		check("each one is tall enough to see from across the map", #short == 0,
+			table.concat(short, ", "))
+		check("each one says what it is", #unnamed == 0, table.concat(unnamed, ", "))
+
+		-- Colour-coded, not six identical lights. A colour you cannot tell
+		-- apart from the next one carries no information.
+		local distinct = 0
+		for _ in colours do
+			distinct += 1
+		end
+		check("the beacons are told apart by colour", distinct == #pillars,
+			string.format("%d colours for %d beacons", distinct, #pillars))
+	end
 end
 
 DUMP(if failures == 0 then "MEDALS WORK" else failures .. " MEDAL FAILURES")
@@ -472,7 +729,7 @@ def strip(s):
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
 SERVER = ['PlayerState', 'TeamService', 'BotService', 'ArcadeService', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
-          'CarnivalService', 'ProjectileService', 'WeaponService', 'PickupService',
+          'CarnivalService', 'FireService', 'ProjectileService', 'WeaponService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',
           'GraphicsService']
 

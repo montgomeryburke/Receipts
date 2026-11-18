@@ -26,6 +26,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+local Util = require(Shared:WaitForChild("Util"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Signal = require(Shared:WaitForChild("Signal"))
 local Sound = require(Shared:WaitForChild("Sound"))
@@ -52,10 +53,17 @@ export type VenueInfo = {
 	perTeam: number,
 	-- Does it have sides at all? Bowling does not.
 	teamed: boolean,
+	-- The beacon colour, so each activity is recognisable from a distance
+	-- rather than being one of six identical lights. Optional; venues that
+	-- do not care get one from the palette by registration order.
+	colour: Color3?,
 }
 
 local venues: { [string]: VenueInfo } = {}
 local order: { string } = {}
+
+-- The beacon pillars, so they can be torn down between rounds with the map.
+local beacons: { Instance } = {}
 
 -- Who is in which game, and which side they are on.
 local membership: { [Player]: { venue: string, team: number } } = {}
@@ -82,7 +90,118 @@ function ArcadeService.Clear()
 	table.clear(order)
 	table.clear(membership)
 	table.clear(staffed)
+	for _, beacon in beacons do
+		beacon:Destroy()
+	end
+	table.clear(beacons)
 	BotService.Clear(nil)
+end
+
+--[[
+	A colour-coded light pillar over every registered activity.
+
+	The map is 2000 studs across and its contents are invisible from the
+	middle of it: there is a rink in one corner, a mountain in another and a
+	carnival somewhere else, and no way to know that from where you spawn.
+	A menu solves it for a player who thinks to open a menu; a pillar of
+	light solves it for everyone else, including while driving or gliding
+	past at speed.
+
+	Built from the venue registry rather than from a list of places, so an
+	activity added later gets a beacon without anybody remembering to add
+	one -- which is exactly the kind of thing nobody remembers.
+
+	Each pillar is one tall, thin, non-colliding Neon part with a PointLight
+	at the base and a billboard name. Non-colliding matters: a solid pillar
+	through the middle of the rink would be a wall in the way of the game it
+	is advertising.
+]]
+local BEACON_PALETTE = {
+	Color3.fromRGB(90, 200, 255),
+	Color3.fromRGB(255, 180, 60),
+	Color3.fromRGB(150, 255, 110),
+	Color3.fromRGB(255, 100, 180),
+	Color3.fromRGB(190, 140, 255),
+	Color3.fromRGB(255, 240, 120),
+	Color3.fromRGB(110, 255, 220),
+}
+
+function ArcadeService.BuildBeacons()
+	for _, beacon in beacons do
+		beacon:Destroy()
+	end
+	table.clear(beacons)
+
+	local holder = Instance.new("Model")
+	holder.Name = "ActivityBeacons"
+
+	for index, id in order do
+		local info = venues[id]
+		if not info then
+			continue
+		end
+		local colour = info.colour or BEACON_PALETTE[(index - 1) % #BEACON_PALETTE + 1]
+
+		local pillar = Util.Part({
+			Name = `Beacon_{id}`,
+			Size = Vector3.new(6, Config.Arcade.BeaconHeight, 6),
+			Position = info.centre + Vector3.new(0, Config.Arcade.BeaconHeight * 0.5, 0),
+			Color = colour,
+			Material = Enum.Material.Neon,
+			Transparency = 0.55,
+			Anchored = true,
+			CanCollide = false,
+			-- Invisible to raycasts, or every shot fired through a beacon
+			-- would stop dead in mid-air at the thing meant to be scenery.
+			CanQuery = false,
+			CanTouch = false,
+			CastShadow = false,
+			Parent = holder,
+		})
+
+		local glow = Instance.new("PointLight")
+		glow.Color = colour
+		glow.Brightness = 2.4
+		glow.Range = 60
+		glow.Parent = pillar
+
+		-- A name you can read from the ground, since a bare colour only
+		-- tells you something is there, not what.
+		local sign = Instance.new("BillboardGui")
+		sign.Name = "BeaconName"
+		sign.Size = UDim2.fromOffset(340, 70)
+		sign.StudsOffsetWorldSpace = Vector3.new(0, -Config.Arcade.BeaconHeight * 0.5 + 26, 0)
+		sign.AlwaysOnTop = false
+		sign.MaxDistance = Config.Arcade.BeaconNameDistance
+		sign.Parent = pillar
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.fromScale(1, 1)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.GothamBlack
+		label.TextScaled = true
+		label.Text = string.upper(info.name)
+		label.TextColor3 = colour
+		label.TextStrokeTransparency = 0.3
+		label.Parent = sign
+
+		table.insert(beacons, pillar)
+	end
+
+	holder.Parent = workspace
+	table.insert(beacons, holder)
+	return holder
+end
+
+--[[ How many beacons are standing, for tests. ]]
+function ArcadeService.BeaconCount(): number
+	local count = 0
+	for _, beacon in beacons do
+		if beacon:IsA("BasePart") then
+			count += 1
+		end
+	end
+	return count
 end
 
 --[[ The list a player sees in the menu. ]]

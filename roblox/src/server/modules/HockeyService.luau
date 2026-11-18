@@ -58,6 +58,32 @@ local pickupBlockedUntil: { [Player]: number } = {}
 local goalLights: { [number]: BasePart } = {}
 local penaltyBox = Vector3.new()
 
+--[[
+	Hand the puck to somebody, or to nobody.
+
+	Routed through one function because the client has to be told when it
+	STOPS carrying as well as when it starts. It was only ever told the
+	start: five separate places set puckOwner back to nil -- a shot, a lost
+	fight, the puck leaving the rink, a reset -- and none of them said so,
+	so the indicator would latch on the first time you touched the puck and
+	stay on for the rest of the round.
+]]
+local function setPuckOwner(player: Player?)
+	if puckOwner == player then
+		return
+	end
+	local previous = puckOwner
+	puckOwner = player
+
+	if previous and previous.Parent then
+		Remotes.Event("HockeyScore"):FireClient(previous, { carrying = false })
+	end
+	if player and player.Parent then
+		Remotes.Event("HockeyScore"):FireClient(player, { carrying = true })
+	end
+end
+
+
 local RINK_LENGTH = 300
 local RINK_WIDTH = 150
 local BOARD_HEIGHT = 11
@@ -484,7 +510,7 @@ local function stepPossession()
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
-			puckOwner = nil
+			setPuckOwner(nil)
 		else
 			local ahead = root.Position
 				+ root.CFrame.LookVector * Config.Hockey.CarryDistance
@@ -513,10 +539,9 @@ local function stepPossession()
 			continue
 		end
 		if (root.Position - live.Position).Magnitude <= Config.Hockey.PickupRange then
-			puckOwner = player
+			setPuckOwner(player)
 			live:SetAttribute("LastTouchUserId", player.UserId)
 			Sound.At("Pickup", live.Position, 0.7)
-			Remotes.Event("HockeyScore"):FireClient(player, { carrying = true })
 			return
 		end
 	end
@@ -536,7 +561,7 @@ function HockeyService.ShootPuck(player: Player, direction: any)
 		return
 	end
 
-	puckOwner = nil
+	setPuckOwner(nil)
 	-- A moment before you can scoop it straight back up.
 	pickupBlockedUntil[player] = os.clock() + 0.6
 
@@ -630,7 +655,7 @@ local function checkGoals()
 
 			Sound.At("RoundEnd", live.Position, 1.2)
 			dropPuck()
-			puckOwner = nil
+			setPuckOwner(nil)
 			return
 		end
 	end
@@ -825,7 +850,7 @@ function HockeyService.EndFight(fight: Fight, winner: Player, loser: Player)
 	-- Losing the fight means losing the puck, and you cannot scoop it back up
 	-- on your way to the box.
 	if puckOwner == loser then
-		puckOwner = nil
+		setPuckOwner(nil)
 		pickupBlockedUntil[loser] = os.clock() + Config.Hockey.PenaltySeconds
 	end
 

@@ -282,6 +282,10 @@ check("every sound the code asks for exists", #missingReferenced == 0,
 	own checks, on the specific behaviours that have already bitten.
 ]]
 print("")
+print("Remotes:")
+--[[REMOTECHECKS]]
+
+print("")
 print("Lighting ownership:")
 --[[LIGHTINGCHECK]]
 
@@ -475,8 +479,71 @@ LIGHTING_CHECK = (
     )
 )
 
+
+# ----------------------------------------------------------------------------
+# Is anybody listening?
+#
+# Every one of the four sub-game remotes was fired by the server and handled
+# by nobody. Hud had the menu panel, the offer banner and the join toast all
+# built; Controls had SetMenuOrder and SetPendingOffer with no callers. So
+# pressing B asked the server for the menu, the server answered, and nothing
+# happened -- which is the literal cause of "I cannot figure out how to play
+# the different games". Every piece existed and none of them were connected.
+#
+# Nothing catches that by behaviour: both halves are correct on their own and
+# the suite exercises each in isolation quite happily. It is only visible by
+# asking, across the whole tree, whether each message has a reader.
+
+FIRE_TO_CLIENT = re.compile(r'Remotes\.Event\(\s*"([A-Za-z]+)"\s*\)\s*:\s*Fire(?:All)?Clients?\b')
+ON_CLIENT = re.compile(r'Remotes\.Event\(\s*"([A-Za-z]+)"\s*\)\s*\.\s*OnClientEvent')
+FIRE_TO_SERVER = re.compile(r'Remotes\.Event\(\s*"([A-Za-z]+)"\s*\)\s*:\s*FireServer\b')
+ON_SERVER = re.compile(r'Remotes\.Event\(\s*"([A-Za-z]+)"\s*\)\s*\.\s*OnServerEvent')
+
+
+def scan(folders, pattern):
+    found = set()
+    for folder in folders:
+        base = os.path.join(SRC, folder)
+        if not os.path.isdir(base):
+            continue
+        for root, _dirs, names in os.walk(base):
+            for name in sorted(names):
+                if not name.endswith(".luau"):
+                    continue
+                with open(os.path.join(root, name), encoding="utf-8") as handle:
+                    for line in handle:
+                        if line.strip().startswith("--"):
+                            continue
+                        for hit in pattern.findall(line):
+                            found.add(hit)
+    return found
+
+
+SENT_DOWN = scan(["server"], FIRE_TO_CLIENT)
+HEARD_DOWN = scan(["client", "shared"], ON_CLIENT)
+SENT_UP = scan(["client", "shared"], FIRE_TO_SERVER)
+HEARD_UP = scan(["server"], ON_SERVER)
+
+DEAF_CLIENT = sorted(SENT_DOWN - HEARD_DOWN)
+DEAF_SERVER = sorted(SENT_UP - HEARD_UP)
+
+
+def verdict(label, missing):
+    return 'check("%s", %s, %s)' % (
+        label,
+        "true" if not missing else "false",
+        '""' if not missing else '"' + ", ".join(missing) + '"',
+    )
+
+
+REMOTE_CHECKS = "\n".join([
+    verdict("every remote the server fires has a client listening", DEAF_CLIENT),
+    verdict("every remote the client fires has a server listening", DEAF_SERVER),
+])
+
 harness = (
     TEMPLATE
+    .replace("--[[REMOTECHECKS]]", REMOTE_CHECKS)
     .replace("--[[LIGHTINGCHECK]]", LIGHTING_CHECK)
     .replace("--[[STUBS]]", read(HERE, "stubs.luau"))
     .replace("--[[CONFIG]]", strip(read(SRC, "shared", "Config.luau")))

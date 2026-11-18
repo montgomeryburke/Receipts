@@ -464,6 +464,42 @@ Config.Driving = {
 	-- the road material claims.
 	WheelFriction = 1.5,
 	WheelFrictionWeight = 5,
+
+	--[[
+		Drivetrain modes, for the off-roaders.
+
+		The point of three modes is that the mud pit should be a decision
+		rather than a wall. In 2WD you bog down and have to pick a line; drop
+		to 4L and you crawl through anything but cannot chase anybody. The
+		numbers are deliberately a trade: 4L has four times the torque of
+		2WD and less than half the speed, so nobody drives around in it.
+
+		Cycled in this order, and the middle one is where a vehicle starts,
+		because 4H is the one that is never actively wrong.
+	]]
+	Modes = {
+		{ id = "2WD", label = "2WD", speedBias = 1.12, torqueBias = 0.75, allWheel = false },
+		{ id = "4H", label = "4H", speedBias = 1.0, torqueBias = 1.0, allWheel = true },
+		{ id = "4L", label = "4L", speedBias = 0.48, torqueBias = 2.2, allWheel = true },
+	},
+	StartingMode = 2,
+
+	--[[
+		Mud takes grip, not just speed.
+
+		Mud used to only slow you down, which made it a speed bump rather
+		than terrain -- and left the diff lock with nothing to do. Taking
+		grip instead means mud makes you slide and spin, and locking the diff
+		is the answer to it. That is the whole reason the button exists.
+	]]
+	MudGripFactor = 0.42,
+	DiffLockGripBias = 1.7,
+	DiffLockTorqueBias = 1.25,
+
+	-- The winch: hook to anything anchored and reel yourself out.
+	WinchRange = 70,
+	WinchReelSpeed = 14,
+	WinchMinLength = 6,
 }
 
 --[[
@@ -669,6 +705,12 @@ Config.Carnival = {
 }
 
 Config.Arcade = {
+	-- A pillar of light over every activity. Tall enough to clear the
+	-- tallest tower so it is visible from the far side of the map, which is
+	-- the entire point of it.
+	BeaconHeight = 420,
+	-- Past this the name is clutter; the colour alone still reads.
+	BeaconNameDistance = 900,
 	-- How close you have to be for a venue to offer you a game.
 	OfferRadius = 150,
 	-- And how long before it asks again, if you said no or ignored it.
@@ -694,6 +736,94 @@ Config.Bots = {
 	places disagreeing about what that is shows up as a scope that un-zooms
 	to the wrong place.
 ]]
+--[[
+	The help panel's contents.
+
+	This exists because of a specific play-test complaint -- "I cannot
+	figure out how to play the different games" -- and that complaint is the
+	whole specification. A 2000-stud map with a dozen activities and three
+	keys that mean different things in each of them is unlearnable by
+	exploration alone.
+
+	Every entry describes something that EXISTS. The temptation with a help
+	file is to write it from the plan rather than from the game, which
+	produces instructions for features nobody can find -- worse than no help
+	at all, because it makes the player hunt for something that is not
+	there. Entries get added as systems land, not before.
+
+	The keywords are what the search box matches on, so they include the
+	words a player would actually type, including the wrong ones: "gun" for
+	the weapon list, "stuck" for the winch, "lost" for travel.
+]]
+Config.Help = {
+	{
+		question = "How do I find the different games?",
+		answer = "Press B for the menu and pick one -- it takes you straight there "
+			.. "and fills the teams out with bots. Or look for the coloured pillars "
+			.. "of light: there is one over every activity on the map.",
+		keywords = { "games", "lost", "menu", "find", "where", "travel", "beacon", "sub" },
+	},
+	{
+		question = "What do the keys along the bottom of the screen mean?",
+		answer = "Those are the keys that are live RIGHT NOW. They change depending on "
+			.. "what you are doing, so Q is your melee on foot, your guard in a "
+			.. "fight and your drivetrain in a truck. The strip always shows the "
+			.. "current set.",
+		keywords = { "keys", "controls", "buttons", "bar", "bottom", "strip", "bind" },
+	},
+	{
+		question = "How do I shoot and switch weapons?",
+		answer = "Left click fires, R reloads, and the number keys 1 to 7 pick a "
+			.. "weapon. G throws a grenade without changing what is in your hands. "
+			.. "F sets off a diamond round.",
+		keywords = { "shoot", "gun", "fire", "weapon", "reload", "grenade", "nade", "switch" },
+	},
+	{
+		question = "How does the sniper zoom work?",
+		answer = "Right click to zoom, and keep right clicking to step through the "
+			.. "magnifications. You move much slower while scoped, which is what "
+			.. "stops a 50x scope being a free sprinting wallhack.",
+		keywords = { "sniper", "zoom", "scope", "rifle", "magnify", "aim" },
+	},
+	{
+		question = "How do I play hockey, and how do fights work?",
+		answer = "Skate over the puck to pick it up and left click to shoot it. Get "
+			.. "next to an opponent to drop the gloves. In a fight: F punches, hold "
+			.. "Q to guard. Punching into a raised guard barely hurts, so watch for "
+			.. "theirs to drop. Your gun still works the whole time.",
+		keywords = { "hockey", "ice", "puck", "fight", "punch", "block", "guard", "stick", "rink" },
+	},
+	{
+		question = "How do I ski, snowboard or ride a tube?",
+		answer = "Take the chairlift or drive an off-roader up the mountain, then "
+			.. "grab gear from the rack at the summit. E shoves and boosts, space "
+			.. "bails out. Hit the table-top jumps for tricks -- spin in the air and "
+			.. "it scores. A tube goes straight off the bottom into the lazy river.",
+		keywords = { "ski", "snowboard", "tube", "mountain", "jump", "trick", "slope", "river", "bike" },
+	},
+	{
+		question = "How do I hang glide?",
+		answer = "Grab a glider at the summit and run off the edge. W dives for speed, "
+			.. "S climbs. Your guns work in the air, which is the point of being up "
+			.. "there. Space pops a parachute if you get shot down.",
+		keywords = { "glide", "glider", "hang", "fly", "air", "parachute", "bail" },
+	},
+	{
+		question = "How do I drive, and what if I get stuck?",
+		answer = "WASD drives, shift is turbo, space bails out. On something fitted "
+			.. "for it: Q changes drivetrain, E locks the diff, C hooks the winch to "
+			.. "a tree and holding X reels you out of the mud.",
+		keywords = { "drive", "car", "truck", "vehicle", "stuck", "winch", "mud", "diff", "4wd", "gear" },
+	},
+	{
+		question = "What is there at the carnival?",
+		answer = "Seven stalls, all played by shooting them: a dunk tank, a duck "
+			.. "gallery, a high striker, a balloon board, milk bottles, whack-a-mole "
+			.. "and a cannon range. Clearing a whole board pays a bonus.",
+		keywords = { "carnival", "fair", "stall", "dunk", "duck", "balloon", "bottle", "mole", "cannon" },
+	},
+}
+
 Config.Visuals = {
 	-- Wider than Roblox's 70. More of the map on screen and a stronger
 	-- sense of speed, which is most of why a modern shooter feels quick.
@@ -705,6 +835,84 @@ Config.Visuals = {
 	EnemyOutline = Color3.fromRGB(255, 70, 70),
 	FriendlyOutline = Color3.fromRGB(90, 230, 140),
 	OutlineTransparency = 0.15,
+}
+
+--[[
+	Riding: skis, snowboard, tube, bike.
+
+	The boost is always worth pressing, which is deliberate -- at 80 studs a
+	second down a mountain there is no time to agonise over a decision. What
+	makes it interesting is that it is worth MORE next to somebody, because
+	the same key shoves them off their line. That is what makes two people on
+	the same hill a race rather than two solo runs.
+
+	The shove is sideways and up, not forwards: the point is to put them into
+	a tree, not to kill them. Shooting them is already available.
+]]
+--[[
+	Petrol, and things burning.
+
+	The numbers are tuned around one idea: pouring is a PLAN, not a weapon.
+	A puddle takes a fifth of a can and goes down slowly, so laying a trail
+	across a doorway costs you the fight you would otherwise be having --
+	and an unlit one evaporates, so it has to be a plan you follow through.
+
+	BurnDamage is per half-second, so standing in it is survivable for a
+	moment and fatal if you panic and run the wrong way. That is the
+	intended feeling: fire is an area you must leave, not an instant kill.
+]]
+Config.Fire = {
+	CanFuel = 100,
+	FuelPerPuddle = 20,
+	PourInterval = 0.18,
+	PuddleSize = 4.2,
+	-- Unlit petrol evaporates, or twenty players pouring for ten minutes
+	-- leaves the map permanently ankle-deep in it.
+	PuddleLifetime = 60,
+
+	-- Fire jumps between puddles this close, after a readable pause. The
+	-- pause is what turns a line of puddles into a fuse you can watch
+	-- travel rather than one long explosion.
+	SpreadRadius = 7,
+	SpreadDelay = 0.18,
+
+	LightRange = 14,
+	BurnSeconds = 12,
+	BurnInterval = 0.5,
+	BurnRadius = 3.4,
+	BurnDamage = 8,
+
+	--[[
+		Cans come in small CLUSTERS, not spread evenly.
+
+		They were on a ring of ten, which put them 310 studs apart -- so the
+		chain reaction could never once fire between two map-spawned cans.
+		The code for it was dead and the "chain reaction" idea was
+		unachievable, which is the kind of thing that looks finished and is
+		not. A huddle of three is a bomb worth shooting and a landmark worth
+		remembering; a lone can is neither.
+	]]
+	CanClusters = 5,
+	CansPerCluster = 3,
+	ClusterSpread = 9,
+	CanRingFactor = 0.26,
+	CanRespawnSeconds = 18,
+	CanBlastRadius = 18,
+	CanBlastDamage = 72,
+	CanVehicleMultiplier = 1.6,
+	CanChainRadius = 18,
+	ChainDelay = 0.15,
+	-- A cluster of cans must not recurse forever.
+	MaxChainDepth = 6,
+}
+
+Config.Riding = {
+	BoostSeconds = 1.2,
+	BoostMultiplier = 1.5,
+	ShoveCooldown = 3.5,
+	ShoveRange = 14,
+	ShoveForce = 55,
+	ShoveLift = 16,
 }
 
 Config.Movement = {
@@ -1136,6 +1344,10 @@ export type ConfigType = {
 		MaxSteerAngle: number, MinSteerAngle: number,
 		SteerSpeed: number, SteerTorque: number,
 		WheelFriction: number, WheelFrictionWeight: number,
+		Modes: { { id: string, label: string, speedBias: number, torqueBias: number, allWheel: boolean } },
+		StartingMode: number,
+		MudGripFactor: number, DiffLockGripBias: number, DiffLockTorqueBias: number,
+		WinchRange: number, WinchReelSpeed: number, WinchMinLength: number,
 	},
 	Wildlife: {
 		ElephantCount: number, ElephantSpeed: number,
@@ -1145,6 +1357,24 @@ export type ConfigType = {
 	GrenadeKeyWeapon: string,
 	WeaponsAlwaysAvailable: boolean,
 	Movement: { JumpPower: number, HeadshotMultiplier: number, ScopedSpeedFactor: number },
+	Help: { { question: string, answer: string, keywords: { string } } },
+	Fire: {
+		CanFuel: number, FuelPerPuddle: number, PourInterval: number,
+		PuddleSize: number, PuddleLifetime: number,
+		SpreadRadius: number, SpreadDelay: number,
+		LightRange: number, BurnSeconds: number, BurnInterval: number,
+		BurnRadius: number, BurnDamage: number,
+		CanClusters: number, CansPerCluster: number, ClusterSpread: number,
+		CanRingFactor: number, CanRespawnSeconds: number,
+		CanBlastRadius: number, CanBlastDamage: number,
+		CanVehicleMultiplier: number, CanChainRadius: number,
+		ChainDelay: number, MaxChainDepth: number,
+	},
+	Riding: {
+		BoostSeconds: number, BoostMultiplier: number,
+		ShoveCooldown: number, ShoveRange: number,
+		ShoveForce: number, ShoveLift: number,
+	},
 	Visuals: {
 		BaseFieldOfView: number,
 		EnemyOutline: Color3,
@@ -1158,7 +1388,10 @@ export type ConfigType = {
 		CratePoints: number, CrateStackBonus: number, CannonCooldown: number,
 		ResetSeconds: number,
 	},
-	Arcade: { OfferRadius: number, ReofferSeconds: number },
+	Arcade: {
+		OfferRadius: number, ReofferSeconds: number,
+		BeaconHeight: number, BeaconNameDistance: number,
+	},
 	Bots: {
 		Health: number,
 		WalkSpeed: number,

@@ -306,6 +306,8 @@ local nextShotFeedback = 0
 local inFight = false
 local guardUp = false
 local heldTool: string? = nil
+local pouring = false
+local nextPourAt = 0
 local guardKeyDown = false
 local reelKeyDown = false
 local shownContext: string? = nil
@@ -709,7 +711,28 @@ local CONTEXT_BINDINGS: { [string]: { [Enum.KeyCode]: Binding } } = {
 		},
 	},
 
+	--[[
+		Holding something that is not a gun.
+
+		Pouring is on Q rather than the mouse, which is a deliberate
+		departure from how a tool like this would normally work. The rule for
+		this whole game is that nothing ever takes your gun away -- that is
+		what makes a fight on an ice rink a fight rather than a cutscene --
+		and a gas can is not an exception just because it is held in the same
+		hand. So: the mouse still shoots, Q pours, F lights it.
+	]]
 	Tool = {
+		[Enum.KeyCode.Q] = {
+			label = "POUR",
+			-- Held. A puddle every fifth of a second, so laying a trail
+			-- takes real time and is visible while you do it.
+			down = function()
+				pouring = true
+			end,
+			up = function()
+				pouring = false
+			end,
+		},
 		[Enum.KeyCode.F] = {
 			label = "IGNITE",
 			down = function()
@@ -739,7 +762,7 @@ local BASE_ACTIONS: { [string]: { { key: string, label: string } } } = {
 		{ key = "MOUSE", label = "SHOOT" },
 	},
 	Tool = {
-		{ key = "LMB", label = "POUR" },
+		{ key = "MOUSE", label = "STILL SHOOTS" },
 	},
 }
 
@@ -868,6 +891,29 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		a 2000-stud map to find out what is in the corner of it. Y accepts an
 		offer when you are already standing in a venue.
 	]]
+	--[[
+		H: what do I do, and take me there.
+
+		Deliberately NOT in the context table. Everything in there changes
+		meaning depending on what you are doing, and the one key whose job
+		is to explain that cannot itself be conditional -- a player who is
+		lost enough to need it is exactly the player who should not have to
+		work out which mode they are in first.
+	]]
+	if input.KeyCode == Enum.KeyCode.H then
+		if Hud.HelpOpen() then
+			Hud.HideHelp()
+			Controls.SetMouseFree(false)
+		else
+			-- Ask for a fresh list on open, so the player counts beside each
+			-- activity are current rather than whatever they were last time.
+			Remotes.Event("RequestArcadeMenu"):FireServer()
+			Hud.ShowHelp()
+			Controls.SetMouseFree(true)
+		end
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.B then
 		if Hud.ArcadeMenuOpen() then
 			Hud.HideArcadeMenu()
@@ -907,6 +953,12 @@ local function onInputBegan(input: InputObject, processed: boolean)
 			Controls.SetMouseFree(false)
 			return
 		end
+	end
+
+	if Hud.HelpOpen() and input.KeyCode == Enum.KeyCode.Escape then
+		Hud.HideHelp()
+		Controls.SetMouseFree(false)
+		return
 	end
 
 	if input.KeyCode == Enum.KeyCode.G then
@@ -1002,6 +1054,18 @@ local function onHeartbeat()
 	end
 	if firing and automatic then
 		tryFire()
+	end
+
+	-- Pouring, while Q is held and there is something to pour. Paced here
+	-- rather than on the keypress because it is a continuous action, and
+	-- paced at all because one request per frame is sixty a second for a
+	-- thing the server does five times a second.
+	if pouring and heldTool then
+		local pourNow = os.clock()
+		if pourNow >= nextPourAt then
+			nextPourAt = pourNow + 0.15
+			Remotes.Event("PourGas"):FireServer()
+		end
 	end
 
 	local now = os.clock()
@@ -1391,6 +1455,11 @@ end
 ]]
 function Controls.SetTool(name: string?)
 	heldTool = name
+	if not name then
+		-- Dropping the can mid-pour must stop the pour, or the request
+		-- keeps going out every frame for the rest of the round.
+		pouring = false
+	end
 	refreshActionBar()
 end
 
