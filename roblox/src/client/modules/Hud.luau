@@ -76,6 +76,12 @@ local respawnToken = 0
 local fightLabel: TextLabel? = nil
 local fightCount: TextLabel? = nil
 local fightToken = 0
+local arcadePanel: Frame? = nil
+local arcadeList: Frame? = nil
+local arcadeOffer: TextLabel? = nil
+local arcadeOfferToken = 0
+local arcadeChoices: { [string]: TextButton } = {}
+local arcadePick: ((string) -> ())? = nil
 local wienerOverlay: TextLabel
 local toastHolder: Frame
 
@@ -643,6 +649,63 @@ function Hud.Build()
 		TextColor3 = Color3.fromRGB(255, 240, 200),
 		Visible = false,
 		ZIndex = 12,
+	})
+
+	-- ------------------------------------------------- the sub-game menu
+	local panel = makeFrame(screen, {
+		Size = UDim2.fromOffset(460, 440),
+		Position = UDim2.new(0.5, -230, 0.5, -220),
+		BackgroundColor3 = Color3.fromRGB(10, 14, 20),
+		BackgroundTransparency = 0.08,
+		Visible = false,
+		ZIndex = 30,
+	})
+	local panelEdge = Instance.new("UIStroke")
+	panelEdge.Color = Color3.fromRGB(120, 200, 255)
+	panelEdge.Thickness = 2
+	panelEdge.Transparency = 0.25
+	panelEdge.Parent = panel
+
+	makeLabel(panel, {
+		Size = UDim2.new(1, -24, 0, 34),
+		Position = UDim2.fromOffset(12, 10),
+		Text = "PICK A GAME",
+		TextSize = 24,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+	makeLabel(panel, {
+		Size = UDim2.new(1, -24, 0, 18),
+		Position = UDim2.fromOffset(12, 44),
+		Text = "You are taken straight there. Teams are filled with CPU players.",
+		TextSize = 12,
+		TextColor3 = Color3.fromRGB(150, 168, 186),
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+
+	local list = makeFrame(panel, {
+		Size = UDim2.new(1, -24, 1, -78),
+		Position = UDim2.fromOffset(12, 68),
+		BackgroundTransparency = 1,
+	})
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Padding = UDim.new(0, 6)
+	listLayout.Parent = list
+
+	arcadePanel = panel
+	arcadeList = list
+
+	-- The walk-in offer.
+	arcadeOffer = makeLabel(screen, {
+		Name = "ArcadeOffer",
+		Size = UDim2.new(1, 0, 0, 58),
+		Position = UDim2.new(0, 0, 0.28, 0),
+		Text = "",
+		TextSize = 22,
+		TextColor3 = Color3.fromRGB(255, 238, 180),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = false,
+		ZIndex = 14,
 	})
 
 	-- The motion tracker, bottom left above the health bar.
@@ -1281,6 +1344,122 @@ function Hud.FightSwings(count: number)
 	if fightCount and fightCount.Visible then
 		fightCount.Text = `MASH  F   ×{count}`
 	end
+end
+
+--[[
+	The sub-game menu.
+
+	Press the key, pick a game, get taken there. This exists because a
+	2000-stud map hides its own contents: there is a hockey rink, a ski
+	mountain, a carnival and a river out there and no way to know it from
+	the middle of the city.
+]]
+function Hud.ShowArcadeMenu(games: { { id: string, name: string, objective: string, players: number } })
+	local panel = arcadePanel
+	local list = arcadeList
+	if not panel or not list then
+		return
+	end
+
+	for _, old in list:GetChildren() do
+		if not old:IsA("UIListLayout") then
+			old:Destroy()
+		end
+	end
+
+	arcadeChoices = {}
+	for index, game in games do
+		local row = Instance.new("TextButton")
+		row.Name = game.id
+		row.Size = UDim2.new(1, 0, 0, 56)
+		row.BackgroundColor3 = Color3.fromRGB(26, 32, 44)
+		row.BackgroundTransparency = 0.1
+		row.BorderSizePixel = 0
+		row.AutoButtonColor = true
+		row.Font = Enum.Font.GothamBold
+		row.TextColor3 = Color3.fromRGB(240, 246, 252)
+		row.TextSize = 18
+		row.TextXAlignment = Enum.TextXAlignment.Left
+		row.Text = `  {index}.  {game.name}`
+		row.LayoutOrder = index
+		row.Parent = list
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 6)
+		corner.Parent = row
+
+        local blurb = makeLabel(row, {
+			Size = UDim2.new(1, -24, 0, 18),
+			Position = UDim2.fromOffset(22, 32),
+			Text = game.objective,
+			TextSize = 13,
+			TextColor3 = Color3.fromRGB(160, 178, 196),
+		})
+		blurb.Name = "Blurb"
+
+		arcadeChoices[game.id] = row
+	end
+
+	panel.Visible = true
+end
+
+--[[ Close the menu. ]]
+function Hud.HideArcadeMenu()
+	if arcadePanel then
+		arcadePanel.Visible = false
+	end
+end
+
+function Hud.ArcadeMenuOpen(): boolean
+	return arcadePanel ~= nil and arcadePanel.Visible
+end
+
+--[[ Wire a callback to each row, once the menu has been built. ]]
+function Hud.OnArcadePick(callback: (string) -> ())
+	arcadePick = callback
+	for id, row in arcadeChoices do
+		row.Activated:Connect(function()
+			if arcadePick then
+				arcadePick(id)
+			end
+		end)
+	end
+end
+
+--[[
+	"You are standing on a basketball court. Want a game?"
+
+	Shown when you walk into a venue, because somebody already standing on
+	the court should not have to open a menu to use it.
+]]
+function Hud.ShowArcadeOffer(name: string, objective: string, acceptKey: string)
+	if not arcadeOffer then
+		return
+	end
+	arcadeOffer.Text = `{string.upper(name)}  —  {objective}\nPress {acceptKey} to play`
+	arcadeOffer.Visible = true
+
+	arcadeOfferToken += 1
+	local token = arcadeOfferToken
+	task.delay(9, function()
+		if arcadeOfferToken == token and arcadeOffer then
+			arcadeOffer.Visible = false
+		end
+	end)
+end
+
+function Hud.HideArcadeOffer()
+	if arcadeOffer then
+		arcadeOffer.Visible = false
+	end
+end
+
+--[[ Confirmation that you are in, and what the game wants from you. ]]
+function Hud.ShowArcadeJoined(name: string, objective: string)
+	Hud.HideArcadeOffer()
+	Hud.HideArcadeMenu()
+	Hud.Medal(string.upper(name))
+	Hud.SetStatus(`{string.upper(name)}  —  {objective}`, true)
 end
 
 function Hud.SetStatus(text: string, good: boolean)

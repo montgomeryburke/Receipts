@@ -55,7 +55,16 @@ local Config = (function()
 {read(SRC, "shared", "Config.luau")}
 end)()
 
+-- The resort and the rink both offer themselves as sub-games now. A map test
+-- does not care which games exist, only that the geometry builds, so this
+-- records the registrations and ignores them.
+ARCADE_REGISTERED = {{}}
+local ArcadeService = {{
+	Register = function(info) table.insert(ARCADE_REGISTERED, info) end,
+}}
+
 local ResortService = (function()
+local ArcadeService = ArcadeService
 local Util = Util
 -- The chairlift runs on a Heartbeat now, so the resort needs RunService.
 local RunService = game:GetService("RunService")
@@ -67,6 +76,7 @@ local Signal = (function()
 end)()
 
 local HockeyService = (function()
+local ArcadeService = ArcadeService
 local Util = Util
 local Config = Config
 local Signal = Signal

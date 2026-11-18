@@ -324,6 +324,74 @@ do
 	check("you cannot fight your own team", HockeyService.StartFight(killer, prey) == false, "")
 end
 
+-- --------------------------------------------------------- the sub-games
+-- The whole point of these is discoverability: a 2000-stud map hides its own
+-- contents, so there is a menu that takes you straight to a game, and a
+-- prompt if you walk into one. And a venue is filled out with bots, because
+-- an empty rink is worse than no rink.
+DUMP("")
+DUMP("Sub-games:")
+do
+	local menu = ArcadeService.Menu()
+	check("the venues are registered", #menu >= 3,
+		string.format("%d games: %s", #menu, (function()
+			local names = {}
+			for _, g in menu do table.insert(names, g.id) end
+			return table.concat(names, ", ")
+		end)()))
+
+	local hasHockey = false
+	for _, game in menu do
+		if game.id == "hockey" then hasHockey = true end
+	end
+	check("hockey is one of them", hasHockey, "")
+
+	-- Every game needs a one-line objective, because that line IS the
+	-- instructions and a game nobody can work out is a game nobody plays.
+	local silent = {}
+	for _, game in menu do
+		if type(game.objective) ~= "string" or #game.objective < 10 then
+			table.insert(silent, game.id)
+		end
+	end
+	check("every game says how to play it", #silent == 0, table.concat(silent, ", "))
+
+	-- Joining puts you there and fills the teams out with bots.
+	BotService.Clear(nil)
+	local joined = ArcadeService.Join(killer, "hockey")
+	check("you can join a game", joined, "")
+	check("and you are taken to it", ArcadeService.VenueOf(killer) == "hockey",
+		tostring(ArcadeService.VenueOf(killer)))
+
+	local staff = BotService.InVenue("hockey")
+	check("the teams are filled with CPU players", #staff > 0,
+		string.format("%d bots", #staff))
+
+	-- A real player takes a slot, so one fewer bot is needed on that side.
+	local before = #BotService.InVenue("hockey")
+	ArcadeService.Join(prey, "hockey")
+	local after = #BotService.InVenue("hockey")
+	check("a second player replaces a bot rather than adding to the game",
+		after <= before, string.format("%d bots, was %d", after, before))
+
+	-- And joining goes to the smaller side, so it never makes it lopsided.
+	check("players are split across both sides",
+		ArcadeService.SideOf(killer) ~= ArcadeService.SideOf(prey),
+		string.format("%s vs %s", tostring(ArcadeService.SideOf(killer)),
+			tostring(ArcadeService.SideOf(prey))))
+
+	-- Bots are shootable, like everything else here.
+	local target = BotService.InVenue("hockey")[1]
+	if target then
+		local head = target.model:FindFirstChild("Head")
+		local handled = BotService.RegisterHit(head, 1000, killer)
+		check("a bot can be shot", handled and target.dead, tostring(target.dead))
+	end
+
+	ArcadeService.Leave(killer)
+	check("and you can leave", ArcadeService.VenueOf(killer) == nil, "")
+end
+
 DUMP(if failures == 0 then "MEDALS WORK" else failures .. " MEDAL FAILURES")
 '''
 
@@ -343,8 +411,8 @@ def strip(s):
     return '\n'.join(out)
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
-SERVER = ['PlayerState', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
-          'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
+SERVER = ['PlayerState', 'TeamService', 'BotService', 'ArcadeService', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
+          'CarnivalService', 'ProjectileService', 'WeaponService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',
           'GraphicsService']
 

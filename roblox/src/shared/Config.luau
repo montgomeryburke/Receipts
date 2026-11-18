@@ -603,8 +603,49 @@ Config.WeaponsAlwaysAvailable = true
 	a 16-stud-a-second walk and a 50 jump -- fine for an obby, a plod across
 	a two-thousand-stud arena.
 ]]
+--[[
+	Computer players.
+
+	A venue with nobody in it is worse than no venue at all, and on a quiet
+	server that is every venue -- so every sub-game fills itself out with
+	bots. They are shootable and worth points, because the rule here is that
+	you can shoot anybody at any time, the goalie included.
+]]
+--[[
+	The sub-games.
+
+	Two ways in, on purpose: a menu key from anywhere, and a prompt when you
+	walk into a venue. Nobody should have to cross a 2000-stud map to find
+	out what is in the corner of it, and nobody who is already standing on a
+	basketball court should have to open a menu to use it.
+]]
+Config.Arcade = {
+	-- How close you have to be for a venue to offer you a game.
+	OfferRadius = 150,
+	-- And how long before it asks again, if you said no or ignored it.
+	ReofferSeconds = 45,
+}
+
+Config.Bots = {
+	Health = 70,
+	WalkSpeed = 20,
+	Points = 60,
+	RespawnDelay = 9,
+	-- How often a bot reconsiders. Four times a second looks identical to
+	-- sixty and costs a fifteenth as much, which matters at twenty bots.
+	ThinkInterval = 0.25,
+}
+
 Config.Movement = {
 	JumpPower = 62,
+	-- How much a headshot multiplies damage by. Was hardcoded in two
+	-- separate places, which is one place too many for a number anybody
+	-- would want to tune.
+	HeadshotMultiplier = 1.8,
+	-- Scoped, you move at a fraction of walking pace. It is the thing that
+	-- stops a 50x scope being a free sprinting wallhack, and it is what
+	-- makes committing to a shot feel like committing.
+	ScopedSpeedFactor = 0.42,
 }
 
 --[[
@@ -1013,7 +1054,15 @@ export type ConfigType = {
 	},
 	GrenadeKeyWeapon: string,
 	WeaponsAlwaysAvailable: boolean,
-	Movement: { JumpPower: number },
+	Movement: { JumpPower: number, HeadshotMultiplier: number, ScopedSpeedFactor: number },
+	Arcade: { OfferRadius: number, ReofferSeconds: number },
+	Bots: {
+		Health: number,
+		WalkSpeed: number,
+		Points: number,
+		RespawnDelay: number,
+		ThinkInterval: number,
+	},
 	Hockey: {
 		GoalPoints: number,
 		FightSeconds: number,

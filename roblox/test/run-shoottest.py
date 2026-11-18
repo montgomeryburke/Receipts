@@ -33,8 +33,9 @@ def strip(s):
 
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
-SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
-          'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
+SERVER = ['PlayerState', 'TeamService', 'BotService', 'ArcadeService', 'HockeyService',
+          'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
+          'CarnivalService', 'ProjectileService', 'WeaponService', 'PickupService',
           'EffectService', 'FlagService']
 
 parts = [read(HERE, 'stubs.luau'), read(HERE, 'serverstubs.luau'), '''

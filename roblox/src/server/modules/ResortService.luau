@@ -31,6 +31,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
+local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
 
 local ResortService = {}
 
@@ -1016,6 +1017,36 @@ function ResortService.Build(mapSize: number, parent: Instance): ResortBuild
 	}
 
 	local _ = jumps
+
+	-- Two sub-games up here: the downhill, and the river. Both are offered
+	-- from the menu so nobody has to find the mountain first.
+	ArcadeService.Register({
+		id = "downhill",
+		name = "Downhill",
+		objective = "Ski, board or bike to the bottom. Tricks off the jumps score.",
+		centre = summit,
+		spawns = {
+			summit + Vector3.new(-14, 4, 0),
+			summit + Vector3.new(14, 4, 0),
+			summit + Vector3.new(0, 4, 16),
+		},
+		perTeam = 3,
+		teamed = false,
+	})
+
+	ArcadeService.Register({
+		id = "river",
+		name = "Lazy River",
+		objective = "Ride a tube round the loop. Watch the sniper towers.",
+		centre = Vector3.new(0, 0, -ringRadius),
+		spawns = {
+			Vector3.new(0, 8, -ringRadius),
+			Vector3.new(ringRadius * 0.4, 8, -ringRadius),
+			Vector3.new(-ringRadius * 0.4, 8, -ringRadius),
+		},
+		perTeam = 2,
+		teamed = false,
+	})
 
 	return {
 		tubePads = tubePads,

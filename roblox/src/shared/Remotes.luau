@@ -47,6 +47,17 @@ local EVENT_NAMES = {
 	"FightStarted",
 	"FightSwing",
 	"FightResult",
+	-- The sub-games: the menu, the walk-in offer, and joining or leaving one.
+	-- The client tells the server it has scoped, so the server can slow the
+	-- player down. Movement speed is the server's to set.
+	"SetScoped",
+	"RequestArcadeMenu",
+	"ArcadeMenu",
+	"ArcadeOffer",
+	"ArcadeJoined",
+	"ArcadeLeft",
+	"JoinArcade",
+	"LeaveArcade",
 	"ShotFired",
 	"ThrowGrenade",
 	"RequestScoreboard",

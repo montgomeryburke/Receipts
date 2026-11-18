@@ -18,6 +18,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
+local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
@@ -508,6 +509,22 @@ function CarnivalService.Build(mapSize: number)
 		glow.Shadows = true
 		glow.Parent = bulb
 	end
+
+	-- Offered as a sub-game, so "fair games" is something you can pick from
+	-- a menu rather than something you have to stumble across.
+	ArcadeService.Register({
+		id = "carnival",
+		name = "Fair Games",
+		objective = "Dunk tank, duck shoot and the high striker. All of it scores.",
+		centre = Vector3.new(mapSize * 0.3, 0, 0),
+		spawns = {
+			Vector3.new(mapSize * 0.3 - 40, 6, 0),
+			Vector3.new(mapSize * 0.3 + 40, 6, 0),
+			Vector3.new(mapSize * 0.3, 6, 40),
+		},
+		perTeam = 2,
+		teamed = false,
+	})
 end
 
 function CarnivalService.Clear()

@@ -1430,6 +1430,204 @@ function VehicleService.DismountSkis(player: Player)
 	return false
 end
 
+--[[
+	A snowboard, and a downhill bike.
+
+	Both are the ski rig with different numbers and a different shape on top,
+	which is the whole reason skis were built as a board you are welded to
+	rather than a seat: anything you ride standing up is the same problem.
+
+	  - The BOARD carves harder and holds its speed better than skis, and
+	    spins more freely in the air, so it suits grabs and flips.
+	  - The BIKE is faster downhill, takes the biggest jumps, and will run
+	    the mountain trail as happily as the piste.
+
+	Both leave your weapons alone. Every sport here does.
+]]
+local function boardLike(
+	name: string,
+	label: string,
+	position: Vector3,
+	slopeSpeed: number,
+	carveRate: number,
+	dress: (Model, BasePart) -> ()
+): Model
+	local model = Instance.new("Model")
+	model.Name = name
+
+	local board = Util.Part({
+		Name = "Chassis",
+		Size = Vector3.new(4.5, 0.6, 13),
+		CFrame = CFrame.new(position),
+		Transparency = 1,
+		Anchored = false,
+		CustomPhysicalProperties = PhysicalProperties.new(0.2, 0.04, 0.3, 1, 1),
+		Parent = model,
+	})
+	model.PrimaryPart = board
+
+	dress(model, board)
+
+	local turn = Instance.new("AngularVelocity")
+	turn.Name = "TurnVelocity"
+	turn.Attachment0 = Util.Attachment(board, Vector3.new())
+	turn.RelativeTo = Enum.ActuatorRelativeTo.World
+	turn.MaxTorque = 160000
+	turn.AngularVelocity = Vector3.new()
+	turn.Enabled = true
+	turn.Parent = board
+
+	local upright = Instance.new("AlignOrientation")
+	upright.Name = "Upright"
+	upright.Attachment0 = Util.Attachment(board, Vector3.new(), "UprightAnchor")
+	upright.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	-- Not rigid: tipping it is how a trick happens.
+	upright.MaxTorque = 42000
+	upright.Responsiveness = 22
+	upright.CFrame = board.CFrame.Rotation
+	upright.Enabled = true
+	upright.Parent = board
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "RidePrompt"
+	prompt.ActionText = `Grab the {string.lower(label)}`
+	prompt.ObjectText = label
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 16
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = board
+	prompt.Triggered:Connect(function(player)
+		VehicleService.MountSkis(player, model)
+	end)
+
+	addVehicleLabel(board, label, Color3.fromRGB(230, 240, 255))
+
+	model:SetAttribute("Health", 34)
+	model:SetAttribute("MaxHealth", 34)
+	model:SetAttribute("VehicleKind", name)
+	model.Parent = workspace
+
+	active[model] = {
+		-- Driven by driveSkis: same physics, different numbers.
+		kind = "Skis",
+		chassis = board,
+		turn = turn,
+		upright = upright,
+		rider = nil,
+		airborneSince = nil,
+		spin = 0,
+		lastFacing = nil,
+		slopeSpeed = slopeSpeed,
+		carveRate = carveRate,
+	}
+	return model
+end
+
+function VehicleService.SpawnSnowboard(position: Vector3): Model
+	return boardLike("Snowboard", "Snowboard", position, 205, 2.9, function(model, board)
+		local deck = Util.Part({
+			Name = "Deck",
+			Size = Vector3.new(4.2, 0.5, 13),
+			CFrame = board.CFrame,
+			Color = Color3.fromRGB(60, 150, 230),
+			Material = Enum.Material.SmoothPlastic,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, deck)
+
+		-- Turned-up nose and tail, which is what makes it read as a board.
+		for _, endZ in { -1, 1 } do
+			local tip = Util.Part({
+				Name = "BoardTip",
+				Size = Vector3.new(4.2, 0.5, 2.4),
+				CFrame = board.CFrame
+					* CFrame.new(0, 0.5, endZ * 7)
+					* CFrame.Angles(math.rad(endZ * 22), 0, 0),
+				Color = Color3.fromRGB(40, 120, 200),
+				Material = Enum.Material.SmoothPlastic,
+				Anchored = false,
+				Massless = true,
+				Parent = model,
+			})
+			Util.Weld(board, tip)
+		end
+
+		for _, side in { -1, 1 } do
+			local binding = Util.Part({
+				Name = "Binding",
+				Size = Vector3.new(2.4, 0.9, 2.6),
+				CFrame = board.CFrame * CFrame.new(0, 0.7, side * 2.2),
+				Color = Color3.fromRGB(30, 32, 38),
+				Material = Enum.Material.Rubber,
+				Anchored = false,
+				Massless = true,
+				Parent = model,
+			})
+			Util.Weld(board, binding)
+		end
+	end)
+end
+
+function VehicleService.SpawnBike(position: Vector3): Model
+	return boardLike("Bike", "Downhill Bike", position, 240, 2.5, function(model, board)
+		local frame = Util.Part({
+			Name = "BikeFrame",
+			Size = Vector3.new(1, 3.2, 10),
+			CFrame = board.CFrame * CFrame.new(0, 2.6, 0),
+			Color = Color3.fromRGB(220, 70, 40),
+			Material = Enum.Material.Metal,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, frame)
+
+		-- Two wheels, fore and aft, welded on: decoration, like the board
+		-- itself, because the slope does the moving.
+		for _, endZ in { -1, 1 } do
+			local wheel = Util.Part({
+				Name = "BikeWheel",
+				Size = Vector3.new(0.7, 6.4, 6.4),
+				CFrame = board.CFrame * CFrame.new(0, 1.4, endZ * 4.6),
+				Shape = Enum.PartType.Cylinder,
+				Color = Color3.fromRGB(24, 24, 28),
+				Material = Enum.Material.Rubber,
+				Anchored = false,
+				Massless = true,
+				Parent = model,
+			})
+			Util.Weld(board, wheel)
+		end
+
+		local bars = Util.Part({
+			Name = "Handlebars",
+			Size = Vector3.new(5, 0.6, 0.6),
+			CFrame = board.CFrame * CFrame.new(0, 4.6, -3.6),
+			Color = Color3.fromRGB(40, 42, 48),
+			Material = Enum.Material.Metal,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, bars)
+
+		local saddle = Util.Part({
+			Name = "Saddle",
+			Size = Vector3.new(1.4, 0.6, 3),
+			CFrame = board.CFrame * CFrame.new(0, 4.4, 2.6),
+			Color = Color3.fromRGB(28, 28, 32),
+			Material = Enum.Material.Fabric,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, saddle)
+	end)
+end
+
 function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 	if kind == "TurretTruck" then
 		return VehicleService.SpawnTurretTruck(position)
@@ -1445,6 +1643,10 @@ function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 		return VehicleService.SpawnGlider(position)
 	elseif kind == "Skis" then
 		return VehicleService.SpawnSkis(position)
+	elseif kind == "Snowboard" then
+		return VehicleService.SpawnSnowboard(position)
+	elseif kind == "Bike" then
+		return VehicleService.SpawnBike(position)
 	elseif kind == "G-Wagon" or kind == "Hummer" or kind == "Jeep" then
 		-- The off-roaders, by name, for the mountain pads.
 		return VehicleService.SpawnCar(3, position, nil, kind)
@@ -1991,7 +2193,7 @@ local function driveSkis(model: Model, state: any, deltaTime: number)
 		local across = Vector3.new(-board.CFrame.LookVector.Z, 0, board.CFrame.LookVector.X)
 		steer = math.clamp(wish:Dot(across) * 1.6, -1, 1)
 	end
-	turn.AngularVelocity = Vector3.new(0, -steer * SKI_CARVE_RATE, 0)
+	turn.AngularVelocity = Vector3.new(0, -steer * (state.carveRate or SKI_CARVE_RATE), 0)
 
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
@@ -2013,7 +2215,7 @@ local function driveSkis(model: Model, state: any, deltaTime: number)
 				then (flatHeading.Unit * 0.55 + downhill.Unit * 0.45).Unit
 				else downhill.Unit
 
-			local target = blend * (steepness * SKI_SLOPE_SPEED)
+			local target = blend * (steepness * (state.slopeSpeed or SKI_SLOPE_SPEED))
 			local current = board.AssemblyLinearVelocity
 			local wanted = target - Vector3.new(current.X, 0, current.Z)
 			board.AssemblyLinearVelocity = current
@@ -2172,6 +2374,34 @@ end
 	Works on whatever they are currently driving; on foot it just makes them
 	run faster, so the same key always means "go faster".
 ]]
+--[[
+	Who is currently looking down a scope, and how fast they may move.
+
+	Kept here beside SetTurbo because both of them write WalkSpeed, and two
+	places writing the same property without knowing about each other is how
+	you get a player permanently stuck at sniper pace.
+]]
+local scoped: { [Player]: boolean? } = {}
+
+function VehicleService.SetScoped(player: Player, on: boolean)
+	-- nil rather than false, so the table does not grow an entry for every
+	-- player who ever un-scoped.
+	scoped[player] = if on then true else nil
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	-- Only touch it on foot: in a seat WalkSpeed is irrelevant anyway.
+	if humanoid.SeatPart then
+		return
+	end
+	humanoid.WalkSpeed = if on
+		then Config.Turbo.WalkSpeed * Config.Movement.ScopedSpeedFactor
+		else Config.Turbo.WalkSpeed
+end
+
 function VehicleService.SetTurbo(player: Player, on: boolean)
 	local state = PlayerState.Get(player)
 
@@ -2183,7 +2413,13 @@ function VehicleService.SetTurbo(player: Player, on: boolean)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.WalkSpeed = if on then Config.Turbo.SprintWalkSpeed else Config.Turbo.WalkSpeed
+		-- Sprinting beats being scoped: letting go of the scope should not
+		-- leave you stuck at sniper pace, and holding shift should always
+		-- make you faster.
+		humanoid.WalkSpeed = if on
+			then Config.Turbo.SprintWalkSpeed
+			elseif scoped[player] then Config.Turbo.WalkSpeed * Config.Movement.ScopedSpeedFactor
+			else Config.Turbo.WalkSpeed
 	end
 end
 
@@ -2514,8 +2750,9 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
 	-- Otherwise a player who leaves mid-ejection holds their claim forever,
-	-- and this table holds on to them.
+	-- and these tables hold on to them.
 	ejecting[player] = nil
+	scoped[player] = nil
 end)
 
 RunService.Heartbeat:Connect(step)

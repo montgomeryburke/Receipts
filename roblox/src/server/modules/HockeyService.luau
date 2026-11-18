@@ -35,6 +35,7 @@ local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 -- in, so without this every single goal threw "attempt to index nil" inside
 -- the Heartbeat connection and took the whole hockey step down with it.
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
+local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
 
 local HockeyService = {}
 
@@ -629,6 +630,23 @@ function HockeyService.Build(mapSize: number)
 
 	puckHome = centre + Vector3.new(0, 4, 0)
 	dropPuck()
+
+	-- Offer it as a sub-game: walk in and it asks, or pick it from the menu
+	-- and you are brought here.
+	ArcadeService.Register({
+		id = "hockey",
+		name = "Ice Hockey",
+		objective = "Shoot the puck into their net. Stick to an opponent starts a fight.",
+		centre = centre,
+		spawns = {
+			centre + Vector3.new(-30, 4, -40),
+			centre + Vector3.new(30, 4, -40),
+			centre + Vector3.new(-30, 4, 40),
+			centre + Vector3.new(30, 4, 40),
+		},
+		perTeam = 4,
+		teamed = true,
+	})
 
 	return { centre = centre, puckHome = puckHome }
 end

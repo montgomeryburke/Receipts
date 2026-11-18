@@ -643,8 +643,49 @@ Config.WeaponsAlwaysAvailable = true
 	a 16-stud-a-second walk and a 50 jump -- fine for an obby, a plod across
 	a two-thousand-stud arena.
 ]]
+--[[
+	Computer players.
+
+	A venue with nobody in it is worse than no venue at all, and on a quiet
+	server that is every venue -- so every sub-game fills itself out with
+	bots. They are shootable and worth points, because the rule here is that
+	you can shoot anybody at any time, the goalie included.
+]]
+--[[
+	The sub-games.
+
+	Two ways in, on purpose: a menu key from anywhere, and a prompt when you
+	walk into a venue. Nobody should have to cross a 2000-stud map to find
+	out what is in the corner of it, and nobody who is already standing on a
+	basketball court should have to open a menu to use it.
+]]
+Config.Arcade = {
+	-- How close you have to be for a venue to offer you a game.
+	OfferRadius = 150,
+	-- And how long before it asks again, if you said no or ignored it.
+	ReofferSeconds = 45,
+}
+
+Config.Bots = {
+	Health = 70,
+	WalkSpeed = 20,
+	Points = 60,
+	RespawnDelay = 9,
+	-- How often a bot reconsiders. Four times a second looks identical to
+	-- sixty and costs a fifteenth as much, which matters at twenty bots.
+	ThinkInterval = 0.25,
+}
+
 Config.Movement = {
 	JumpPower = 62,
+	-- How much a headshot multiplies damage by. Was hardcoded in two
+	-- separate places, which is one place too many for a number anybody
+	-- would want to tune.
+	HeadshotMultiplier = 1.8,
+	-- Scoped, you move at a fraction of walking pace. It is the thing that
+	-- stops a 50x scope being a free sprinting wallhack, and it is what
+	-- makes committing to a shot feel like committing.
+	ScopedSpeedFactor = 0.42,
 }
 
 --[[
@@ -1053,7 +1094,15 @@ export type ConfigType = {
 	},
 	GrenadeKeyWeapon: string,
 	WeaponsAlwaysAvailable: boolean,
-	Movement: { JumpPower: number },
+	Movement: { JumpPower: number, HeadshotMultiplier: number, ScopedSpeedFactor: number },
+	Arcade: { OfferRadius: number, ReofferSeconds: number },
+	Bots: {
+		Health: number,
+		WalkSpeed: number,
+		Points: number,
+		RespawnDelay: number,
+		ThinkInterval: number,
+	},
 	Hockey: {
 		GoalPoints: number,
 		FightSeconds: number,
@@ -1181,6 +1230,17 @@ local EVENT_NAMES = {
 	"FightStarted",
 	"FightSwing",
 	"FightResult",
+	-- The sub-games: the menu, the walk-in offer, and joining or leaving one.
+	-- The client tells the server it has scoped, so the server can slow the
+	-- player down. Movement speed is the server's to set.
+	"SetScoped",
+	"RequestArcadeMenu",
+	"ArcadeMenu",
+	"ArcadeOffer",
+	"ArcadeJoined",
+	"ArcadeLeft",
+	"JoinArcade",
+	"LeaveArcade",
 	"ShotFired",
 	"ThrowGrenade",
 	"RequestScoreboard",
@@ -1935,6 +1995,8 @@ local MatchService = tryRequire(modules, "MatchService")
 local GraphicsService = tryRequire(modules, "GraphicsService")
 local ScoreboardService = tryRequire(modules, "ScoreboardService")
 local HockeyService = tryRequire(modules, "HockeyService")
+local BotService = tryRequire(modules, "BotService")
+local ArcadeService = tryRequire(modules, "ArcadeService")
 
 tryStart("GraphicsService", GraphicsService)
 tryStart("TeamService", TeamService)
@@ -1942,6 +2004,8 @@ tryStart("WeaponService", WeaponService)
 tryStart("MonetizationService", MonetizationService)
 tryStart("ScoreboardService", ScoreboardService)
 tryStart("HockeyService", HockeyService)
+tryStart("BotService", BotService)
+tryStart("ArcadeService", ArcadeService)
 tryStart("MatchService", MatchService)
 
 -- ========================================================= 3. THE HUD FEED ==
@@ -2042,6 +2106,766 @@ print("[Nuclear Mud Arena] Server ready.")
         </Properties>
         <Item class="ModuleScript" referent="13">
           <Properties>
+            <string name="Name">ArcadeService</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Nuclear Mud Arena — the sub-games.
+
+	The game is a shooter with sports scattered through it, and the problem
+	with scattering sports through a 2000-stud map is that nobody finds them.
+	This is the fix, and it works two ways on purpose:
+
+	  1. Press the menu key anywhere and pick a game. You are taken straight
+	     there. Nobody should have to walk across a map to find out what is
+	     in the corner of it.
+	  2. Walk into a venue and it asks whether you want to play. If you say
+	     yes you are put on a side and the game starts.
+
+	Either way the roster is filled out with bots up to full teams, so a game
+	is never short. Real players take the empty slots first and bots only
+	make up the difference -- which is what "computer players play when there
+	aren't other online people" has to mean in practice.
+
+	And you keep your guns the whole time. That is the rule.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Signal = require(Shared:WaitForChild("Signal"))
+local Sound = require(Shared:WaitForChild("Sound"))
+
+local BotService = require(script.Parent:WaitForChild("BotService"))
+local TeamService = require(script.Parent:WaitForChild("TeamService"))
+
+local ArcadeService = {}
+
+--[[ Fired as (player, gameId) when somebody joins a sub-game. ]]
+ArcadeService.Joined = Signal.new()
+
+export type VenueInfo = {
+	id: string,
+	name: string,
+	-- One line, shown on screen when you join. This is the whole of the
+	-- game's instructions and it has to fit on one line.
+	objective: string,
+	-- Where the game is played, set when the map is built.
+	centre: Vector3,
+	-- Where a joining player is put down.
+	spawns: { Vector3 },
+	-- How many on each side for a full game.
+	perTeam: number,
+	-- Does it have sides at all? Bowling does not.
+	teamed: boolean,
+}
+
+local venues: { [string]: VenueInfo } = {}
+local order: { string } = {}
+
+-- Who is in which game, and which side they are on.
+local membership: { [Player]: { venue: string, team: number } } = {}
+
+-- Which venues have been filled out with bots.
+local staffed: { [string]: boolean } = {}
+
+--[[
+	Declare a venue.
+
+	Called by whichever service builds the place, so the geometry and the
+	game rules stay together and this module never has to know what a rink
+	looks like.
+]]
+function ArcadeService.Register(info: VenueInfo)
+	if not venues[info.id] then
+		table.insert(order, info.id)
+	end
+	venues[info.id] = info
+end
+
+function ArcadeService.Clear()
+	table.clear(venues)
+	table.clear(order)
+	table.clear(membership)
+	table.clear(staffed)
+	BotService.Clear(nil)
+end
+
+--[[ The list a player sees in the menu. ]]
+function ArcadeService.Menu(): { { id: string, name: string, objective: string, players: number } }
+	local out = {}
+	for _, id in order do
+		local info = venues[id]
+		if not info then
+			continue
+		end
+		local count = 0
+		for _, where in membership do
+			if where.venue == id then
+				count += 1
+			end
+		end
+		table.insert(out, {
+			id = id,
+			name = info.name,
+			objective = info.objective,
+			players = count,
+		})
+	end
+	return out
+end
+
+--[[
+	How many real players are on each side of a venue right now.
+]]
+local function humanCount(venueId: string): { [number]: number }
+	local counts = { [1] = 0, [2] = 0 }
+	for player, where in membership do
+		if where.venue == venueId and player.Parent then
+			counts[where.team] = (counts[where.team] or 0) + 1
+		end
+	end
+	return counts
+end
+
+--[[
+	Fill a venue out to full teams with bots.
+
+	Real players first: bots only ever make up the difference, and they are
+	topped up again whenever somebody joins or leaves, so a game is always
+	full and never over-full.
+]]
+function ArcadeService.Staff(venueId: string)
+	local info = venues[venueId]
+	if not info then
+		return
+	end
+
+	local humans = humanCount(venueId)
+	BotService.Clear(venueId)
+
+	if not info.teamed then
+		-- A solo game: a couple of others milling about, for company and for
+		-- something to shoot at.
+		for index = 1, math.max(0, info.perTeam - (humans[1] + humans[2])) do
+			local spot = info.spawns[((index - 1) % #info.spawns) + 1]
+			BotService.Spawn(venueId, 1, "bystander", spot)
+		end
+		staffed[venueId] = true
+		return
+	end
+
+	for team = 1, 2 do
+		local wanted = info.perTeam - (humans[team] or 0)
+		for index = 1, math.max(0, wanted) do
+			-- Spread them along the venue's spawn points rather than
+			-- stacking them all on one.
+			local base = info.spawns[((index + team) % #info.spawns) + 1]
+			local spot = base + Vector3.new(
+				(index - 1) * 8 - 12,
+				0,
+				if team == 1 then -14 else 14
+			)
+			BotService.Spawn(venueId, team, "player", spot)
+		end
+	end
+	staffed[venueId] = true
+end
+
+--[[ Put a player into a game. ]]
+function ArcadeService.Join(player: Player, venueId: string): boolean
+	local info = venues[venueId]
+	if not info then
+		return false
+	end
+
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return false
+	end
+
+	-- The smaller side, so joining never makes a game more lopsided. On an
+	-- empty venue this puts you opposite the bots rather than among them.
+	local humans = humanCount(venueId)
+	local side = if (humans[1] or 0) <= (humans[2] or 0) then 1 else 2
+	if not info.teamed then
+		side = TeamService.IndexOf(player)
+	end
+
+	membership[player] = { venue = venueId, team = side }
+
+	-- Stood on the venue's own spawn rather than wherever you pressed the
+	-- key, because the point of the menu is not having to walk.
+	local spot = info.spawns[math.random(1, math.max(1, #info.spawns))]
+	root.CFrame = CFrame.new(spot + Vector3.new(0, 6, 0))
+
+	ArcadeService.Staff(venueId)
+
+	Remotes.Event("ArcadeJoined"):FireClient(player, {
+		id = info.id,
+		name = info.name,
+		objective = info.objective,
+		team = side,
+	})
+	Remotes.Event("PlaySound"):FireClient(player, "Medal")
+
+	ArcadeService.Joined.Fire(player, venueId)
+	return true
+end
+
+--[[ Take a player out of whatever game they were in. ]]
+function ArcadeService.Leave(player: Player)
+	local where = membership[player]
+	if not where then
+		return
+	end
+	membership[player] = nil
+	-- Re-staff, so the side they left does not play a man down.
+	ArcadeService.Staff(where.venue)
+	Remotes.Event("ArcadeLeft"):FireClient(player, { id = where.venue })
+end
+
+--[[ Which game a player is in, if any. ]]
+function ArcadeService.VenueOf(player: Player): string?
+	local where = membership[player]
+	return if where then where.venue else nil
+end
+
+--[[ Which side a player is on inside their sub-game. ]]
+function ArcadeService.SideOf(player: Player): number?
+	local where = membership[player]
+	return if where then where.team else nil
+end
+
+--[[
+	Offer a game to anybody who wanders into a venue.
+
+	Checked a few times a second rather than with a Touched event on a huge
+	invisible part, because a trigger volume the size of a rink fires
+	constantly for every bullet, every car and every bot that crosses it.
+]]
+local lastSweep = 0
+local offered: { [Player]: { [string]: number } } = {}
+
+local function sweep()
+	local now = os.clock()
+	if now - lastSweep < 0.4 then
+		return
+	end
+	lastSweep = now
+
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
+			continue
+		end
+
+		local here = root.Position
+		local inside: string? = nil
+		for _, id in order do
+			local info = venues[id]
+			if info and (Vector3.new(here.X, 0, here.Z) - Vector3.new(info.centre.X, 0, info.centre.Z)).Magnitude
+				< Config.Arcade.OfferRadius
+			then
+				inside = id
+				break
+			end
+		end
+
+		-- Walked out of everything: drop out of whatever they were in.
+		if not inside then
+			if membership[player] then
+				ArcadeService.Leave(player)
+			end
+			continue
+		end
+
+		-- Already playing this one, nothing to ask.
+		if membership[player] and membership[player].venue == inside then
+			continue
+		end
+
+		-- Ask, but not over and over.
+		local seen = offered[player]
+		if not seen then
+			seen = {}
+			offered[player] = seen
+		end
+		if now - (seen[inside] or 0) < Config.Arcade.ReofferSeconds then
+			continue
+		end
+		seen[inside] = now
+
+		local info = venues[inside]
+		if info then
+			Remotes.Event("ArcadeOffer"):FireClient(player, {
+				id = info.id,
+				name = info.name,
+				objective = info.objective,
+			})
+		end
+	end
+end
+
+function ArcadeService.Start()
+	Remotes.Event("RequestArcadeMenu").OnServerEvent:Connect(function(player: Player)
+		Remotes.Event("ArcadeMenu"):FireClient(player, { games = ArcadeService.Menu() })
+	end)
+
+	Remotes.Event("JoinArcade").OnServerEvent:Connect(function(player: Player, venueId: any)
+		if typeof(venueId) ~= "string" then
+			return
+		end
+		ArcadeService.Join(player, venueId)
+	end)
+
+	Remotes.Event("LeaveArcade").OnServerEvent:Connect(function(player: Player)
+		ArcadeService.Leave(player)
+	end)
+
+	RunService.Heartbeat:Connect(sweep)
+
+	Players.PlayerRemoving:Connect(function(player)
+		local where = membership[player]
+		membership[player] = nil
+		offered[player] = nil
+		if where then
+			ArcadeService.Staff(where.venue)
+		end
+	end)
+
+	local _ = Sound
+end
+
+--[[ Run one offer sweep, for tests. ]]
+function ArcadeService.SweepForTests()
+	lastSweep = 0
+	sweep()
+end
+
+return ArcadeService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="14">
+          <Properties>
+            <string name="Name">BotService</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Nuclear Mud Arena — the bots.
+
+	Computer players, so that walking into the rink or up to the ski lift is
+	never a disappointment. A venue with nobody in it is worse than no venue
+	at all, and on a quiet server that is every venue.
+
+	They are not real Players -- Roblox has no way to fake one -- so they are
+	models with a Humanoid, a team number in an attribute, and a brain the
+	venue drives. That means every piece of code that asks
+	`Players:GetPlayerFromCharacter` gets nil for a bot, which is why hits on
+	them are routed through BotService.RegisterHit the same way the zombies
+	and the carnival props are.
+
+	They are also shootable, killable, and worth points, because the rule
+	here is that you can shoot anybody at any time -- including the goalie.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Signal = require(Shared:WaitForChild("Signal"))
+local Sound = require(Shared:WaitForChild("Sound"))
+local Util = require(Shared:WaitForChild("Util"))
+
+local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+
+local BotService = {}
+
+--[[ Fired as (bot, killer) when a bot is killed. ]]
+BotService.Killed = Signal.new()
+
+export type Bot = {
+	model: Model,
+	humanoid: Humanoid,
+	root: BasePart,
+	name: string,
+	team: number,
+	-- Which venue owns it, so a venue can clean up only its own.
+	venue: string,
+	role: string,
+	health: number,
+	maxHealth: number,
+	dead: boolean,
+	-- Where the brain currently wants to be.
+	goal: Vector3?,
+	-- Simple combat: bots shoot back.
+	nextShotAt: number,
+	homeAt: Vector3,
+}
+
+local bots: { Bot } = {}
+
+local FIRST_NAMES = {
+	"Dale", "Cletus", "Darla", "Roscoe", "Bobbi", "Earl", "Junior", "Maybelle",
+	"Tucker", "Shelby", "Gator", "Peaches", "Buford", "Luanne", "Hoyt", "Dixie",
+}
+
+local nextBotNumber = 0
+
+local function botName(): string
+	nextBotNumber += 1
+	local first = FIRST_NAMES[((nextBotNumber - 1) % #FIRST_NAMES) + 1]
+	return `{first} (CPU)`
+end
+
+--[[
+	A body with a Humanoid, so Roblox's own walking does the hard part.
+
+	Using a real Humanoid rather than moving a part by hand means they walk
+	round obstacles, climb the stairs, fall off things and ragdoll when they
+	die, all for free.
+]]
+local function buildBody(name: string, team: number, position: Vector3): (Model, Humanoid, BasePart)
+	-- Config.Teams stores a BrickColor, which carries the Color3 in .Color.
+	local brick = Config.Teams[team] and Config.Teams[team].Color
+	local colour = if brick then brick.Color else Color3.fromRGB(180, 180, 190)
+
+	local model = Instance.new("Model")
+	model.Name = name
+
+	local root = Util.Part({
+		Name = "HumanoidRootPart",
+		Size = Vector3.new(2, 2, 1),
+		CFrame = CFrame.new(position + Vector3.new(0, 3, 0)),
+		Transparency = 1,
+		Anchored = false,
+		Parent = model,
+	})
+	model.PrimaryPart = root
+
+	local torso = Util.Part({
+		Name = "Torso",
+		Size = Vector3.new(2.6, 3.4, 1.5),
+		CFrame = root.CFrame,
+		Color = colour,
+		Material = Enum.Material.Fabric,
+		Anchored = false,
+		Parent = model,
+	})
+	Util.Weld(root, torso)
+
+	local head = Util.Part({
+		Name = "Head",
+		Size = Vector3.new(1.7, 1.7, 1.7),
+		CFrame = torso.CFrame * CFrame.new(0, 2.6, 0),
+		Color = Color3.fromRGB(226, 192, 150),
+		Material = Enum.Material.SmoothPlastic,
+		Anchored = false,
+		Parent = model,
+	})
+	Util.Weld(torso, head)
+
+	for _, side in { -1, 1 } do
+		local arm = Util.Part({
+			Name = "Arm",
+			Size = Vector3.new(0.9, 3.2, 0.9),
+			CFrame = torso.CFrame * CFrame.new(side * 1.75, 0, 0),
+			Color = Color3.fromRGB(226, 192, 150),
+			Material = Enum.Material.SmoothPlastic,
+			Anchored = false,
+			Parent = model,
+		})
+		Util.Weld(torso, arm)
+
+		local leg = Util.Part({
+			Name = "Leg",
+			Size = Vector3.new(1, 3, 1),
+			CFrame = torso.CFrame * CFrame.new(side * 0.7, -3.2, 0),
+			Color = Color3.fromRGB(60, 72, 110),
+			Material = Enum.Material.Fabric,
+			Anchored = false,
+			Parent = model,
+		})
+		Util.Weld(torso, leg)
+	end
+
+	local humanoid = Instance.new("Humanoid")
+	humanoid.WalkSpeed = Config.Bots.WalkSpeed
+	humanoid.MaxHealth = Config.Bots.Health
+	humanoid.Health = Config.Bots.Health
+	humanoid.Parent = model
+
+	-- A name tag, in team colour, so you can tell friend from foe at a
+	-- glance and tell a bot from a player at all.
+	local tag = Instance.new("BillboardGui")
+	tag.Name = "BotTag"
+	tag.Size = UDim2.fromOffset(190, 22)
+	tag.StudsOffset = Vector3.new(0, 3.4, 0)
+	tag.MaxDistance = 220
+	tag.Adornee = head
+	tag.Parent = head
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = name
+	label.TextColor3 = colour
+	label.TextStrokeTransparency = 0.4
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.Parent = tag
+
+	model.Parent = workspace
+	return model, humanoid, root
+end
+
+--[[ Put a bot on the field. ]]
+function BotService.Spawn(venue: string, team: number, role: string, position: Vector3): Bot
+	local name = botName()
+	local model, humanoid, root = buildBody(name, team, position)
+
+	model:SetAttribute("Bot", true)
+	model:SetAttribute("BotTeam", team)
+
+	local bot: Bot = {
+		model = model,
+		humanoid = humanoid,
+		root = root,
+		name = name,
+		team = team,
+		venue = venue,
+		role = role,
+		health = Config.Bots.Health,
+		maxHealth = Config.Bots.Health,
+		dead = false,
+		goal = nil,
+		nextShotAt = 0,
+		homeAt = position,
+	}
+	table.insert(bots, bot)
+	return bot
+end
+
+--[[ Every bot still standing in a given venue. ]]
+function BotService.InVenue(venue: string): { Bot }
+	local out: { Bot } = {}
+	for _, bot in bots do
+		if bot.venue == venue and not bot.dead then
+			table.insert(out, bot)
+		end
+	end
+	return out
+end
+
+function BotService.Count(): number
+	local total = 0
+	for _, bot in bots do
+		if not bot.dead then
+			total += 1
+		end
+	end
+	return total
+end
+
+--[[ Clear out a venue's bots, or all of them. ]]
+function BotService.Clear(venue: string?)
+	for index = #bots, 1, -1 do
+		local bot = bots[index]
+		if venue == nil or bot.venue == venue then
+			if bot.model.Parent then
+				bot.model:Destroy()
+			end
+			table.remove(bots, index)
+		end
+	end
+end
+
+--[[ The bot a part belongs to, if any. ]]
+local function botFromPart(part: BasePart): Bot?
+	local model = part:FindFirstAncestorOfClass("Model")
+	if not model then
+		return nil
+	end
+	for _, bot in bots do
+		if bot.model == model then
+			return bot
+		end
+	end
+	return nil
+end
+
+--[[
+	A shot hit a bot.
+
+	Routed the same way the zombies and the fairground props are, because a
+	bot is not a Player and so every normal damage path misses it.
+]]
+function BotService.RegisterHit(part: BasePart, damage: number, attacker: Player?): boolean
+	local bot = botFromPart(part)
+	if not bot or bot.dead then
+		return false
+	end
+
+	-- Headshots count on bots too, or sniping them would feel wrong.
+	local hit = if part.Name == "Head" then damage * Config.Movement.HeadshotMultiplier else damage
+	bot.health -= hit
+	bot.humanoid.Health = math.max(0, bot.health)
+	Sound.At("Hitmarker", part.Position, 0.6)
+
+	if bot.health > 0 then
+		return true
+	end
+
+	bot.dead = true
+	bot.humanoid.Health = 0
+
+	if attacker then
+		PlayerState.AwardPoints(attacker, Config.Bots.Points)
+	end
+	BotService.Killed.Fire(bot, attacker)
+
+	-- Gone after a moment, then back where it started, so a venue stays
+	-- populated for whoever is still playing.
+	local model = bot.model
+	task.delay(Config.Bots.RespawnDelay, function()
+		if model.Parent then
+			model:Destroy()
+		end
+		-- Only bring it back if its venue is still running.
+		local stillWanted = false
+		for _, other in bots do
+			if other == bot then
+				stillWanted = true
+				break
+			end
+		end
+		if not stillWanted then
+			return
+		end
+
+		local fresh, humanoid, root = buildBody(bot.name, bot.team, bot.homeAt)
+		fresh:SetAttribute("Bot", true)
+		fresh:SetAttribute("BotTeam", bot.team)
+		bot.model = fresh
+		bot.humanoid = humanoid
+		bot.root = root
+		bot.health = bot.maxHealth
+		bot.dead = false
+	end)
+
+	return true
+end
+
+--[[ Is this part a bot? Used by the aim assist, which must not lock onto one
+     of your own side. ]]
+function BotService.TeamOf(part: BasePart): number?
+	local bot = botFromPart(part)
+	return if bot then bot.team else nil
+end
+
+-- =================================================================== BRAINS ==
+
+--[[
+	Walk somewhere, using the Humanoid's own pathing.
+
+	MoveTo rather than setting a velocity: it steps up kerbs, round walls and
+	up the stairs for free, and it looks like walking because it is.
+]]
+function BotService.WalkTo(bot: Bot, goal: Vector3)
+	bot.goal = goal
+	if not bot.dead and bot.humanoid.Parent then
+		bot.humanoid:MoveTo(goal)
+	end
+end
+
+--[[ The nearest living player not on this bot's team. ]]
+function BotService.NearestEnemy(bot: Bot, within: number): (Player?, Vector3?)
+	local best: Player? = nil
+	local bestPosition: Vector3? = nil
+	local bestDistance = within
+
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
+			continue
+		end
+		-- A bot's team is a number; a player's is a Team object. Compare
+		-- through TeamService's index rather than the objects.
+		local distance = (root.Position - bot.root.Position).Magnitude
+		if distance < bestDistance then
+			best, bestPosition, bestDistance = player, root.Position, distance
+		end
+	end
+
+	return best, bestPosition
+end
+
+local lastStep = 0
+
+--[[
+	One tick of bot upkeep.
+
+	Deliberately slow -- a few times a second, not sixty. A bot deciding
+	where to walk four times a second is indistinguishable from one deciding
+	sixty times a second, and twenty bots doing it sixty times a second is
+	the sort of thing that quietly eats a server.
+]]
+local function step()
+	local now = os.clock()
+	if now - lastStep < Config.Bots.ThinkInterval then
+		return
+	end
+	lastStep = now
+
+	for index = #bots, 1, -1 do
+		local bot = bots[index]
+		if not bot.model.Parent then
+			table.remove(bots, index)
+			continue
+		end
+		if bot.dead then
+			continue
+		end
+
+		-- Keep walking toward whatever the venue last asked for. The venue
+		-- brains set the goal; this just makes sure a bot that has stopped
+		-- short of it starts again.
+		local goal = bot.goal
+		if goal then
+			local flat = Vector3.new(goal.X - bot.root.Position.X, 0, goal.Z - bot.root.Position.Z)
+			if flat.Magnitude > 6 then
+				bot.humanoid:MoveTo(goal)
+			end
+		end
+	end
+end
+
+function BotService.Start()
+	RunService.Heartbeat:Connect(step)
+end
+
+--[[ One tick, for tests. ]]
+function BotService.StepForTests()
+	lastStep = 0
+	step()
+end
+
+return BotService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="15">
+          <Properties>
             <string name="Name">CarnivalService</string>
             <string name="Source"><![CDATA[--!strict
 --[[
@@ -2063,6 +2887,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
+local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
@@ -2553,6 +3378,22 @@ function CarnivalService.Build(mapSize: number)
 		glow.Shadows = true
 		glow.Parent = bulb
 	end
+
+	-- Offered as a sub-game, so "fair games" is something you can pick from
+	-- a menu rather than something you have to stumble across.
+	ArcadeService.Register({
+		id = "carnival",
+		name = "Fair Games",
+		objective = "Dunk tank, duck shoot and the high striker. All of it scores.",
+		centre = Vector3.new(mapSize * 0.3, 0, 0),
+		spawns = {
+			Vector3.new(mapSize * 0.3 - 40, 6, 0),
+			Vector3.new(mapSize * 0.3 + 40, 6, 0),
+			Vector3.new(mapSize * 0.3, 6, 40),
+		},
+		perTeam = 2,
+		teamed = false,
+	})
 end
 
 function CarnivalService.Clear()
@@ -2613,7 +3454,7 @@ return CarnivalService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">DamageService</string>
             <string name="Source"><![CDATA[--!strict
@@ -2865,7 +3706,7 @@ return DamageService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">EffectService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3179,7 +4020,7 @@ return EffectService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="18">
           <Properties>
             <string name="Name">FlagService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3637,7 +4478,7 @@ return FlagService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="17">
+        <Item class="ModuleScript" referent="19">
           <Properties>
             <string name="Name">GraphicsService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3795,7 +4636,7 @@ return GraphicsService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="18">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">HockeyService</string>
             <string name="Source"><![CDATA[--!strict
@@ -3835,6 +4676,7 @@ local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 -- in, so without this every single goal threw "attempt to index nil" inside
 -- the Heartbeat connection and took the whole hockey step down with it.
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
+local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
 
 local HockeyService = {}
 
@@ -4430,6 +5272,23 @@ function HockeyService.Build(mapSize: number)
 	puckHome = centre + Vector3.new(0, 4, 0)
 	dropPuck()
 
+	-- Offer it as a sub-game: walk in and it asks, or pick it from the menu
+	-- and you are brought here.
+	ArcadeService.Register({
+		id = "hockey",
+		name = "Ice Hockey",
+		objective = "Shoot the puck into their net. Stick to an opponent starts a fight.",
+		centre = centre,
+		spawns = {
+			centre + Vector3.new(-30, 4, -40),
+			centre + Vector3.new(30, 4, -40),
+			centre + Vector3.new(-30, 4, 40),
+			centre + Vector3.new(30, 4, 40),
+		},
+		perTeam = 4,
+		teamed = true,
+	})
+
 	return { centre = centre, puckHome = puckHome }
 end
 
@@ -4507,7 +5366,7 @@ return HockeyService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">MapService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5681,7 +6540,7 @@ return MapService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">MatchService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6313,7 +7172,7 @@ return MatchService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">MonetizationService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6505,7 +7364,7 @@ return MonetizationService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">PickupService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6802,7 +7661,7 @@ return PickupService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">PlayerState</string>
             <string name="Source"><![CDATA[--!strict
@@ -7035,7 +7894,7 @@ return PlayerState
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">ProjectileService</string>
             <string name="Source"><![CDATA[--!strict
@@ -7598,7 +8457,7 @@ return ProjectileService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">ResortService</string>
             <string name="Source"><![CDATA[--!strict
@@ -7634,6 +8493,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
+local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
 
 local ResortService = {}
 
@@ -8620,6 +9480,36 @@ function ResortService.Build(mapSize: number, parent: Instance): ResortBuild
 
 	local _ = jumps
 
+	-- Two sub-games up here: the downhill, and the river. Both are offered
+	-- from the menu so nobody has to find the mountain first.
+	ArcadeService.Register({
+		id = "downhill",
+		name = "Downhill",
+		objective = "Ski, board or bike to the bottom. Tricks off the jumps score.",
+		centre = summit,
+		spawns = {
+			summit + Vector3.new(-14, 4, 0),
+			summit + Vector3.new(14, 4, 0),
+			summit + Vector3.new(0, 4, 16),
+		},
+		perTeam = 3,
+		teamed = false,
+	})
+
+	ArcadeService.Register({
+		id = "river",
+		name = "Lazy River",
+		objective = "Ride a tube round the loop. Watch the sniper towers.",
+		centre = Vector3.new(0, 0, -ringRadius),
+		spawns = {
+			Vector3.new(0, 8, -ringRadius),
+			Vector3.new(ringRadius * 0.4, 8, -ringRadius),
+			Vector3.new(-ringRadius * 0.4, 8, -ringRadius),
+		},
+		perTeam = 2,
+		teamed = false,
+	})
+
 	return {
 		tubePads = tubePads,
 		skiPads = skiPads,
@@ -8657,7 +9547,7 @@ return ResortService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">ScoreboardService</string>
             <string name="Source"><![CDATA[--!strict
@@ -8808,7 +9698,7 @@ return ScoreboardService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">TeamService</string>
             <string name="Source"><![CDATA[--!strict
@@ -8900,7 +9790,7 @@ return TeamService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -10335,6 +11225,204 @@ function VehicleService.DismountSkis(player: Player)
 	return false
 end
 
+--[[
+	A snowboard, and a downhill bike.
+
+	Both are the ski rig with different numbers and a different shape on top,
+	which is the whole reason skis were built as a board you are welded to
+	rather than a seat: anything you ride standing up is the same problem.
+
+	  - The BOARD carves harder and holds its speed better than skis, and
+	    spins more freely in the air, so it suits grabs and flips.
+	  - The BIKE is faster downhill, takes the biggest jumps, and will run
+	    the mountain trail as happily as the piste.
+
+	Both leave your weapons alone. Every sport here does.
+]]
+local function boardLike(
+	name: string,
+	label: string,
+	position: Vector3,
+	slopeSpeed: number,
+	carveRate: number,
+	dress: (Model, BasePart) -> ()
+): Model
+	local model = Instance.new("Model")
+	model.Name = name
+
+	local board = Util.Part({
+		Name = "Chassis",
+		Size = Vector3.new(4.5, 0.6, 13),
+		CFrame = CFrame.new(position),
+		Transparency = 1,
+		Anchored = false,
+		CustomPhysicalProperties = PhysicalProperties.new(0.2, 0.04, 0.3, 1, 1),
+		Parent = model,
+	})
+	model.PrimaryPart = board
+
+	dress(model, board)
+
+	local turn = Instance.new("AngularVelocity")
+	turn.Name = "TurnVelocity"
+	turn.Attachment0 = Util.Attachment(board, Vector3.new())
+	turn.RelativeTo = Enum.ActuatorRelativeTo.World
+	turn.MaxTorque = 160000
+	turn.AngularVelocity = Vector3.new()
+	turn.Enabled = true
+	turn.Parent = board
+
+	local upright = Instance.new("AlignOrientation")
+	upright.Name = "Upright"
+	upright.Attachment0 = Util.Attachment(board, Vector3.new(), "UprightAnchor")
+	upright.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	-- Not rigid: tipping it is how a trick happens.
+	upright.MaxTorque = 42000
+	upright.Responsiveness = 22
+	upright.CFrame = board.CFrame.Rotation
+	upright.Enabled = true
+	upright.Parent = board
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "RidePrompt"
+	prompt.ActionText = `Grab the {string.lower(label)}`
+	prompt.ObjectText = label
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 16
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = board
+	prompt.Triggered:Connect(function(player)
+		VehicleService.MountSkis(player, model)
+	end)
+
+	addVehicleLabel(board, label, Color3.fromRGB(230, 240, 255))
+
+	model:SetAttribute("Health", 34)
+	model:SetAttribute("MaxHealth", 34)
+	model:SetAttribute("VehicleKind", name)
+	model.Parent = workspace
+
+	active[model] = {
+		-- Driven by driveSkis: same physics, different numbers.
+		kind = "Skis",
+		chassis = board,
+		turn = turn,
+		upright = upright,
+		rider = nil,
+		airborneSince = nil,
+		spin = 0,
+		lastFacing = nil,
+		slopeSpeed = slopeSpeed,
+		carveRate = carveRate,
+	}
+	return model
+end
+
+function VehicleService.SpawnSnowboard(position: Vector3): Model
+	return boardLike("Snowboard", "Snowboard", position, 205, 2.9, function(model, board)
+		local deck = Util.Part({
+			Name = "Deck",
+			Size = Vector3.new(4.2, 0.5, 13),
+			CFrame = board.CFrame,
+			Color = Color3.fromRGB(60, 150, 230),
+			Material = Enum.Material.SmoothPlastic,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, deck)
+
+		-- Turned-up nose and tail, which is what makes it read as a board.
+		for _, endZ in { -1, 1 } do
+			local tip = Util.Part({
+				Name = "BoardTip",
+				Size = Vector3.new(4.2, 0.5, 2.4),
+				CFrame = board.CFrame
+					* CFrame.new(0, 0.5, endZ * 7)
+					* CFrame.Angles(math.rad(endZ * 22), 0, 0),
+				Color = Color3.fromRGB(40, 120, 200),
+				Material = Enum.Material.SmoothPlastic,
+				Anchored = false,
+				Massless = true,
+				Parent = model,
+			})
+			Util.Weld(board, tip)
+		end
+
+		for _, side in { -1, 1 } do
+			local binding = Util.Part({
+				Name = "Binding",
+				Size = Vector3.new(2.4, 0.9, 2.6),
+				CFrame = board.CFrame * CFrame.new(0, 0.7, side * 2.2),
+				Color = Color3.fromRGB(30, 32, 38),
+				Material = Enum.Material.Rubber,
+				Anchored = false,
+				Massless = true,
+				Parent = model,
+			})
+			Util.Weld(board, binding)
+		end
+	end)
+end
+
+function VehicleService.SpawnBike(position: Vector3): Model
+	return boardLike("Bike", "Downhill Bike", position, 240, 2.5, function(model, board)
+		local frame = Util.Part({
+			Name = "BikeFrame",
+			Size = Vector3.new(1, 3.2, 10),
+			CFrame = board.CFrame * CFrame.new(0, 2.6, 0),
+			Color = Color3.fromRGB(220, 70, 40),
+			Material = Enum.Material.Metal,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, frame)
+
+		-- Two wheels, fore and aft, welded on: decoration, like the board
+		-- itself, because the slope does the moving.
+		for _, endZ in { -1, 1 } do
+			local wheel = Util.Part({
+				Name = "BikeWheel",
+				Size = Vector3.new(0.7, 6.4, 6.4),
+				CFrame = board.CFrame * CFrame.new(0, 1.4, endZ * 4.6),
+				Shape = Enum.PartType.Cylinder,
+				Color = Color3.fromRGB(24, 24, 28),
+				Material = Enum.Material.Rubber,
+				Anchored = false,
+				Massless = true,
+				Parent = model,
+			})
+			Util.Weld(board, wheel)
+		end
+
+		local bars = Util.Part({
+			Name = "Handlebars",
+			Size = Vector3.new(5, 0.6, 0.6),
+			CFrame = board.CFrame * CFrame.new(0, 4.6, -3.6),
+			Color = Color3.fromRGB(40, 42, 48),
+			Material = Enum.Material.Metal,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, bars)
+
+		local saddle = Util.Part({
+			Name = "Saddle",
+			Size = Vector3.new(1.4, 0.6, 3),
+			CFrame = board.CFrame * CFrame.new(0, 4.4, 2.6),
+			Color = Color3.fromRGB(28, 28, 32),
+			Material = Enum.Material.Fabric,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, saddle)
+	end)
+end
+
 function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 	if kind == "TurretTruck" then
 		return VehicleService.SpawnTurretTruck(position)
@@ -10350,6 +11438,10 @@ function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 		return VehicleService.SpawnGlider(position)
 	elseif kind == "Skis" then
 		return VehicleService.SpawnSkis(position)
+	elseif kind == "Snowboard" then
+		return VehicleService.SpawnSnowboard(position)
+	elseif kind == "Bike" then
+		return VehicleService.SpawnBike(position)
 	elseif kind == "G-Wagon" or kind == "Hummer" or kind == "Jeep" then
 		-- The off-roaders, by name, for the mountain pads.
 		return VehicleService.SpawnCar(3, position, nil, kind)
@@ -10896,7 +11988,7 @@ local function driveSkis(model: Model, state: any, deltaTime: number)
 		local across = Vector3.new(-board.CFrame.LookVector.Z, 0, board.CFrame.LookVector.X)
 		steer = math.clamp(wish:Dot(across) * 1.6, -1, 1)
 	end
-	turn.AngularVelocity = Vector3.new(0, -steer * SKI_CARVE_RATE, 0)
+	turn.AngularVelocity = Vector3.new(0, -steer * (state.carveRate or SKI_CARVE_RATE), 0)
 
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
@@ -10918,7 +12010,7 @@ local function driveSkis(model: Model, state: any, deltaTime: number)
 				then (flatHeading.Unit * 0.55 + downhill.Unit * 0.45).Unit
 				else downhill.Unit
 
-			local target = blend * (steepness * SKI_SLOPE_SPEED)
+			local target = blend * (steepness * (state.slopeSpeed or SKI_SLOPE_SPEED))
 			local current = board.AssemblyLinearVelocity
 			local wanted = target - Vector3.new(current.X, 0, current.Z)
 			board.AssemblyLinearVelocity = current
@@ -11077,6 +12169,34 @@ end
 	Works on whatever they are currently driving; on foot it just makes them
 	run faster, so the same key always means "go faster".
 ]]
+--[[
+	Who is currently looking down a scope, and how fast they may move.
+
+	Kept here beside SetTurbo because both of them write WalkSpeed, and two
+	places writing the same property without knowing about each other is how
+	you get a player permanently stuck at sniper pace.
+]]
+local scoped: { [Player]: boolean? } = {}
+
+function VehicleService.SetScoped(player: Player, on: boolean)
+	-- nil rather than false, so the table does not grow an entry for every
+	-- player who ever un-scoped.
+	scoped[player] = if on then true else nil
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	-- Only touch it on foot: in a seat WalkSpeed is irrelevant anyway.
+	if humanoid.SeatPart then
+		return
+	end
+	humanoid.WalkSpeed = if on
+		then Config.Turbo.WalkSpeed * Config.Movement.ScopedSpeedFactor
+		else Config.Turbo.WalkSpeed
+end
+
 function VehicleService.SetTurbo(player: Player, on: boolean)
 	local state = PlayerState.Get(player)
 
@@ -11088,7 +12208,13 @@ function VehicleService.SetTurbo(player: Player, on: boolean)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.WalkSpeed = if on then Config.Turbo.SprintWalkSpeed else Config.Turbo.WalkSpeed
+		-- Sprinting beats being scoped: letting go of the scope should not
+		-- leave you stuck at sniper pace, and holding shift should always
+		-- make you faster.
+		humanoid.WalkSpeed = if on
+			then Config.Turbo.SprintWalkSpeed
+			elseif scoped[player] then Config.Turbo.WalkSpeed * Config.Movement.ScopedSpeedFactor
+			else Config.Turbo.WalkSpeed
 	end
 end
 
@@ -11419,8 +12545,9 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
 	-- Otherwise a player who leaves mid-ejection holds their claim forever,
-	-- and this table holds on to them.
+	-- and these tables hold on to them.
 	ejecting[player] = nil
+	scoped[player] = nil
 end)
 
 RunService.Heartbeat:Connect(step)
@@ -11429,7 +12556,7 @@ return VehicleService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="31">
           <Properties>
             <string name="Name">WeaponService</string>
             <string name="Source"><![CDATA[--!strict
@@ -11656,7 +12783,7 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 			local damage = spec.Damage
 			local headshot = result.Instance.Name == "Head"
 			if headshot then
-				damage *= 1.8
+				damage *= Config.Movement.HeadshotMultiplier
 			end
 			--[[
 				A stick to the body on the ice starts a scrap.
@@ -12175,6 +13302,10 @@ function WeaponService.Start()
 		handleFire(player, direction)
 	end)
 
+	Remotes.Event("SetScoped").OnServerEvent:Connect(function(player, on)
+		VehicleService.SetScoped(player, on == true)
+	end)
+
 	Remotes.Event("ThrowGrenade").OnServerEvent:Connect(function(player, direction)
 		handleThrowGrenade(player, direction)
 	end)
@@ -12251,7 +13382,7 @@ return WeaponService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="30">
+        <Item class="ModuleScript" referent="32">
           <Properties>
             <string name="Name">WildlifeService</string>
             <string name="Source"><![CDATA[--!strict
@@ -13079,27 +14210,27 @@ return WildlifeService
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="31">
+  <Item class="SoundService" referent="33">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterGui" referent="32">
+  <Item class="StarterGui" referent="34">
     <Properties>
       <string name="Name">StarterGui</string>
       <bool name="ResetPlayerGuiOnSpawn">false</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="33">
+  <Item class="StarterPlayer" referent="35">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="34">
+    <Item class="StarterPlayerScripts" referent="36">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="35">
+      <Item class="LocalScript" referent="37">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
@@ -13426,11 +14557,11 @@ end)
 print("[Nuclear Mud Arena] Client ready. WASD drives, F mega-detonates.")
 ]]></string>
         </Properties>
-        <Item class="Folder" referent="36">
+        <Item class="Folder" referent="38">
           <Properties>
             <string name="Name">modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="37">
+          <Item class="ModuleScript" referent="39">
             <Properties>
               <string name="Name">Controls</string>
               <string name="Source"><![CDATA[--!strict
@@ -13729,6 +14860,11 @@ end
 -- guard silently did nothing.
 local mouseFree = false
 
+-- The venue currently being offered, if you have walked into one, and the
+-- order the menu listed its games in so the number keys can pick from it.
+local pendingOffer: string? = nil
+local menuOrder: { string } = {}
+
 local nextShotFeedback = 0
 
 -- Counts up while a hockey fight is running, so F throws punches as well as
@@ -13820,6 +14956,8 @@ local function applyZoom()
 		end
 		player.CameraMode = Enum.CameraMode.Classic
 		Hud.SetZoom(0)
+		-- Back to walking pace.
+		Remotes.Event("SetScoped"):FireServer(false)
 		return
 	end
 
@@ -13838,6 +14976,14 @@ local function applyZoom()
 	end
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
 	Hud.SetZoom(magnification)
+	--[[
+		Scoped, you move at a fraction of walking pace.
+
+		Without it a 50x scope is a free sprinting wallhack. With it,
+		committing to a shot means committing to standing still, which is the
+		trade every shooter with a scope in it makes.
+	]]
+	Remotes.Event("SetScoped"):FireServer(true)
 end
 
 --[[ Right click: next magnification, then back out to hipfire. ]]
@@ -13986,6 +15132,55 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		Remotes.Event("SetTurbo"):FireServer(true)
 		Hud.SetTurbo(true)
 		return
+	end
+
+	--[[
+		The sub-game menu, and the walk-in offer.
+
+		B opens the list from anywhere and takes you straight to whatever you
+		pick -- the whole point being that you should not have to walk across
+		a 2000-stud map to find out what is in the corner of it. Y accepts an
+		offer when you are already standing in a venue.
+	]]
+	if input.KeyCode == Enum.KeyCode.B then
+		if Hud.ArcadeMenuOpen() then
+			Hud.HideArcadeMenu()
+			Controls.SetMouseFree(false)
+		else
+			Remotes.Event("RequestArcadeMenu"):FireServer()
+			Controls.SetMouseFree(true)
+		end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Y then
+		if pendingOffer then
+			Remotes.Event("JoinArcade"):FireServer(pendingOffer)
+			pendingOffer = nil
+			Hud.HideArcadeOffer()
+		end
+		return
+	end
+
+	-- The number row picks from the open menu rather than switching weapons.
+	if Hud.ArcadeMenuOpen() then
+		local digits = {
+			[Enum.KeyCode.One] = 1, [Enum.KeyCode.Two] = 2, [Enum.KeyCode.Three] = 3,
+			[Enum.KeyCode.Four] = 4, [Enum.KeyCode.Five] = 5, [Enum.KeyCode.Six] = 6,
+			[Enum.KeyCode.Seven] = 7, [Enum.KeyCode.Eight] = 8, [Enum.KeyCode.Nine] = 9,
+		}
+		local pick = digits[input.KeyCode]
+		if pick and menuOrder[pick] then
+			Remotes.Event("JoinArcade"):FireServer(menuOrder[pick])
+			Hud.HideArcadeMenu()
+			Controls.SetMouseFree(false)
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.Escape then
+			Hud.HideArcadeMenu()
+			Controls.SetMouseFree(false)
+			return
+		end
 	end
 
 	if input.KeyCode == Enum.KeyCode.G then
@@ -14415,6 +15610,16 @@ end
 	able to clear that latch, and doing it through a named function is
 	honester than reaching into the module.
 ]]
+--[[ A venue is offering a game; Y accepts it. ]]
+function Controls.SetPendingOffer(id: string?)
+	pendingOffer = id
+end
+
+--[[ Remember the order the menu was listed in, for the number keys. ]]
+function Controls.SetMenuOrder(ids: { string })
+	menuOrder = ids
+end
+
 function Controls.ResetForTests()
 	controlsStarted = false
 end
@@ -14436,7 +15641,7 @@ return Controls
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="38">
+          <Item class="ModuleScript" referent="40">
             <Properties>
               <string name="Name">Feel</string>
               <string name="Source"><![CDATA[--!strict
@@ -14590,7 +15795,7 @@ return Feel
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="39">
+          <Item class="ModuleScript" referent="41">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--!strict
@@ -14671,6 +15876,12 @@ local respawnToken = 0
 local fightLabel: TextLabel? = nil
 local fightCount: TextLabel? = nil
 local fightToken = 0
+local arcadePanel: Frame? = nil
+local arcadeList: Frame? = nil
+local arcadeOffer: TextLabel? = nil
+local arcadeOfferToken = 0
+local arcadeChoices: { [string]: TextButton } = {}
+local arcadePick: ((string) -> ())? = nil
 local wienerOverlay: TextLabel
 local toastHolder: Frame
 
@@ -15238,6 +16449,63 @@ function Hud.Build()
 		TextColor3 = Color3.fromRGB(255, 240, 200),
 		Visible = false,
 		ZIndex = 12,
+	})
+
+	-- ------------------------------------------------- the sub-game menu
+	local panel = makeFrame(screen, {
+		Size = UDim2.fromOffset(460, 440),
+		Position = UDim2.new(0.5, -230, 0.5, -220),
+		BackgroundColor3 = Color3.fromRGB(10, 14, 20),
+		BackgroundTransparency = 0.08,
+		Visible = false,
+		ZIndex = 30,
+	})
+	local panelEdge = Instance.new("UIStroke")
+	panelEdge.Color = Color3.fromRGB(120, 200, 255)
+	panelEdge.Thickness = 2
+	panelEdge.Transparency = 0.25
+	panelEdge.Parent = panel
+
+	makeLabel(panel, {
+		Size = UDim2.new(1, -24, 0, 34),
+		Position = UDim2.fromOffset(12, 10),
+		Text = "PICK A GAME",
+		TextSize = 24,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+	makeLabel(panel, {
+		Size = UDim2.new(1, -24, 0, 18),
+		Position = UDim2.fromOffset(12, 44),
+		Text = "You are taken straight there. Teams are filled with CPU players.",
+		TextSize = 12,
+		TextColor3 = Color3.fromRGB(150, 168, 186),
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+
+	local list = makeFrame(panel, {
+		Size = UDim2.new(1, -24, 1, -78),
+		Position = UDim2.fromOffset(12, 68),
+		BackgroundTransparency = 1,
+	})
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Padding = UDim.new(0, 6)
+	listLayout.Parent = list
+
+	arcadePanel = panel
+	arcadeList = list
+
+	-- The walk-in offer.
+	arcadeOffer = makeLabel(screen, {
+		Name = "ArcadeOffer",
+		Size = UDim2.new(1, 0, 0, 58),
+		Position = UDim2.new(0, 0, 0.28, 0),
+		Text = "",
+		TextSize = 22,
+		TextColor3 = Color3.fromRGB(255, 238, 180),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = false,
+		ZIndex = 14,
 	})
 
 	-- The motion tracker, bottom left above the health bar.
@@ -15878,6 +17146,122 @@ function Hud.FightSwings(count: number)
 	end
 end
 
+--[[
+	The sub-game menu.
+
+	Press the key, pick a game, get taken there. This exists because a
+	2000-stud map hides its own contents: there is a hockey rink, a ski
+	mountain, a carnival and a river out there and no way to know it from
+	the middle of the city.
+]]
+function Hud.ShowArcadeMenu(games: { { id: string, name: string, objective: string, players: number } })
+	local panel = arcadePanel
+	local list = arcadeList
+	if not panel or not list then
+		return
+	end
+
+	for _, old in list:GetChildren() do
+		if not old:IsA("UIListLayout") then
+			old:Destroy()
+		end
+	end
+
+	arcadeChoices = {}
+	for index, game in games do
+		local row = Instance.new("TextButton")
+		row.Name = game.id
+		row.Size = UDim2.new(1, 0, 0, 56)
+		row.BackgroundColor3 = Color3.fromRGB(26, 32, 44)
+		row.BackgroundTransparency = 0.1
+		row.BorderSizePixel = 0
+		row.AutoButtonColor = true
+		row.Font = Enum.Font.GothamBold
+		row.TextColor3 = Color3.fromRGB(240, 246, 252)
+		row.TextSize = 18
+		row.TextXAlignment = Enum.TextXAlignment.Left
+		row.Text = `  {index}.  {game.name}`
+		row.LayoutOrder = index
+		row.Parent = list
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 6)
+		corner.Parent = row
+
+        local blurb = makeLabel(row, {
+			Size = UDim2.new(1, -24, 0, 18),
+			Position = UDim2.fromOffset(22, 32),
+			Text = game.objective,
+			TextSize = 13,
+			TextColor3 = Color3.fromRGB(160, 178, 196),
+		})
+		blurb.Name = "Blurb"
+
+		arcadeChoices[game.id] = row
+	end
+
+	panel.Visible = true
+end
+
+--[[ Close the menu. ]]
+function Hud.HideArcadeMenu()
+	if arcadePanel then
+		arcadePanel.Visible = false
+	end
+end
+
+function Hud.ArcadeMenuOpen(): boolean
+	return arcadePanel ~= nil and arcadePanel.Visible
+end
+
+--[[ Wire a callback to each row, once the menu has been built. ]]
+function Hud.OnArcadePick(callback: (string) -> ())
+	arcadePick = callback
+	for id, row in arcadeChoices do
+		row.Activated:Connect(function()
+			if arcadePick then
+				arcadePick(id)
+			end
+		end)
+	end
+end
+
+--[[
+	"You are standing on a basketball court. Want a game?"
+
+	Shown when you walk into a venue, because somebody already standing on
+	the court should not have to open a menu to use it.
+]]
+function Hud.ShowArcadeOffer(name: string, objective: string, acceptKey: string)
+	if not arcadeOffer then
+		return
+	end
+	arcadeOffer.Text = `{string.upper(name)}  —  {objective}\nPress {acceptKey} to play`
+	arcadeOffer.Visible = true
+
+	arcadeOfferToken += 1
+	local token = arcadeOfferToken
+	task.delay(9, function()
+		if arcadeOfferToken == token and arcadeOffer then
+			arcadeOffer.Visible = false
+		end
+	end)
+end
+
+function Hud.HideArcadeOffer()
+	if arcadeOffer then
+		arcadeOffer.Visible = false
+	end
+end
+
+--[[ Confirmation that you are in, and what the game wants from you. ]]
+function Hud.ShowArcadeJoined(name: string, objective: string)
+	Hud.HideArcadeOffer()
+	Hud.HideArcadeMenu()
+	Hud.Medal(string.upper(name))
+	Hud.SetStatus(`{string.upper(name)}  —  {objective}`, true)
+end
+
 function Hud.SetStatus(text: string, good: boolean)
 	if not statusText then
 		return
@@ -15906,7 +17290,7 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="40">
+          <Item class="ModuleScript" referent="42">
             <Properties>
               <string name="Name">Radar</string>
               <string name="Source"><![CDATA[--!strict
@@ -16205,7 +17589,7 @@ return Radar
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="41">
+  <Item class="Workspace" referent="43">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

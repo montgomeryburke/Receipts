@@ -294,6 +294,11 @@ end
 -- guard silently did nothing.
 local mouseFree = false
 
+-- The venue currently being offered, if you have walked into one, and the
+-- order the menu listed its games in so the number keys can pick from it.
+local pendingOffer: string? = nil
+local menuOrder: { string } = {}
+
 local nextShotFeedback = 0
 
 -- Counts up while a hockey fight is running, so F throws punches as well as
@@ -385,6 +390,8 @@ local function applyZoom()
 		end
 		player.CameraMode = Enum.CameraMode.Classic
 		Hud.SetZoom(0)
+		-- Back to walking pace.
+		Remotes.Event("SetScoped"):FireServer(false)
 		return
 	end
 
@@ -403,6 +410,14 @@ local function applyZoom()
 	end
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
 	Hud.SetZoom(magnification)
+	--[[
+		Scoped, you move at a fraction of walking pace.
+
+		Without it a 50x scope is a free sprinting wallhack. With it,
+		committing to a shot means committing to standing still, which is the
+		trade every shooter with a scope in it makes.
+	]]
+	Remotes.Event("SetScoped"):FireServer(true)
 end
 
 --[[ Right click: next magnification, then back out to hipfire. ]]
@@ -551,6 +566,55 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		Remotes.Event("SetTurbo"):FireServer(true)
 		Hud.SetTurbo(true)
 		return
+	end
+
+	--[[
+		The sub-game menu, and the walk-in offer.
+
+		B opens the list from anywhere and takes you straight to whatever you
+		pick -- the whole point being that you should not have to walk across
+		a 2000-stud map to find out what is in the corner of it. Y accepts an
+		offer when you are already standing in a venue.
+	]]
+	if input.KeyCode == Enum.KeyCode.B then
+		if Hud.ArcadeMenuOpen() then
+			Hud.HideArcadeMenu()
+			Controls.SetMouseFree(false)
+		else
+			Remotes.Event("RequestArcadeMenu"):FireServer()
+			Controls.SetMouseFree(true)
+		end
+		return
+	end
+
+	if input.KeyCode == Enum.KeyCode.Y then
+		if pendingOffer then
+			Remotes.Event("JoinArcade"):FireServer(pendingOffer)
+			pendingOffer = nil
+			Hud.HideArcadeOffer()
+		end
+		return
+	end
+
+	-- The number row picks from the open menu rather than switching weapons.
+	if Hud.ArcadeMenuOpen() then
+		local digits = {
+			[Enum.KeyCode.One] = 1, [Enum.KeyCode.Two] = 2, [Enum.KeyCode.Three] = 3,
+			[Enum.KeyCode.Four] = 4, [Enum.KeyCode.Five] = 5, [Enum.KeyCode.Six] = 6,
+			[Enum.KeyCode.Seven] = 7, [Enum.KeyCode.Eight] = 8, [Enum.KeyCode.Nine] = 9,
+		}
+		local pick = digits[input.KeyCode]
+		if pick and menuOrder[pick] then
+			Remotes.Event("JoinArcade"):FireServer(menuOrder[pick])
+			Hud.HideArcadeMenu()
+			Controls.SetMouseFree(false)
+			return
+		end
+		if input.KeyCode == Enum.KeyCode.Escape then
+			Hud.HideArcadeMenu()
+			Controls.SetMouseFree(false)
+			return
+		end
 	end
 
 	if input.KeyCode == Enum.KeyCode.G then
@@ -980,6 +1044,16 @@ end
 	able to clear that latch, and doing it through a named function is
 	honester than reaching into the module.
 ]]
+--[[ A venue is offering a game; Y accepts it. ]]
+function Controls.SetPendingOffer(id: string?)
+	pendingOffer = id
+end
+
+--[[ Remember the order the menu was listed in, for the number keys. ]]
+function Controls.SetMenuOrder(ids: { string })
+	menuOrder = ids
+end
+
 function Controls.ResetForTests()
 	controlsStarted = false
 end

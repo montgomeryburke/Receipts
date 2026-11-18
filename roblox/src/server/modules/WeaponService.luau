@@ -222,7 +222,7 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 			local damage = spec.Damage
 			local headshot = result.Instance.Name == "Head"
 			if headshot then
-				damage *= 1.8
+				damage *= Config.Movement.HeadshotMultiplier
 			end
 			--[[
 				A stick to the body on the ice starts a scrap.
@@ -739,6 +739,10 @@ function WeaponService.Start()
 
 	Remotes.Event("FireWeapon").OnServerEvent:Connect(function(player, direction)
 		handleFire(player, direction)
+	end)
+
+	Remotes.Event("SetScoped").OnServerEvent:Connect(function(player, on)
+		VehicleService.SetScoped(player, on == true)
 	end)
 
 	Remotes.Event("ThrowGrenade").OnServerEvent:Connect(function(player, direction)
