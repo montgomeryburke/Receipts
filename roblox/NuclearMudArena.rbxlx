@@ -757,6 +757,19 @@ Config.Hockey = {
 	-- the splintered half is the best melee weapon in the game.
 	StickBreakChance = 0.55,
 	StickWeapon = "HockeyStick",
+	-- Possession: how close you have to be to pick the puck up, how far in
+	-- front of you it rides, and how hard you can shoot it.
+	PickupRange = 9,
+	CarryDistance = 4.5,
+	ShotSpeed = 110,
+	-- A fight is a punch-and-block contest now rather than a mash. These are
+	-- its numbers.
+	FightHealth = 100,
+	PunchCooldown = 0.45,
+	PunchDamageMin = 16,
+	PunchDamageMax = 24,
+	BlockedDamage = 5,
+	PenaltySeconds = 10,
 	BrokenStickWeapon = "BrokenStick",
 }
 
@@ -1172,6 +1185,10 @@ export type ConfigType = {
 		KnockdownSeconds: number,
 		StickBreakChance: number,
 		StickWeapon: string,
+		PickupRange: number, CarryDistance: number, ShotSpeed: number,
+		FightHealth: number, PunchCooldown: number,
+		PunchDamageMin: number, PunchDamageMax: number,
+		BlockedDamage: number, PenaltySeconds: number,
 		BrokenStickWeapon: string,
 	},
 	Radar: {
@@ -1289,6 +1306,13 @@ local EVENT_NAMES = {
 	-- the parts, and far less laggy than drawing them server-side.
 	-- The hockey fight scene: the server starts one, the client mashes, the
 	-- server says who won.
+	-- Hockey: possession, shooting, and the fight.
+	"HockeyShoot",
+	"HockeyChallenge",
+	"HockeyPunch",
+	"HockeyBlock",
+	"HockeyScore",
+	"FightUpdate",
 	"FightStarted",
 	"FightSwing",
 	"FightResult",
@@ -5273,6 +5297,19 @@ HockeyService.Goal = Signal.new()
 --[[ Fired as (winner, loser, brokeStick) when a fight is settled. ]]
 HockeyService.FightOver = Signal.new()
 
+--[[
+	Who has the puck, and where they may not pick it up again yet.
+
+	Possession is the whole difference between a rink and a rink with a
+	puck lying on it: you carry it, you can be checked off it, and you shoot
+	it where you are looking. Before this the puck was only ever something to
+	shoot at from a distance.
+]]
+local puckOwner: Player? = nil
+local pickupBlockedUntil: { [Player]: number } = {}
+local goalLights: { [number]: BasePart } = {}
+local penaltyBox = Vector3.new()
+
 local RINK_LENGTH = 300
 local RINK_WIDTH = 150
 local BOARD_HEIGHT = 11
@@ -5438,6 +5475,23 @@ local function goal(centre: Vector3, facingZ: number, defendingTeam: number, par
 			Parent = parent,
 		})
 	end
+
+	-- The lamp behind the net, which is the whole drama of a goal.
+	local lamp = Util.Part({
+		Name = "GoalLight",
+		Size = Vector3.new(4, 4, 4),
+		CFrame = CFrame.new(centre + Vector3.new(0, height + 6, facingZ * (depth + 4))),
+		Shape = Enum.PartType.Ball,
+		Color = Color3.fromRGB(70, 14, 14),
+		Material = Enum.Material.Neon,
+		Parent = parent,
+	})
+	local glow = Instance.new("PointLight")
+	glow.Color = Color3.fromRGB(255, 40, 40)
+	glow.Brightness = 0
+	glow.Range = 60
+	glow.Parent = lamp
+	goalLights[defendingTeam] = lamp
 
 	-- The goal line, painted.
 	Util.Part({
@@ -5606,6 +5660,96 @@ function HockeyService.RegisterHit(part: BasePart, attacker: Player?, direction:
 	return true
 end
 
+--[[
+	Carry the puck, and shoot it.
+
+	The puck is pulled toward a point in front of whoever has it rather than
+	welded to them, so it can be checked off, shot away, or lost when they
+	are knocked down. Welding would make possession absolute, and a puck
+	nobody can take off you is not hockey.
+]]
+local function stepPossession()
+	local live = puck
+	if not live or not live.Parent then
+		return
+	end
+
+	local owner = puckOwner
+	if owner then
+		local character = owner.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
+			puckOwner = nil
+		else
+			local ahead = root.Position
+				+ root.CFrame.LookVector * Config.Hockey.CarryDistance
+				- Vector3.new(0, 2.2, 0)
+			-- Pulled, not placed: it lags a little and can be knocked loose.
+			live.AssemblyLinearVelocity = (ahead - live.Position) * 18
+			return
+		end
+	end
+
+	-- Loose: whoever is closest and on the ice picks it up.
+	local now = os.clock()
+	for _, player in Players:GetPlayers() do
+		if now < (pickupBlockedUntil[player] or 0) then
+			continue
+		end
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
+			continue
+		end
+		-- Not while in a fight: you have dropped your gloves, not picked up
+		-- a stick.
+		if fightOf[player] then
+			continue
+		end
+		if (root.Position - live.Position).Magnitude <= Config.Hockey.PickupRange then
+			puckOwner = player
+			live:SetAttribute("LastTouchUserId", player.UserId)
+			Sound.At("Pickup", live.Position, 0.7)
+			Remotes.Event("HockeyScore"):FireClient(player, { carrying = true })
+			return
+		end
+	end
+end
+
+--[[ Shoot the puck where the shooter is looking. ]]
+function HockeyService.ShootPuck(player: Player, direction: any)
+	if puckOwner ~= player then
+		return
+	end
+	local live = puck
+	if not live or not live.Parent then
+		return
+	end
+	local aim = Util.SaneDirection(direction)
+	if not aim then
+		return
+	end
+
+	puckOwner = nil
+	-- A moment before you can scoop it straight back up.
+	pickupBlockedUntil[player] = os.clock() + 0.6
+
+	local flat = Vector3.new(aim.X, 0, aim.Z)
+	if flat.Magnitude < 0.01 then
+		flat = Vector3.new(0, 0, -1)
+	end
+	live.AssemblyLinearVelocity = flat.Unit * Config.Hockey.ShotSpeed + Vector3.new(0, 9, 0)
+	live:SetAttribute("LastTouchUserId", player.UserId)
+	Sound.At("MeleeHit", live.Position, 1.1)
+end
+
+--[[ Who has it, for tests. ]]
+function HockeyService.PuckOwner(): Player?
+	return puckOwner
+end
+
 --[[ Who last touched the puck, if they are still here. ]]
 local function lastToucher(): Player?
 	if not puck then
@@ -5651,6 +5795,25 @@ local function checkGoals()
 		then
 			lastGoalAt = now
 
+			-- Light the lamp at the end that was scored on.
+			local lamp = goalLights[zone.defendingTeam]
+			if lamp then
+				lamp.Color = Color3.fromRGB(255, 40, 40)
+				local glow = lamp:FindFirstChildOfClass("PointLight")
+				if glow then
+					glow.Brightness = 6
+				end
+				task.delay(2.5, function()
+					if lamp.Parent then
+						lamp.Color = Color3.fromRGB(70, 14, 14)
+						local dim = lamp:FindFirstChildOfClass("PointLight")
+						if dim then
+							dim.Brightness = 0
+						end
+					end
+				end)
+			end
+
 			local scorer = lastToucher()
 			-- The goal belongs to whoever is NOT defending it.
 			local scoringTeam = if zone.defendingTeam == 1 then 2 else 1
@@ -5663,6 +5826,7 @@ local function checkGoals()
 
 			Sound.At("RoundEnd", live.Position, 1.2)
 			dropPuck()
+			puckOwner = nil
 			return
 		end
 	end
@@ -5908,8 +6072,13 @@ function HockeyService.Start()
 		HockeyService.Swing(player)
 	end)
 
+	Remotes.Event("HockeyShoot").OnServerEvent:Connect(function(player: Player, direction)
+		HockeyService.ShootPuck(player, direction)
+	end)
+
 	RunService.Heartbeat:Connect(function()
 		checkGoals()
+		stepPossession()
 
 		local now = os.clock()
 		for index = #fights, 1, -1 do
@@ -11211,7 +11380,6 @@ function VehicleService.SpawnCar(
 		torque = tier.Torque,
 		turnSpeed = tier.TurnSpeed,
 		offRoad = body.OffRoad == true,
-		climbAssist = body.ClimbAssist or 0,
 	}
 	return model
 end
@@ -12179,6 +12347,42 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local velocity = chassis.AssemblyLinearVelocity
 	local forward = chassis.CFrame.LookVector
 	local roadSpeed = velocity:Dot(forward)
+
+	--[[
+		What is under the wheels.
+
+		Paced by distance rather than time: a boost chevron is nine studs
+		long, and a fixed 20 Hz sample is ten studs apart at full speed, so
+		the pads on the run-up to a ramp get stepped straight over. Four
+		studs keeps the real spacing under six.
+
+		This block was lost when the drive loop was rewritten around the new
+		rig, and losing it silently switched off mud AND every boost pad on
+		every map -- which the mud check below caught.
+	]]
+	local rolling = math.abs(roadSpeed) > 1 or seat.Occupant ~= nil
+	if rolling then
+		local now = os.clock()
+		local here = chassis.Position
+		local moved = if state.lastGroundSampleAt
+			then (here - state.lastGroundSampleAt).Magnitude
+			else math.huge
+
+		if moved >= GROUND_SAMPLE_STUDS or now >= (state.nextGroundSampleAt or 0) then
+			state.nextGroundSampleAt = now + GROUND_SAMPLE_INTERVAL
+			state.lastGroundSampleAt = here
+			groundParams.FilterDescendantsInstances = { model }
+			local hit = workspace:Raycast(here, GROUND_PROBE, groundParams)
+			state.groundIsMud = hit ~= nil
+				and (hit.Instance.Name == "Mud" or hit.Material == Enum.Material.Mud)
+			state.groundIsBoost = hit ~= nil and hit.Instance:GetAttribute("Boost") == true
+		end
+	else
+		state.groundIsMud = false
+		state.groundIsBoost = false
+		state.nextGroundSampleAt = 0
+		state.lastGroundSampleAt = nil
+	end
 
 	-- Mud, boost pads and turbo, all as multipliers on the speed the motors
 	-- are asked for.

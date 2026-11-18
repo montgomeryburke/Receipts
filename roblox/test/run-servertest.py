@@ -271,8 +271,9 @@ do
 			thePuck:GetAttribute("LastTouchUserId") == killer._props.UserId, "")
 	end
 
-	-- Fights. Both players mash; whoever swings most wins, the loser goes
-	-- down, and the winner's stick may break into a weapon.
+	-- Fights. Two fighters with fight health, a punch and a guard. A clean
+	-- punch bites, a punch into a raised guard barely stings, and dropping
+	-- to zero knocks you down and sends you to the box.
 	PlayerState.Reset(killer, false)
 	PlayerState.Reset(prey, false)
 
@@ -285,31 +286,71 @@ do
 		string.format("%d running", HockeyService.FightCount()))
 	check("and not twice over", HockeyService.StartFight(killer, prey) == false, "")
 
-	-- The killer mashes harder.
-	--
-	-- Swings are rate limited to one every 0.08s, which is the right call
-	-- for a mash contest fed by a remote. So the clock has to move between
-	-- them: nine instant calls collapse to one, both players end up on a
-	-- single swing, and the fight settles as a DRAW -- which the draw branch
-	-- reports without firing FightOver at all.
-	for _ = 1, 9 do
-		ADVANCE(0.1)
-		HockeyService.Swing(killer)
-	end
-	for _ = 1, 3 do
-		ADVANCE(0.1)
-		HockeyService.Swing(prey)
-	end
+	-- A fight takes your legs, not your gun. That distinction is the whole
+	-- rule of this map, so it is worth asserting both halves.
+	local killerHum = killer._props.Character:FindFirstChildOfClass("Humanoid")
+	local preyHum = prey._props.Character:FindFirstChildOfClass("Humanoid")
+	check("a fight pins both fighters in place",
+		killerHum._props.WalkSpeed == 0 and preyHum._props.WalkSpeed == 0,
+		string.format("%.0f / %.0f walkspeed", killerHum._props.WalkSpeed, preyHum._props.WalkSpeed))
+	check("but nobody is disarmed mid-fight",
+		PlayerState.Get(killer).equipped ~= nil, tostring(PlayerState.Get(killer).equipped))
 
-	-- A fight must still run while it is on, and settle when the clock is up.
+	check("both start on full fight health",
+		HockeyService.FightHealthOf(killer) == Config.Hockey.FightHealth
+			and HockeyService.FightHealthOf(prey) == Config.Hockey.FightHealth,
+		string.format("%d / %d", HockeyService.FightHealthOf(killer) or -1,
+			HockeyService.FightHealthOf(prey) or -1))
+
+	-- One punch lands for real damage.
+	ADVANCE(1)
+	HockeyService.Punch(killer)
+	local afterOne = HockeyService.FightHealthOf(prey) or -1
+	check("a clean punch takes a real bite",
+		afterOne <= Config.Hockey.FightHealth - Config.Hockey.PunchDamageMin
+			and afterOne >= Config.Hockey.FightHealth - Config.Hockey.PunchDamageMax,
+		string.format("%d health left", afterOne))
+
+	-- Mashing gains nothing: the cooldown eats the second punch.
+	HockeyService.Punch(killer)
+	HockeyService.Punch(killer)
+	check("mashing the punch key is rate limited",
+		HockeyService.FightHealthOf(prey) == afterOne,
+		string.format("%d health, still", HockeyService.FightHealthOf(prey) or -1))
+
+	-- A raised guard turns the next one into a graze.
+	HockeyService.Block(prey, true)
+	check("the guard goes up", HockeyService.IsBlocking(prey), "")
+	ADVANCE(Config.Hockey.PunchCooldown + 0.05)
+	HockeyService.Punch(killer)
+	check("a punch into a raised guard barely stings",
+		HockeyService.FightHealthOf(prey) == afterOne - Config.Hockey.BlockedDamage,
+		string.format("%d damage", afterOne - (HockeyService.FightHealthOf(prey) or 0)))
+
+	-- Throwing a punch drops your own guard -- you cannot hide and hit.
+	HockeyService.Block(prey, true)
+	ADVANCE(Config.Hockey.PunchCooldown + 0.05)
+	HockeyService.Punch(prey)
+	check("throwing a punch drops your own guard",
+		HockeyService.IsBlocking(prey) == false, "")
+
 	check("the fight is still running", HockeyService.FightCount() == 1, "")
-	ADVANCE(Config.Hockey.FightSeconds + 1)
-	RunService.Heartbeat._fire(1 / 60)
+
+	-- Now punch him out. Worst case is PunchDamageMin a punch with the guard
+	-- down, so this many swings always reaches zero.
+	local swings = math.ceil(Config.Hockey.FightHealth / Config.Hockey.PunchDamageMin) + 2
+	for _ = 1, swings do
+		ADVANCE(Config.Hockey.PunchCooldown + 0.05)
+		HockeyService.Punch(killer)
+	end
 	RUN_SPAWNED()
 
-	check("the fight settles", #settled == 1, string.format("%d results", #settled))
+	check("running out of fight health ends it", #settled == 1,
+		string.format("%d results", #settled))
+	check("a knockout ends the fight without waiting for the clock",
+		HockeyService.FightCount() == 0, string.format("%d running", HockeyService.FightCount()))
 	if #settled == 1 then
-		check("whoever swung most wins", settled[1].winner == killer,
+		check("whoever landed more wins", settled[1].winner == killer,
 			tostring(settled[1].winner and settled[1].winner._props.Name))
 		check("the loser is knocked down, not killed",
 			prey._props.Character:FindFirstChildOfClass("Humanoid")._props.Health > 0,
@@ -317,7 +358,26 @@ do
 				prey._props.Character:FindFirstChildOfClass("Humanoid")._props.Health))
 		check("the winner takes points", PlayerState.Get(killer).points > 0,
 			string.format("%d points", PlayerState.Get(killer).points))
+		check("and both get their legs back",
+			killerHum._props.WalkSpeed > 0 and preyHum._props.WalkSpeed > 0,
+			string.format("%.0f / %.0f walkspeed",
+				killerHum._props.WalkSpeed, preyHum._props.WalkSpeed))
 	end
+
+	-- The loser serves time: after the knockdown they are put in the box,
+	-- which is a real place on the map rather than a nil position.
+	ADVANCE(Config.Hockey.KnockdownSeconds + 0.5)
+	RUN_DELAYED()
+	local preyRoot = prey._props.Character:FindFirstChild("HumanoidRootPart")
+	local boxed = preyRoot and preyRoot._props.CFrame
+	local box = HockeyService.PenaltyBox()
+	check("the rink actually has a penalty box", box.Magnitude > 1,
+		string.format("%.0f, %.0f, %.0f", box.X, box.Y, box.Z))
+	check("the loser is sent to the penalty box",
+		boxed ~= nil and (boxed.Position - box).Magnitude < 1,
+		if boxed then string.format("at %.0f, %.0f, %.0f vs box %.0f, %.0f, %.0f",
+			boxed.Position.X, boxed.Position.Y, boxed.Position.Z, box.X, box.Y, box.Z)
+			else "no root")
 
 	-- A fight with a team-mate is not a fight.
 	prey._props.Team = killer._props.Team

@@ -44,6 +44,13 @@ local EVENT_NAMES = {
 	-- the parts, and far less laggy than drawing them server-side.
 	-- The hockey fight scene: the server starts one, the client mashes, the
 	-- server says who won.
+	-- Hockey: possession, shooting, and the fight.
+	"HockeyShoot",
+	"HockeyChallenge",
+	"HockeyPunch",
+	"HockeyBlock",
+	"HockeyScore",
+	"FightUpdate",
 	"FightStarted",
 	"FightSwing",
 	"FightResult",

@@ -45,6 +45,19 @@ HockeyService.Goal = Signal.new()
 --[[ Fired as (winner, loser, brokeStick) when a fight is settled. ]]
 HockeyService.FightOver = Signal.new()
 
+--[[
+	Who has the puck, and where they may not pick it up again yet.
+
+	Possession is the whole difference between a rink and a rink with a
+	puck lying on it: you carry it, you can be checked off it, and you shoot
+	it where you are looking. Before this the puck was only ever something to
+	shoot at from a distance.
+]]
+local puckOwner: Player? = nil
+local pickupBlockedUntil: { [Player]: number } = {}
+local goalLights: { [number]: BasePart } = {}
+local penaltyBox = Vector3.new()
+
 local RINK_LENGTH = 300
 local RINK_WIDTH = 150
 local BOARD_HEIGHT = 11
@@ -60,7 +73,8 @@ type Fight = {
 	a: Player,
 	b: Player,
 	endsAt: number,
-	swings: { [Player]: number },
+	health: { [Player]: number },
+	blocking: { [Player]: boolean },
 }
 local fights: { Fight } = {}
 local fightOf: { [Player]: Fight } = {}
@@ -211,6 +225,23 @@ local function goal(centre: Vector3, facingZ: number, defendingTeam: number, par
 		})
 	end
 
+	-- The lamp behind the net, which is the whole drama of a goal.
+	local lamp = Util.Part({
+		Name = "GoalLight",
+		Size = Vector3.new(4, 4, 4),
+		CFrame = CFrame.new(centre + Vector3.new(0, height + 6, facingZ * (depth + 4))),
+		Shape = Enum.PartType.Ball,
+		Color = Color3.fromRGB(70, 14, 14),
+		Material = Enum.Material.Neon,
+		Parent = parent,
+	})
+	local glow = Instance.new("PointLight")
+	glow.Color = Color3.fromRGB(255, 40, 40)
+	glow.Brightness = 0
+	glow.Range = 60
+	glow.Parent = lamp
+	goalLights[defendingTeam] = lamp
+
 	-- The goal line, painted.
 	Util.Part({
 		Name = "GoalLine",
@@ -297,6 +328,61 @@ local function surface(centre: Vector3, parent: Instance)
 end
 
 --[[ A rack of sticks, so the rink comes with something to play it with. ]]
+--[[
+	The penalty box: a bench behind the boards with a low wall and a gate
+	gap. Losing a fight puts you here for a few seconds, which is the only
+	thing in this game that briefly takes you out of it -- and even in the
+	box your gun still works, so sitting there is not safe either.
+]]
+local function penaltyBench(centre: Vector3, parent: Instance)
+	local at = centre + Vector3.new(RINK_WIDTH * 0.5 + 9, 0, RINK_LENGTH * 0.16)
+	penaltyBox = at + Vector3.new(0, 4, 0)
+
+	Util.Part({
+		Name = "PenaltyFloor",
+		Size = Vector3.new(16, 1, 34),
+		Position = at + Vector3.new(0, 0.5, 0),
+		Color = Color3.fromRGB(58, 62, 70),
+		Material = Enum.Material.Concrete,
+		Anchored = true,
+		Parent = parent,
+	})
+
+	Util.Part({
+		Name = "PenaltyBench",
+		Size = Vector3.new(3, 1.6, 28),
+		Position = at + Vector3.new(5.5, 1.8, 0),
+		Color = Color3.fromRGB(120, 86, 48),
+		Material = Enum.Material.WoodPlanks,
+		Anchored = true,
+		Parent = parent,
+	})
+
+	-- Low wall on the rink side, with a gap in the middle for the gate.
+	for _, span in { { -11, 10 }, { 11, 10 } } do
+		Util.Part({
+			Name = "PenaltyWall",
+			Size = Vector3.new(1, 7, span[2]),
+			Position = at + Vector3.new(-8, 4, span[1]),
+			Color = Color3.fromRGB(235, 238, 242),
+			Material = Enum.Material.SmoothPlastic,
+			Anchored = true,
+			Parent = parent,
+		})
+	end
+
+	Util.Part({
+		Name = "PenaltySign",
+		Size = Vector3.new(0.4, 3, 12),
+		Position = at + Vector3.new(5.5, 8, 0),
+		Color = Color3.fromRGB(205, 40, 40),
+		Material = Enum.Material.Neon,
+		Anchored = true,
+		CanCollide = false,
+		Parent = parent,
+	})
+end
+
 local function stickRack(at: Vector3, parent: Instance)
 	Util.Part({
 		Name = "StickRack",
@@ -378,6 +464,96 @@ function HockeyService.RegisterHit(part: BasePart, attacker: Player?, direction:
 	return true
 end
 
+--[[
+	Carry the puck, and shoot it.
+
+	The puck is pulled toward a point in front of whoever has it rather than
+	welded to them, so it can be checked off, shot away, or lost when they
+	are knocked down. Welding would make possession absolute, and a puck
+	nobody can take off you is not hockey.
+]]
+local function stepPossession()
+	local live = puck
+	if not live or not live.Parent then
+		return
+	end
+
+	local owner = puckOwner
+	if owner then
+		local character = owner.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
+			puckOwner = nil
+		else
+			local ahead = root.Position
+				+ root.CFrame.LookVector * Config.Hockey.CarryDistance
+				- Vector3.new(0, 2.2, 0)
+			-- Pulled, not placed: it lags a little and can be knocked loose.
+			live.AssemblyLinearVelocity = (ahead - live.Position) * 18
+			return
+		end
+	end
+
+	-- Loose: whoever is closest and on the ice picks it up.
+	local now = os.clock()
+	for _, player in Players:GetPlayers() do
+		if now < (pickupBlockedUntil[player] or 0) then
+			continue
+		end
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
+			continue
+		end
+		-- Not while in a fight: you have dropped your gloves, not picked up
+		-- a stick.
+		if fightOf[player] then
+			continue
+		end
+		if (root.Position - live.Position).Magnitude <= Config.Hockey.PickupRange then
+			puckOwner = player
+			live:SetAttribute("LastTouchUserId", player.UserId)
+			Sound.At("Pickup", live.Position, 0.7)
+			Remotes.Event("HockeyScore"):FireClient(player, { carrying = true })
+			return
+		end
+	end
+end
+
+--[[ Shoot the puck where the shooter is looking. ]]
+function HockeyService.ShootPuck(player: Player, direction: any)
+	if puckOwner ~= player then
+		return
+	end
+	local live = puck
+	if not live or not live.Parent then
+		return
+	end
+	local aim = Util.SaneDirection(direction)
+	if not aim then
+		return
+	end
+
+	puckOwner = nil
+	-- A moment before you can scoop it straight back up.
+	pickupBlockedUntil[player] = os.clock() + 0.6
+
+	local flat = Vector3.new(aim.X, 0, aim.Z)
+	if flat.Magnitude < 0.01 then
+		flat = Vector3.new(0, 0, -1)
+	end
+	live.AssemblyLinearVelocity = flat.Unit * Config.Hockey.ShotSpeed + Vector3.new(0, 9, 0)
+	live:SetAttribute("LastTouchUserId", player.UserId)
+	Sound.At("MeleeHit", live.Position, 1.1)
+end
+
+--[[ Who has it, for tests. ]]
+function HockeyService.PuckOwner(): Player?
+	return puckOwner
+end
+
 --[[ Who last touched the puck, if they are still here. ]]
 local function lastToucher(): Player?
 	if not puck then
@@ -423,6 +599,25 @@ local function checkGoals()
 		then
 			lastGoalAt = now
 
+			-- Light the lamp at the end that was scored on.
+			local lamp = goalLights[zone.defendingTeam]
+			if lamp then
+				lamp.Color = Color3.fromRGB(255, 40, 40)
+				local glow = lamp:FindFirstChildOfClass("PointLight")
+				if glow then
+					glow.Brightness = 6
+				end
+				task.delay(2.5, function()
+					if lamp.Parent then
+						lamp.Color = Color3.fromRGB(70, 14, 14)
+						local dim = lamp:FindFirstChildOfClass("PointLight")
+						if dim then
+							dim.Brightness = 0
+						end
+					end
+				end)
+			end
+
 			local scorer = lastToucher()
 			-- The goal belongs to whoever is NOT defending it.
 			local scoringTeam = if zone.defendingTeam == 1 then 2 else 1
@@ -435,6 +630,7 @@ local function checkGoals()
 
 			Sound.At("RoundEnd", live.Position, 1.2)
 			dropPuck()
+			puckOwner = nil
 			return
 		end
 	end
@@ -445,10 +641,13 @@ end
 --[[
 	A hockey fight, Blades of Steel style.
 
-	Two opposing players, both mashing, for a few seconds. The one who
-	swings most wins: the loser goes down, the winner takes the points, and
-	the winner's stick has a good chance of breaking over them -- at which
-	point the splintered half becomes a genuinely nasty melee weapon.
+	Two opposing players, squared up face to face. Each one has fight health
+	and two controls: throw a punch, or raise the guard. A clean punch takes
+	a real bite; a punch into a raised guard barely stings. Drop to zero and
+	you go down, the winner takes the points, and the winner's stick has a
+	good chance of breaking over them -- at which point the splintered half
+	becomes a genuinely nasty melee weapon. The loser then serves time in the
+	penalty box, because of course they do.
 
 	Note what does NOT happen: nobody's guns are taken away. You can shoot
 	your way out of a fight, or shoot two other people having one. That is
@@ -467,17 +666,39 @@ function HockeyService.StartFight(a: Player, b: Player): boolean
 		a = a,
 		b = b,
 		endsAt = os.clock() + Config.Hockey.FightSeconds,
-		swings = { [a] = 0, [b] = 0 },
+		health = { [a] = Config.Hockey.FightHealth, [b] = Config.Hockey.FightHealth },
+		blocking = { [a] = false, [b] = false },
 	}
 	table.insert(fights, fight)
 	fightOf[a] = fight
 	fightOf[b] = fight
 
+	-- Square them up face to face. A fight is a fight, not a chase, so their
+	-- legs come off for the duration -- but nothing takes their gun away.
+	local aRoot = a.Character and a.Character:FindFirstChild("HumanoidRootPart")
+	local bRoot = b.Character and b.Character:FindFirstChild("HumanoidRootPart")
+	if aRoot and bRoot and aRoot:IsA("BasePart") and bRoot:IsA("BasePart") then
+		local midpoint = (aRoot.Position + bRoot.Position) * 0.5
+		local axis = bRoot.Position - aRoot.Position
+		if Util.IsSaneVector(axis) and axis.Magnitude > 0.5 then
+			local unit = axis.Unit
+			aRoot.CFrame = CFrame.lookAt(midpoint - unit * 3, midpoint + unit * 3)
+			bRoot.CFrame = CFrame.lookAt(midpoint + unit * 3, midpoint - unit * 3)
+		end
+	end
+
 	for _, who in { a, b } do
 		local foe = if who == a then b else a
+		local humanoid = who.Character and who.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = 0
+			humanoid.JumpPower = 0
+		end
 		Remotes.Event("FightStarted"):FireClient(who, {
 			opponent = foe.DisplayName,
 			duration = Config.Hockey.FightSeconds,
+			health = Config.Hockey.FightHealth,
+			maxHealth = Config.Hockey.FightHealth,
 		})
 	end
 
@@ -488,46 +709,104 @@ function HockeyService.StartFight(a: Player, b: Player): boolean
 	return true
 end
 
-local lastSwingAt: { [Player]: number } = {}
+local lastPunchAt: { [Player]: number } = {}
 
---[[ A swing thrown during a fight. The client sends one per mash (rate-limited). ]]
-function HockeyService.Swing(player: Player)
+--[[ Give a fighter their legs back once the scrap is over. ]]
+local function releaseFighter(player: Player)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Parent then
+		humanoid.WalkSpeed = Config.Turbo.WalkSpeed
+		humanoid.JumpPower = Config.Movement.JumpPower
+	end
+end
+
+--[[ Tell both fighters where the two health bars stand. ]]
+local function pushFightState(fight: Fight)
+	for _, who in { fight.a, fight.b } do
+		if who.Parent then
+			local foe = if who == fight.a then fight.b else fight.a
+			Remotes.Event("FightUpdate"):FireClient(who, {
+				health = fight.health[who] or 0,
+				opponentHealth = fight.health[foe] or 0,
+				maxHealth = Config.Hockey.FightHealth,
+				blocking = fight.blocking[who] == true,
+				opponentBlocking = fight.blocking[foe] == true,
+			})
+		end
+	end
+end
+
+--[[
+	Raise or drop the guard. A raised guard turns a knockout blow into a
+	graze, which makes the fight a read rather than a race: whoever only
+	hammers the punch key loses to whoever watches and times it.
+]]
+function HockeyService.Block(player: Player, up: boolean)
 	local fight = fightOf[player]
 	if not fight then
 		return
 	end
-	local now = os.clock()
-	if now - (lastSwingAt[player] or 0) < 0.08 then
-		return
-	end
-	lastSwingAt[player] = now
-	fight.swings[player] = (fight.swings[player] or 0) + 1
+	fight.blocking[player] = up == true
+	pushFightState(fight)
 end
 
-local function settle(fight: Fight)
+--[[
+	Throw a punch. Rate-limited by PunchCooldown so a macro gains nothing,
+	and throwing drops your own guard -- you cannot hide and hit at once.
+]]
+function HockeyService.Punch(player: Player)
+	local fight = fightOf[player]
+	if not fight then
+		return
+	end
+
+	local now = os.clock()
+	if now - (lastPunchAt[player] or 0) < Config.Hockey.PunchCooldown then
+		return
+	end
+	lastPunchAt[player] = now
+
+	local foe = if player == fight.a then fight.b else fight.a
+	fight.blocking[player] = false
+
+	local damage = if fight.blocking[foe]
+		then Config.Hockey.BlockedDamage
+		else math.random(Config.Hockey.PunchDamageMin, Config.Hockey.PunchDamageMax)
+
+	local left = math.max(0, (fight.health[foe] or 0) - damage)
+	fight.health[foe] = left
+	pushFightState(fight)
+
+	if left <= 0 then
+		HockeyService.EndFight(fight, player, foe)
+	end
+end
+
+--[[
+	Close out a fight with a decided winner -- either a knockout or the clock
+	running out with one of them ahead.
+]]
+function HockeyService.EndFight(fight: Fight, winner: Player, loser: Player)
+	if not fightOf[winner] and not fightOf[loser] then
+		return
+	end
 	fightOf[fight.a] = nil
 	fightOf[fight.b] = nil
-
-	local aSwings = fight.swings[fight.a] or 0
-	local bSwings = fight.swings[fight.b] or 0
-
-	local winner, loser
-	if aSwings == bSwings then
-		-- A dead heat is a draw: both of them look silly and neither falls.
-		for _, who in { fight.a, fight.b } do
-			Remotes.Event("FightResult"):FireClient(who, { won = false, draw = true })
+	for index, candidate in fights do
+		if candidate == fight then
+			table.remove(fights, index)
+			break
 		end
-		return
-	elseif aSwings > bSwings then
-		winner, loser = fight.a, fight.b
-	else
-		winner, loser = fight.b, fight.a
 	end
+
+	releaseFighter(winner)
+	releaseFighter(loser)
 
 	PlayerState.AwardPoints(winner, Config.Hockey.FightWinPoints)
 
-	-- The loser goes down. Not killed -- knocked over, which is both funnier
-	-- and leaves them in the game.
+	-- The loser goes down, then serves time. Not killed -- knocked over and
+	-- benched, which is both funnier and leaves them in the game.
 	local loserCharacter = loser.Character
 	local loserHumanoid = loserCharacter and loserCharacter:FindFirstChildOfClass("Humanoid")
 	if loserHumanoid then
@@ -536,7 +815,18 @@ local function settle(fight: Fight)
 			if loserHumanoid and loserHumanoid.Parent then
 				loserHumanoid.PlatformStand = false
 			end
+			local root = loserCharacter and loserCharacter:FindFirstChild("HumanoidRootPart")
+			if root and root:IsA("BasePart") and penaltyBox.Magnitude > 0 then
+				root.CFrame = CFrame.new(penaltyBox)
+			end
 		end)
+	end
+
+	-- Losing the fight means losing the puck, and you cannot scoop it back up
+	-- on your way to the box.
+	if puckOwner == loser then
+		puckOwner = nil
+		pickupBlockedUntil[loser] = os.clock() + Config.Hockey.PenaltySeconds
 	end
 
 	-- And the stick may well break. The splintered half is the prize.
@@ -564,6 +854,31 @@ local function settle(fight: Fight)
 	)
 
 	HockeyService.FightOver.Fire(winner, loser, brokeStick)
+end
+
+--[[ The clock ran out. Whoever is still standing taller takes it. ]]
+local function settle(fight: Fight)
+	local aLeft = fight.health[fight.a] or 0
+	local bLeft = fight.health[fight.b] or 0
+
+	if aLeft == bLeft then
+		-- A dead heat is a draw: both of them look silly and neither falls.
+		fightOf[fight.a] = nil
+		fightOf[fight.b] = nil
+		for _, who in { fight.a, fight.b } do
+			releaseFighter(who)
+			if who.Parent then
+				Remotes.Event("FightResult"):FireClient(who, { won = false, draw = true })
+			end
+		end
+		return
+	end
+
+	if aLeft > bLeft then
+		HockeyService.EndFight(fight, fight.a, fight.b)
+	else
+		HockeyService.EndFight(fight, fight.b, fight.a)
+	end
 end
 
 --[[ Is this player on the ice? Fights only start on the rink. ]]
@@ -602,7 +917,7 @@ function HockeyService.Clear()
 	table.clear(goalZones)
 	table.clear(fights)
 	table.clear(fightOf)
-	table.clear(lastSwingAt)
+	table.clear(lastPunchAt)
 end
 
 --[[ Put the rink down, off to one side of the city. ]]
@@ -622,6 +937,8 @@ function HockeyService.Build(mapSize: number)
 
 	goal(centre + Vector3.new(0, 0, -RINK_LENGTH * 0.42), -1, 1, model)
 	goal(centre + Vector3.new(0, 0, RINK_LENGTH * 0.42), 1, 2, model)
+
+	penaltyBench(centre, model)
 
 	stickRack(centre + Vector3.new(RINK_WIDTH * 0.5 + 14, 0, 0), model)
 	stickRack(centre + Vector3.new(-RINK_WIDTH * 0.5 - 14, 0, 0), model)
@@ -680,8 +997,21 @@ function HockeyService.Start()
 		HockeyService.Swing(player)
 	end)
 
+	Remotes.Event("HockeyPunch").OnServerEvent:Connect(function(player: Player)
+		HockeyService.Punch(player)
+	end)
+
+	Remotes.Event("HockeyBlock").OnServerEvent:Connect(function(player: Player, up)
+		HockeyService.Block(player, up == true)
+	end)
+
+	Remotes.Event("HockeyShoot").OnServerEvent:Connect(function(player: Player, direction)
+		HockeyService.ShootPuck(player, direction)
+	end)
+
 	RunService.Heartbeat:Connect(function()
 		checkGoals()
+		stepPossession()
 
 		local now = os.clock()
 		for index = #fights, 1, -1 do
@@ -694,6 +1024,7 @@ function HockeyService.Start()
 					fightOf[fight.a] = nil
 					fightOf[fight.b] = nil
 					for _, fighter in { fight.a, fight.b } do
+						releaseFighter(fighter)
 						if fighter.Parent then
 							Remotes.Event("FightResult"):FireClient(fighter, { won = false, draw = true, brokeStick = false })
 						end
@@ -707,8 +1038,25 @@ function HockeyService.Start()
 
 	Players.PlayerRemoving:Connect(function(player)
 		fightOf[player] = nil
-		lastSwingAt[player] = nil
+		lastPunchAt[player] = nil
 	end)
+end
+
+--[[ Where the penalty box is, for tests. Zero before the rink is built. ]]
+function HockeyService.PenaltyBox(): Vector3
+	return penaltyBox
+end
+
+--[[ A fighter's remaining fight health, for tests and for the HUD. ]]
+function HockeyService.FightHealthOf(player: Player): number?
+	local fight = fightOf[player]
+	return fight and fight.health[player]
+end
+
+--[[ Is this player's guard up right now? ]]
+function HockeyService.IsBlocking(player: Player): boolean
+	local fight = fightOf[player]
+	return fight ~= nil and fight.blocking[player] == true
 end
 
 --[[ How many fights are running, for tests. ]]

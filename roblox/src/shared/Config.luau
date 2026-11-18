@@ -717,6 +717,19 @@ Config.Hockey = {
 	-- the splintered half is the best melee weapon in the game.
 	StickBreakChance = 0.55,
 	StickWeapon = "HockeyStick",
+	-- Possession: how close you have to be to pick the puck up, how far in
+	-- front of you it rides, and how hard you can shoot it.
+	PickupRange = 9,
+	CarryDistance = 4.5,
+	ShotSpeed = 110,
+	-- A fight is a punch-and-block contest now rather than a mash. These are
+	-- its numbers.
+	FightHealth = 100,
+	PunchCooldown = 0.45,
+	PunchDamageMin = 16,
+	PunchDamageMax = 24,
+	BlockedDamage = 5,
+	PenaltySeconds = 10,
 	BrokenStickWeapon = "BrokenStick",
 }
 
@@ -1132,6 +1145,10 @@ export type ConfigType = {
 		KnockdownSeconds: number,
 		StickBreakChance: number,
 		StickWeapon: string,
+		PickupRange: number, CarryDistance: number, ShotSpeed: number,
+		FightHealth: number, PunchCooldown: number,
+		PunchDamageMin: number, PunchDamageMax: number,
+		BlockedDamage: number, PenaltySeconds: number,
 		BrokenStickWeapon: string,
 	},
 	Radar: {
