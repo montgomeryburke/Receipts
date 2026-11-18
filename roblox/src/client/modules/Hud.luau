@@ -10,6 +10,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
@@ -17,6 +18,15 @@ local Util = require(Shared:WaitForChild("Util"))
 local player = Players.LocalPlayer
 
 local Hud = {}
+
+-- Low-health warning and the scoreboard, declared up here with the rest of
+-- the widgets so every function can reach them.
+local lowHealthHolder: Frame? = nil
+local vignetteStrength = 0
+local vignettePulse = 0
+local scoreboard: Frame? = nil
+local scoreboardRows: Frame? = nil
+local scoreboardTitle: TextLabel? = nil
 
 local screen: ScreenGui
 local healthFill: Frame
@@ -455,6 +465,111 @@ function Hud.Build()
 	toastLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	toastLayout.Padding = UDim.new(0, 6)
 	toastLayout.Parent = toastHolder
+
+	-- ------------------------------------------------- low-health vignette
+	--
+	-- Red creeping in from the edges when you are nearly dead. A number in
+	-- the corner is something you have to look at; this you cannot miss, and
+	-- it is the single clearest thing Halo did to tell you to break off.
+	--
+	-- Built from four edge gradients rather than an image, because an image
+	-- would need an asset ID, and an asset ID in a place that has never been
+	-- published is a thing that can silently fail to load.
+	local vignetteHolder = makeFrame(screen, {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Visible = false,
+		ZIndex = 4,
+	})
+	vignetteHolder.Name = "LowHealth"
+
+	for _, edge in {
+		{ size = UDim2.new(1, 0, 0, 150), pos = UDim2.new(0, 0, 0, 0), rot = 90 },
+		{ size = UDim2.new(1, 0, 0, 150), pos = UDim2.new(0, 0, 1, -150), rot = 270 },
+		{ size = UDim2.new(0, 220, 1, 0), pos = UDim2.new(0, 0, 0, 0), rot = 0 },
+		{ size = UDim2.new(0, 220, 1, 0), pos = UDim2.new(1, -220, 0, 0), rot = 180 },
+	} do
+		local band = makeFrame(vignetteHolder, {
+			Size = edge.size,
+			Position = edge.pos,
+			BackgroundColor3 = Color3.fromRGB(190, 24, 24),
+			BackgroundTransparency = 0.25,
+		})
+		local fade = Instance.new("UIGradient")
+		fade.Rotation = edge.rot
+		fade.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		fade.Parent = band
+	end
+
+	-- ------------------------------------------------------- the scoreboard
+	--
+	-- Held down, not toggled, the way Halo's was. In a game scored by points
+	-- rather than kills there is no way to tell whether you are winning
+	-- without one.
+	local board = makeFrame(screen, {
+		Size = UDim2.fromOffset(620, 460),
+		Position = UDim2.new(0.5, -310, 0.5, -230),
+		BackgroundColor3 = Color3.fromRGB(10, 14, 20),
+		BackgroundTransparency = 0.12,
+		Visible = false,
+		ZIndex = 20,
+	})
+	local border = Instance.new("UIStroke")
+	border.Color = Color3.fromRGB(120, 200, 255)
+	border.Thickness = 2
+	border.Transparency = 0.3
+	border.Parent = board
+
+	scoreboardTitle = makeLabel(board, {
+		Size = UDim2.new(1, -24, 0, 36),
+		Position = UDim2.fromOffset(12, 10),
+		Text = "SCOREBOARD",
+		TextSize = 24,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+
+	makeLabel(board, {
+		Size = UDim2.new(1, -24, 0, 18),
+		Position = UDim2.fromOffset(12, 48),
+		Text = "PLAYER                                 PTS    KILLS   DEATHS",
+		TextSize = 13,
+		TextColor3 = Color3.fromRGB(150, 165, 180),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+
+	local rows = makeFrame(board, {
+		Size = UDim2.new(1, -24, 1, -84),
+		Position = UDim2.fromOffset(12, 72),
+		BackgroundTransparency = 1,
+	})
+	local rowLayout = Instance.new("UIListLayout")
+	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rowLayout.Padding = UDim.new(0, 2)
+	rowLayout.Parent = rows
+
+	scoreboard = board
+	scoreboardRows = rows
+
+	-- Drive the vignette from the frame loop rather than from health events,
+	-- so the pulse is smooth no matter how often damage arrives.
+	RunService.RenderStepped:Connect(function(deltaTime: number)
+		if not vignetteHolder.Visible then
+			return
+		end
+		vignettePulse += deltaTime * 6
+		-- Faster and harder the closer to death you are.
+		local beat = 0.5 + 0.5 * math.sin(vignettePulse)
+		for _, band in vignetteHolder:GetChildren() do
+			if band:IsA("Frame") then
+				band.BackgroundTransparency = 0.72 - vignetteStrength * (0.32 + beat * 0.14)
+			end
+		end
+	end)
+
+	lowHealthHolder = vignetteHolder
 end
 
 -- ================================================================ UPDATING ==
@@ -474,6 +589,14 @@ function Hud.SetHealth(current: number, maximum: number)
 		then Color3.fromRGB(80, 200, 110)
 		elseif fraction > 0.3 then Color3.fromRGB(230, 170, 60)
 		else Color3.fromRGB(230, 70, 60)
+
+	-- The edge warning comes up below a third of health and gets stronger all
+	-- the way down, so "nearly dead" and "one more hit" look different.
+	if lowHealthHolder then
+		local danger = math.clamp((0.34 - fraction) / 0.34, 0, 1)
+		vignetteStrength = danger
+		lowHealthHolder.Visible = danger > 0.02 and current > 0
+	end
 end
 
 --[[ Tell the player their turbo is lit. ]]
@@ -882,6 +1005,84 @@ function Hud.Medal(text: string)
 end
 
 --[[ Report control health on screen. Green when fine, red when not. ]]
+--[[
+	Show or hide the scoreboard.
+
+	Held down rather than toggled, so you can glance at it mid-fight and let
+	go, which is how Halo's worked and the reason it never got in the way.
+]]
+function Hud.ShowScoreboard(visible: boolean)
+	if scoreboard then
+		scoreboard.Visible = visible
+	end
+end
+
+--[[
+	Fill the scoreboard in.
+
+	`rows` arrives already sorted by the server, which is the only place that
+	knows everyone's score. Teams are kept apart and coloured, because in a
+	team game the question is not who is top but which half is winning.
+]]
+function Hud.SetScoreboard(
+	rows: { { name: string, team: string?, teamColor: Color3?, points: number, kills: number, deaths: number, isYou: boolean? } },
+	heading: string?
+)
+	local rowHolder = scoreboardRows
+	if not rowHolder then
+		return
+	end
+
+	for _, old in rowHolder:GetChildren() do
+		if not old:IsA("UIListLayout") then
+			old:Destroy()
+		end
+	end
+
+	if scoreboardTitle then
+		scoreboardTitle.Text = heading or "SCOREBOARD"
+	end
+
+	local lastTeam: string? = nil
+	local order = 0
+
+	for _, row in rows do
+		-- A heading each time the team changes, so the two sides read as two
+		-- sides rather than one long list.
+		if row.team and row.team ~= lastTeam then
+			lastTeam = row.team
+			order += 1
+			local header = makeLabel(rowHolder, {
+				Size = UDim2.new(1, 0, 0, 22),
+				Text = string.upper(row.team),
+				TextSize = 16,
+				TextColor3 = row.teamColor or Color3.fromRGB(200, 210, 220),
+				TextXAlignment = Enum.TextXAlignment.Left,
+			})
+			header.LayoutOrder = order
+		end
+
+		order += 1
+		local line = makeLabel(rowHolder, {
+			Size = UDim2.new(1, 0, 0, 20),
+			Text = string.format(
+				"%-30s %6d %7d %8d",
+				string.sub(row.name, 1, 30),
+				row.points,
+				row.kills,
+				row.deaths
+			),
+			TextSize = 15,
+			Font = Enum.Font.Code, -- monospaced, or the columns do not line up
+			TextColor3 = if row.isYou
+				then Color3.fromRGB(255, 240, 150)
+				else Color3.fromRGB(215, 225, 235),
+			TextXAlignment = Enum.TextXAlignment.Left,
+		})
+		line.LayoutOrder = order
+	end
+end
+
 function Hud.SetStatus(text: string, good: boolean)
 	if not statusText then
 		return

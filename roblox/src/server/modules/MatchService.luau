@@ -25,6 +25,7 @@ local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local EffectService = require(script.Parent:WaitForChild("EffectService"))
+local ScoreboardService = require(script.Parent:WaitForChild("ScoreboardService"))
 
 local MatchService = {}
 
@@ -350,6 +351,10 @@ local function runIntermission()
 	local winnerName = if winnerIndex == 0 then "NOBODY" else Config.Teams[winnerIndex].Name
 	EffectService.CelebrateWinner(winnerName)
 	fanfare("RoundEnd")
+
+	-- Put the final standings up without anybody having to reach for Tab.
+	-- It is the one moment everyone wants to see them.
+	pcall(ScoreboardService.PushAll)
 
 	while os.clock() < phaseEndsAt do
 		broadcast()

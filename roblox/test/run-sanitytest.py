@@ -87,9 +87,17 @@ end
 print("")
 print("Weapons:")
 local weaponCount, missingPoints, badNumbers, badSlots = 0, {}, {}, {}
+local badRecoil = {}
 for name, spec in Config.Weapons do
 	weaponCount += 1
 	if not spec.Points then table.insert(missingPoints, name) end
+
+	-- Camera kick. Zero would mean a weapon that feels like nothing at all,
+	-- and anything past the module's own cap would be a weapon that spins
+	-- the view somewhere a player cannot recover from.
+	if type(spec.Recoil) ~= "number" or spec.Recoil <= 0 or spec.Recoil > 5 then
+		table.insert(badRecoil, name .. " = " .. tostring(spec.Recoil))
+	end
 	if spec.Cooldown <= 0 or spec.MagSize <= 0 or spec.Range <= 0 then
 		table.insert(badNumbers, name)
 	end
@@ -103,6 +111,7 @@ end
 
 check("every weapon scores points", #missingPoints == 0, table.concat(missingPoints, ", "))
 check("every weapon has sane numbers", #badNumbers == 0, table.concat(badNumbers, ", "))
+check("every weapon has a camera kick", #badRecoil == 0, table.concat(badRecoil, ", "))
 check("every weapon sits in a real slot", #badSlots == 0, table.concat(badSlots, ", "))
 check("the arsenal is not empty", weaponCount >= 16, string.format("%d weapons", weaponCount))
 

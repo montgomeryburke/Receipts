@@ -36,6 +36,11 @@ local EVENT_NAMES = {
 	"KillFeed",
 	"PlaySound",
 	"MountedWeaponState",
+	-- The scoreboard is pulled, not pushed: streaming everyone's score to
+	-- everyone continuously costs bandwidth all match for a panel that is on
+	-- screen a few seconds at a time.
+	"RequestScoreboard",
+	"Scoreboard",
 }
 
 local FUNCTION_NAMES = {

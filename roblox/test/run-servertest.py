@@ -113,6 +113,46 @@ RUN_SPAWNED()
 check("dying resets the multikill window", #medalsSent() == 0,
 	table.concat(medalsSent(), ", "))
 
+-- ------------------------------------------------------------ scoreboard
+-- A game scored by points is unplayable without one, and it has to survive
+-- the awkward cases: a player with no team, and a request arriving before
+-- anybody has scored anything.
+PlayerState.AwardPoints(killer, 250)
+PlayerState.AwardPoints(prey, 90)
+
+FIRED = {}
+ScoreboardService.Send(killer)
+local sent = FIRED_TO("Scoreboard")
+check("a request gets a scoreboard back", #sent == 1, string.format("%d payloads", #sent))
+
+if #sent == 1 then
+	local payload = sent[1].args[1]
+	local rows = payload and payload.rows
+	check("it lists every player", rows and #rows == 2, string.format("%d rows", rows and #rows or 0))
+	check("the heading totals the teams",
+		payload and type(payload.heading) == "string" and #payload.heading > 0,
+		tostring(payload and payload.heading))
+
+	if rows and #rows == 2 then
+		-- Sorted by team, then by points within the team. Both players are
+		-- on different teams here, so check the fields arrived at all.
+		local found = 0
+		local marked = 0
+		for _, row in rows do
+			if row.points and row.points > 0 then found += 1 end
+			if row.isYou then marked += 1 end
+		end
+		check("points reach the panel", found == 2, string.format("%d rows scored", found))
+		check("your own row is marked", marked == 1, string.format("%d marked", marked))
+	end
+end
+
+-- The end of a round pushes it to everybody unasked.
+FIRED = {}
+ScoreboardService.PushAll()
+check("the round end pushes to everyone", #FIRED_TO("Scoreboard") == 2,
+	string.format("%d pushes", #FIRED_TO("Scoreboard")))
+
 DUMP(if failures == 0 then "MEDALS WORK" else failures .. " MEDAL FAILURES")
 '''
 
@@ -134,7 +174,8 @@ def strip(s):
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound']
 SERVER = ['PlayerState', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
-          'EffectService', 'FlagService', 'MonetizationService', 'MatchService', 'GraphicsService']
+          'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',
+          'GraphicsService']
 
 parts = [read(HERE, 'stubs.luau'), read(HERE, 'serverstubs.luau')]
 parts.append(f'DATASTORE_THROWS = {"true" if BLOCK_DATASTORE else "false"}\n')

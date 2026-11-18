@@ -26,6 +26,7 @@ local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local Hud = require(script.Parent:WaitForChild("Hud"))
+local Feel = require(script.Parent:WaitForChild("Feel"))
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
@@ -37,6 +38,8 @@ type ArsenalEntry = {
 	Category: string,
 	DisplayName: string,
 	MagSize: number,
+	Cooldown: number,
+	Recoil: number,
 	Automatic: boolean,
 	ZoomFov: number?,
 	ZoomLevels: { number }?,
@@ -205,6 +208,8 @@ end
 
 -- ==================================================================== FIRING ==
 
+local nextKick = 0
+
 local function tryFire()
 	local spec = arsenal[effectiveWeaponName()]
 	if not spec then
@@ -225,6 +230,15 @@ local function tryFire()
 	end
 
 	Remotes.Event("FireWeapon"):FireServer(direction)
+
+	-- Kick the camera, gated on the weapon's REAL cooldown rather than the
+	-- loose network one above. Both sides read the same Config, so this is
+	-- the same rate the server will actually accept shots at, and the view
+	-- does not buzz at 33 Hz while a sniper fires once a second and a half.
+	if now >= nextKick then
+		nextKick = now + spec.Cooldown * 0.9
+		Feel.Kick(spec.Recoil)
+	end
 end
 
 -- ==================================================================== ZOOMING ==
@@ -392,6 +406,14 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
+	if input.KeyCode == Enum.KeyCode.Tab then
+		-- Held, not toggled. Ask for fresh numbers at the moment it opens,
+		-- rather than streaming a scoreboard to everyone continuously.
+		Hud.ShowScoreboard(true)
+		Remotes.Event("RequestScoreboard"):FireServer()
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.R then
 		Remotes.Event("Reload"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F then
@@ -424,6 +446,11 @@ local function onInputBegan(input: InputObject, processed: boolean)
 end
 
 local function onInputEnded(input: InputObject)
+	if input.KeyCode == Enum.KeyCode.Tab then
+		Hud.ShowScoreboard(false)
+		return
+	end
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1
 		or input.UserInputType == Enum.UserInputType.Touch
 	then
@@ -658,6 +685,8 @@ function Controls.Start()
 			Category = spec.Category,
 			DisplayName = spec.DisplayName,
 			MagSize = spec.MagSize,
+			Cooldown = spec.Cooldown,
+			Recoil = spec.Recoil or 0.8,
 			Automatic = spec.Automatic == true,
 			ZoomFov = spec.ZoomFov,
 			ZoomLevels = spec.ZoomLevels,

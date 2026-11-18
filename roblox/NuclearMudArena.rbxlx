@@ -179,7 +179,7 @@ Config.Combat = {
 Config.Weapons = {
 	-- ------------------------------------------------------------- SIDEARMS
 	Pistol = {
-		Slot = 1, Category = "Sidearm", DisplayName = "9mm Pistol",
+		Slot = 1, Category = "Sidearm", DisplayName = "9mm Pistol", Recoil = 0.9,
 		Kind = "Hitscan", Damage = 12, Cooldown = 0.28, Range = 400,
 		MagSize = 12, ReloadTime = 1.3, Spread = 1.2,
 		Color = Color3.fromRGB(90, 90, 96),
@@ -187,7 +187,7 @@ Config.Weapons = {
 		Points = 10,
 	},
 	Revolver = {
-		Slot = 1, Category = "Sidearm", DisplayName = ".44 Revolver",
+		Slot = 1, Category = "Sidearm", DisplayName = ".44 Revolver", Recoil = 2.6,
 		Kind = "Hitscan", Damage = 34, Cooldown = 0.7, Range = 500,
 		MagSize = 6, ReloadTime = 2.1, Spread = 0.8,
 		Color = Color3.fromRGB(150, 130, 90),
@@ -195,7 +195,7 @@ Config.Weapons = {
 		Points = 15,
 	},
 	Deagle = {
-		Slot = 1, Category = "Sidearm", DisplayName = "Hand Cannon",
+		Slot = 1, Category = "Sidearm", DisplayName = "Hand Cannon", Recoil = 2.9,
 		Kind = "Hitscan", Damage = 42, Cooldown = 0.75, Range = 480,
 		MagSize = 7, ReloadTime = 2.0, Spread = 1.0,
 		Color = Color3.fromRGB(200, 180, 110),
@@ -205,28 +205,28 @@ Config.Weapons = {
 
 	-- ------------------------------------------------------------ AUTOMATIC
 	SMG = {
-		Slot = 2, Category = "Automatic", DisplayName = "Backroad SMG",
+		Slot = 2, Category = "Automatic", DisplayName = "Backroad SMG", Recoil = 0.5,
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.075, Range = 380,
 		MagSize = 35, ReloadTime = 1.7, Spread = 2.6, Automatic = true,
 		Color = Color3.fromRGB(70, 76, 84),
 		Points = 8,
 	},
 	AssaultRifle = {
-		Slot = 2, Category = "Automatic", DisplayName = "Assault Rifle",
+		Slot = 2, Category = "Automatic", DisplayName = "Assault Rifle", Recoil = 0.7,
 		Kind = "Hitscan", Damage = 14, Cooldown = 0.11, Range = 700,
 		MagSize = 30, ReloadTime = 2.0, Spread = 1.5, Automatic = true,
 		Color = Color3.fromRGB(60, 68, 58),
 		Points = 10,
 	},
 	MachineGun = {
-		Slot = 2, Category = "Automatic", DisplayName = "Machine Gun",
+		Slot = 2, Category = "Automatic", DisplayName = "Machine Gun", Recoil = 0.6,
 		Kind = "Hitscan", Damage = 11, Cooldown = 0.09, Range = 650,
 		MagSize = 80, ReloadTime = 3.4, Spread = 2.2, Automatic = true,
 		Color = Color3.fromRGB(52, 54, 58),
 		Points = 10,
 	},
 	Minigun = {
-		Slot = 2, Category = "Automatic", DisplayName = "Mud Minigun",
+		Slot = 2, Category = "Automatic", DisplayName = "Mud Minigun", Recoil = 0.35,
 		Kind = "Hitscan", Damage = 9, Cooldown = 0.045, Range = 600,
 		MagSize = 200, ReloadTime = 5.0, Spread = 3.4, Automatic = true,
 		-- Slows you down while you hold the trigger, because it is enormous.
@@ -237,7 +237,7 @@ Config.Weapons = {
 
 	-- ------------------------------------------------------------- SHOTGUNS
 	Shotgun = {
-		Slot = 3, Category = "Shotgun", DisplayName = "Pump Shotgun",
+		Slot = 3, Category = "Shotgun", DisplayName = "Pump Shotgun", Recoil = 3.4,
 		Kind = "Hitscan", Damage = 9, Cooldown = 0.85, Range = 160,
 		MagSize = 6, ReloadTime = 2.6, Spread = 6.0, Pellets = 9,
 		Color = Color3.fromRGB(120, 84, 52),
@@ -245,7 +245,7 @@ Config.Weapons = {
 		Points = 14,
 	},
 	AutoShotgun = {
-		Slot = 3, Category = "Shotgun", DisplayName = "Auto Shotgun",
+		Slot = 3, Category = "Shotgun", DisplayName = "Auto Shotgun", Recoil = 2.2,
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.4, Range = 140,
 		MagSize = 8, ReloadTime = 3.0, Spread = 7.5, Pellets = 8, Automatic = true,
 		Color = Color3.fromRGB(90, 70, 60),
@@ -254,7 +254,7 @@ Config.Weapons = {
 
 	-- -------------------------------------------------------------- SNIPERS
 	Sniper = {
-		Slot = 4, Category = "Sniper", DisplayName = "Sniper Rifle",
+		Slot = 4, Category = "Sniper", DisplayName = "Sniper Rifle", Recoil = 3.2,
 		Kind = "Hitscan", Damage = 62, Cooldown = 1.5, Range = 2400,
 		MagSize = 4, ReloadTime = 2.8, Spread = 0.0,
 		-- Halo's sniper had two scope stages. This has four, because the ask
@@ -270,7 +270,7 @@ Config.Weapons = {
 		Points = 30,
 	},
 	AntiMaterial = {
-		Slot = 4, Category = "Sniper", DisplayName = "Anti-Truck Rifle",
+		Slot = 4, Category = "Sniper", DisplayName = "Anti-Truck Rifle", Recoil = 4.5,
 		Kind = "Projectile", Damage = 90, Cooldown = 2.4, Range = 2600, Speed = 1200,
 		MagSize = 3, ReloadTime = 3.6, Spread = 0.0,
 		ZoomLevels = { 2, 5, 10, 16 },
@@ -285,7 +285,7 @@ Config.Weapons = {
 
 	-- ------------------------------------------------------- THE STAR ITEM
 	DiamondGun = {
-		Slot = 5, Category = "Special", DisplayName = "Nuclear Diamond Gun",
+		Slot = 5, Category = "Special", DisplayName = "Nuclear Diamond Gun", Recoil = 1.6,
 		Kind = "Projectile", Damage = 10, Cooldown = 0.55, Range = 900, Speed = 320,
 		MagSize = 8, ReloadTime = 2.2, Spread = 0.0,
 		-- The whole point: it goes through things, and every thing it goes
@@ -303,7 +303,7 @@ Config.Weapons = {
 
 	-- --------------------------------------------------------- EXPLOSIVES
 	Grenade = {
-		Slot = 6, Category = "Explosive", DisplayName = "Frag Grenade",
+		Slot = 6, Category = "Explosive", DisplayName = "Frag Grenade", Recoil = 0.4,
 		Kind = "Arcing", Damage = 0, Cooldown = 1.1, Range = 220, Speed = 90,
 		MagSize = 3, ReloadTime = 4.0, Spread = 0.0,
 		-- Was 26. A literal ten-times radius would be 260 studs, which is a
@@ -314,7 +314,7 @@ Config.Weapons = {
 		Points = 20,
 	},
 	StickyGrenade = {
-		Slot = 6, Category = "Explosive", DisplayName = "Sticky Bomb",
+		Slot = 6, Category = "Explosive", DisplayName = "Sticky Bomb", Recoil = 0.4,
 		Kind = "Arcing", Damage = 0, Cooldown = 1.3, Range = 200, Speed = 80,
 		MagSize = 2, ReloadTime = 4.5, Spread = 0.0,
 		FuseTime = 2.5, BlastRadius = 110, BlastDamage = 170, Sticky = true,
@@ -322,7 +322,7 @@ Config.Weapons = {
 		Points = 22,
 	},
 	RPG = {
-		Slot = 6, Category = "Explosive", DisplayName = "Rocket Propelled Grenade",
+		Slot = 6, Category = "Explosive", DisplayName = "Rocket Propelled Grenade", Recoil = 3.0,
 		Kind = "Rocket", Damage = 0, Cooldown = 2.2, Range = 1400, Speed = 180,
 		MagSize = 1, ReloadTime = 3.2, Spread = 0.0,
 		BlastRadius = 90, BlastDamage = 150,
@@ -335,7 +335,7 @@ Config.Weapons = {
 	-- Both of these are found on the map rather than carried from spawn, and
 	-- neither reloads: what you pick up is what you have.
 	Poop = {
-		Slot = 7, Category = "Utility", DisplayName = "Elephant Poop",
+		Slot = 7, Category = "Utility", DisplayName = "Elephant Poop", Recoil = 0.2,
 		Kind = "Arcing", Damage = 6, Cooldown = 0.55, Range = 220, Speed = 88,
 		MagSize = 6, ReloadTime = 0, Spread = 1.5,
 		FuseTime = 0,
@@ -347,7 +347,7 @@ Config.Weapons = {
 		Points = 5,
 	},
 	Drone = {
-		Slot = 7, Category = "Utility", DisplayName = "Hunter Drone",
+		Slot = 7, Category = "Utility", DisplayName = "Hunter Drone", Recoil = 0.6,
 		Kind = "Homing", Damage = 0, Cooldown = 1.6, Range = 1000, Speed = 92,
 		MagSize = 2, ReloadTime = 0, Spread = 0,
 		BlastRadius = 28, BlastDamage = 95,
@@ -361,7 +361,7 @@ Config.Weapons = {
 	},
 
 	LandMine = {
-		Slot = 6, Category = "Explosive", DisplayName = "Land Mine",
+		Slot = 6, Category = "Explosive", DisplayName = "Land Mine", Recoil = 0.2,
 		Kind = "Arcing", Damage = 0, Cooldown = 1.0, Range = 90, Speed = 40,
 		MagSize = 4, ReloadTime = 3.0, Spread = 0.0,
 		-- Sits where it lands and waits. A long fuse is what makes it a mine
@@ -373,7 +373,7 @@ Config.Weapons = {
 		Color = Color3.fromRGB(90, 96, 70),
 	},
 	ClusterBomb = {
-		Slot = 6, Category = "Explosive", DisplayName = "Cluster Bomb",
+		Slot = 6, Category = "Explosive", DisplayName = "Cluster Bomb", Recoil = 0.5,
 		Kind = "Arcing", Damage = 0, Cooldown = 1.6, Range = 240, Speed = 95,
 		MagSize = 2, ReloadTime = 4.5, Spread = 0.0,
 		FuseTime = 2.2,
@@ -389,7 +389,7 @@ Config.Weapons = {
 	-- --------------------------------------------------- VEHICLE-MOUNTED
 	-- These are not carried on foot; they come attached to a vehicle seat.
 	FiftyCal = {
-		Slot = 0, Category = "Mounted", DisplayName = "50 Cal",
+		Slot = 0, Category = "Mounted", DisplayName = "50 Cal", Recoil = 1.1,
 		Kind = "Projectile", Damage = 28, Cooldown = 0.14, Range = 1600, Speed = 900,
 		MagSize = 100, ReloadTime = 4.0, Spread = 1.4, Automatic = true,
 		Pierces = 2, BlastRadius = 6, BlastDamage = 10,
@@ -399,7 +399,7 @@ Config.Weapons = {
 		Points = 18,
 	},
 	TankCannon = {
-		Slot = 0, Category = "Mounted", DisplayName = "Tank Cannon",
+		Slot = 0, Category = "Mounted", DisplayName = "Tank Cannon", Recoil = 4.0,
 		Kind = "Rocket", Damage = 0, Cooldown = 3.0, Range = 2000, Speed = 420,
 		MagSize = 1, ReloadTime = 3.0, Spread = 0.0,
 		BlastRadius = 40, BlastDamage = 130,
@@ -408,7 +408,7 @@ Config.Weapons = {
 		Points = 25,
 	},
 	PlaneGun = {
-		Slot = 0, Category = "Mounted", DisplayName = "Wing Guns",
+		Slot = 0, Category = "Mounted", DisplayName = "Wing Guns", Recoil = 0.5,
 		Kind = "Projectile", Damage = 16, Cooldown = 0.1, Range = 1200, Speed = 800,
 		MagSize = 150, ReloadTime = 5.0, Spread = 2.0, Automatic = true,
 		MountedOnly = true,
@@ -784,6 +784,7 @@ export type WeaponSpec = {
 	Kind: string,
 	Damage: number,
 	Cooldown: number,
+	Recoil: number?, -- camera kick in degrees, per shot
 	Range: number,
 	MagSize: number,
 	ReloadTime: number,
@@ -1007,6 +1008,11 @@ local EVENT_NAMES = {
 	"KillFeed",
 	"PlaySound",
 	"MountedWeaponState",
+	-- The scoreboard is pulled, not pushed: streaming everyone's score to
+	-- everyone continuously costs bandwidth all match for a panel that is on
+	-- screen a few seconds at a time.
+	"RequestScoreboard",
+	"Scoreboard",
 }
 
 local FUNCTION_NAMES = {
@@ -1523,11 +1529,13 @@ local WeaponService = tryRequire(modules, "WeaponService")
 local MonetizationService = tryRequire(modules, "MonetizationService")
 local MatchService = tryRequire(modules, "MatchService")
 local GraphicsService = tryRequire(modules, "GraphicsService")
+local ScoreboardService = tryRequire(modules, "ScoreboardService")
 
 tryStart("GraphicsService", GraphicsService)
 tryStart("TeamService", TeamService)
 tryStart("WeaponService", WeaponService)
 tryStart("MonetizationService", MonetizationService)
+tryStart("ScoreboardService", ScoreboardService)
 tryStart("MatchService", MatchService)
 
 -- ========================================================= 3. THE HUD FEED ==
@@ -4276,6 +4284,7 @@ local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local EffectService = require(script.Parent:WaitForChild("EffectService"))
+local ScoreboardService = require(script.Parent:WaitForChild("ScoreboardService"))
 
 local MatchService = {}
 
@@ -4601,6 +4610,10 @@ local function runIntermission()
 	local winnerName = if winnerIndex == 0 then "NOBODY" else Config.Teams[winnerIndex].Name
 	EffectService.CelebrateWinner(winnerName)
 	fanfare("RoundEnd")
+
+	-- Put the final standings up without anybody having to reach for Tab.
+	-- It is the one moment everyone wants to see them.
+	pcall(ScoreboardService.PushAll)
 
 	while os.clock() < phaseEndsAt do
 		broadcast()
@@ -5880,6 +5893,134 @@ return ProjectileService
         </Item>
         <Item class="ModuleScript" referent="23">
           <Properties>
+            <string name="Name">ScoreboardService</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Nuclear Mud Arena — the scoreboard.
+
+	In a game scored by points rather than kills there is no way to tell
+	whether you are winning without one of these. It answers a request rather
+	than broadcasting: the panel is on screen a few seconds at a time, and
+	streaming every player's score to every player for a whole match is
+	bandwidth spent on a window nobody is looking at.
+]]
+
+local Players = game:GetService("Players")
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+local TeamService = require(script.Parent:WaitForChild("TeamService"))
+
+local ScoreboardService = {}
+
+type Row = {
+	name: string,
+	team: string?,
+	teamColor: Color3?,
+	teamIndex: number,
+	points: number,
+	kills: number,
+	deaths: number,
+	isYou: boolean?,
+}
+
+--[[
+	Everybody's standing, sorted for display.
+
+	Teams first so the two sides read as two sides, then points within a team,
+	because points are what decides the round.
+]]
+function ScoreboardService.Build(viewer: Player?): { Row }
+	local rows: { Row } = {}
+
+	for _, player in Players:GetPlayers() do
+		local state = PlayerState.Get(player)
+		local team = player.Team
+		table.insert(rows, {
+			name = player.DisplayName,
+			team = if team then team.Name else nil,
+			teamColor = if team then team.TeamColor.Color else nil,
+			teamIndex = TeamService.IndexOf(player),
+			points = state.points,
+			kills = state.kills,
+			deaths = state.deaths,
+			isYou = player == viewer,
+		})
+	end
+
+	table.sort(rows, function(a, b)
+		if a.teamIndex ~= b.teamIndex then
+			return a.teamIndex < b.teamIndex
+		end
+		if a.points ~= b.points then
+			return a.points > b.points
+		end
+		-- A stable tie-break, so rows do not jump around between openings.
+		return a.name < b.name
+	end)
+
+	return rows
+end
+
+--[[ A one-line summary for the panel's heading. ]]
+function ScoreboardService.Heading(rows: { Row }): string
+	local totals = {}
+	for _, row in rows do
+		local key = row.team or "Unteamed"
+		totals[key] = (totals[key] or 0) + row.points
+	end
+
+	local parts = {}
+	for name, points in totals do
+		table.insert(parts, `{string.upper(name)} {points}`)
+	end
+	table.sort(parts)
+
+	if #parts == 0 then
+		return "SCOREBOARD"
+	end
+	return table.concat(parts, "   ·   ")
+end
+
+function ScoreboardService.Send(player: Player)
+	local rows = ScoreboardService.Build(player)
+	Remotes.Event("Scoreboard"):FireClient(player, {
+		rows = rows,
+		heading = ScoreboardService.Heading(rows),
+	})
+end
+
+function ScoreboardService.Start()
+	Remotes.Event("RequestScoreboard").OnServerEvent:Connect(function(player: Player)
+		-- No rate limit beyond the cost of building it: the panel is held
+		-- down by hand, and a player spamming Tab only slows themselves.
+		local ok, err = pcall(function()
+			ScoreboardService.Send(player)
+		end)
+		if not ok then
+			warn(`[Nuclear Mud Arena] Scoreboard failed for {player.Name}: {err}`)
+		end
+	end)
+end
+
+--[[ Send it to everyone, unasked. Used at the end of a round. ]]
+function ScoreboardService.PushAll()
+	for _, player in Players:GetPlayers() do
+		pcall(function()
+			ScoreboardService.Send(player)
+		end)
+	end
+end
+
+return ScoreboardService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="24">
+          <Properties>
             <string name="Name">TeamService</string>
             <string name="Source"><![CDATA[--!strict
 --[[
@@ -5961,7 +6102,7 @@ return TeamService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -7264,7 +7405,7 @@ return VehicleService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">WeaponService</string>
             <string name="Source"><![CDATA[--!strict
@@ -7959,7 +8100,7 @@ return WeaponService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">WildlifeService</string>
             <string name="Source"><![CDATA[--!strict
@@ -8741,27 +8882,27 @@ return WildlifeService
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="27">
+  <Item class="SoundService" referent="28">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterGui" referent="28">
+  <Item class="StarterGui" referent="29">
     <Properties>
       <string name="Name">StarterGui</string>
       <bool name="ResetPlayerGuiOnSpawn">false</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="29">
+  <Item class="StarterPlayer" referent="30">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="30">
+    <Item class="StarterPlayerScripts" referent="31">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="31">
+      <Item class="LocalScript" referent="32">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
@@ -8782,6 +8923,7 @@ local Sound = require(Shared:WaitForChild("Sound"))
 local modules = script:WaitForChild("modules")
 local Hud = require(modules:WaitForChild("Hud"))
 local Controls = require(modules:WaitForChild("Controls"))
+local Feel = require(modules:WaitForChild("Feel"))
 
 local player = Players.LocalPlayer
 
@@ -8803,6 +8945,12 @@ end
 local function startControls(): string
 	Controls.Start()
 	return "ok"
+end
+
+-- The camera reactions. Nothing else depends on this, so a failure here
+-- must not take the controls down with it.
+if not pcall(Feel.Start) then
+	warn("[Nuclear Mud Arena] Camera feel failed to start.")
 end
 
 local controlsOk, controlsErr = pcall(startControls)
@@ -8835,12 +8983,42 @@ local function watchCharacter(character: Model)
 		return
 	end
 
+	local lastHealth = humanoid.Health
+
 	local function refresh()
 		Hud.SetHealth(humanoid.Health, humanoid.MaxHealth)
+
+		-- Flinch when hit. Being shot at from somewhere you cannot see is
+		-- the one thing a HUD number alone never communicates in time.
+		local lost = lastHealth - humanoid.Health
+		lastHealth = humanoid.Health
+		if lost > 0 and humanoid.Health > 0 then
+			Feel.Shake(math.clamp(lost * 0.06, 0.3, 2.2))
+		end
 	end
 
 	humanoid.HealthChanged:Connect(refresh)
 	refresh()
+
+	-- A hard landing should land. Track where the fall started, because the
+	-- vertical velocity has already been zeroed by the time Roblox reports
+	-- the landing itself.
+	local fallFrom: number? = nil
+	humanoid.StateChanged:Connect(function(_, new)
+		local root = humanoid.RootPart
+		if new == Enum.HumanoidStateType.Freefall then
+			fallFrom = if root then root.Position.Y else nil
+		elseif new == Enum.HumanoidStateType.Landed then
+			local from = fallFrom
+			fallFrom = nil
+			if from and root then
+				local drop = from - root.Position.Y
+				if drop > 18 then
+					Feel.Shake(math.clamp(drop * 0.03, 0.4, 2.5))
+				end
+			end
+		end
+	end)
 end
 
 if player.Character then
@@ -8914,6 +9092,32 @@ Remotes.Event("PlayEffect").OnClientEvent:Connect(function(payload)
 	end
 end)
 
+--[[
+	Rattle the camera for every explosion, wherever it came from.
+
+	Watching for the replicated Explosion instances rather than sending a
+	message per blast means this covers grenades, rockets, mines, cluster
+	bombs, torpedoes, wrecked vehicles and the diamond mega-detonation
+	without any of them having to know the camera exists.
+]]
+workspace.DescendantAdded:Connect(function(descendant)
+	local blast = descendant :: Instance
+	if not blast:IsA("Explosion") then
+		return
+	end
+	local radius: number = blast.BlastRadius
+	-- Bigger blast, harder shake and felt from further away.
+	Feel.ShakeFrom(blast.Position, math.clamp(radius * 0.06, 0.8, 3.6), radius * 2.6)
+end)
+
+--[[ The scoreboard we asked for, or the one pushed at the end of a round. ]]
+Remotes.Event("Scoreboard").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" or typeof(payload.rows) ~= "table" then
+		return
+	end
+	Hud.SetScoreboard(payload.rows, payload.heading)
+end)
+
 --[[ A shot connected. Marker, number, and the right click in your ears. ]]
 Remotes.Event("Hitmarker").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
@@ -8968,11 +9172,11 @@ end)
 print("[Nuclear Mud Arena] Client ready. WASD drives, F mega-detonates.")
 ]]></string>
         </Properties>
-        <Item class="Folder" referent="32">
+        <Item class="Folder" referent="33">
           <Properties>
             <string name="Name">modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="33">
+          <Item class="ModuleScript" referent="34">
             <Properties>
               <string name="Name">Controls</string>
               <string name="Source"><![CDATA[--!strict
@@ -9003,6 +9207,7 @@ local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
 local Hud = require(script.Parent:WaitForChild("Hud"))
+local Feel = require(script.Parent:WaitForChild("Feel"))
 
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
@@ -9014,6 +9219,8 @@ type ArsenalEntry = {
 	Category: string,
 	DisplayName: string,
 	MagSize: number,
+	Cooldown: number,
+	Recoil: number,
 	Automatic: boolean,
 	ZoomFov: number?,
 	ZoomLevels: { number }?,
@@ -9182,6 +9389,8 @@ end
 
 -- ==================================================================== FIRING ==
 
+local nextKick = 0
+
 local function tryFire()
 	local spec = arsenal[effectiveWeaponName()]
 	if not spec then
@@ -9202,6 +9411,15 @@ local function tryFire()
 	end
 
 	Remotes.Event("FireWeapon"):FireServer(direction)
+
+	-- Kick the camera, gated on the weapon's REAL cooldown rather than the
+	-- loose network one above. Both sides read the same Config, so this is
+	-- the same rate the server will actually accept shots at, and the view
+	-- does not buzz at 33 Hz while a sniper fires once a second and a half.
+	if now >= nextKick then
+		nextKick = now + spec.Cooldown * 0.9
+		Feel.Kick(spec.Recoil)
+	end
 end
 
 -- ==================================================================== ZOOMING ==
@@ -9369,6 +9587,14 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
+	if input.KeyCode == Enum.KeyCode.Tab then
+		-- Held, not toggled. Ask for fresh numbers at the moment it opens,
+		-- rather than streaming a scoreboard to everyone continuously.
+		Hud.ShowScoreboard(true)
+		Remotes.Event("RequestScoreboard"):FireServer()
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.R then
 		Remotes.Event("Reload"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F then
@@ -9401,6 +9627,11 @@ local function onInputBegan(input: InputObject, processed: boolean)
 end
 
 local function onInputEnded(input: InputObject)
+	if input.KeyCode == Enum.KeyCode.Tab then
+		Hud.ShowScoreboard(false)
+		return
+	end
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1
 		or input.UserInputType == Enum.UserInputType.Touch
 	then
@@ -9635,6 +9866,8 @@ function Controls.Start()
 			Category = spec.Category,
 			DisplayName = spec.DisplayName,
 			MagSize = spec.MagSize,
+			Cooldown = spec.Cooldown,
+			Recoil = spec.Recoil or 0.8,
 			Automatic = spec.Automatic == true,
 			ZoomFov = spec.ZoomFov,
 			ZoomLevels = spec.ZoomLevels,
@@ -9676,7 +9909,157 @@ return Controls
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="34">
+          <Item class="ModuleScript" referent="35">
+            <Properties>
+              <string name="Name">Feel</string>
+              <string name="Source"><![CDATA[--!strict
+--[[
+	Nuclear Mud Arena — how the camera reacts to what you do.
+
+	Shooting in Halo felt like shooting because the camera moved. The rifle
+	pushed the view up a little and it settled back; a rocket landing nearby
+	rattled everything; a hard landing jolted you. None of it changes where a
+	bullet goes, and that is the point — this module never touches aim, only
+	the camera, so the game stays as accurate as it was before and simply
+	stops feeling like a spreadsheet.
+
+	Everything decays on its own, so a dropped frame or a missed event can
+	never leave the camera stuck off-axis.
+]]
+
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local Feel = {}
+
+-- Degrees of accumulated kick, and how fast it is bleeding off.
+local kickPitch = 0
+local kickYaw = 0
+
+-- Shake amplitude, in degrees, and its own decay.
+local shake = 0
+
+-- How quickly a kick settles back. Smaller is snappier. 0.09 of a second is
+-- about where a burst reads as a burst rather than a slow drift upward.
+local KICK_RECOVERY = 0.09
+local SHAKE_RECOVERY = 0.22
+
+-- Hard ceilings. A minigun held down, or three rockets at once, must never
+-- spin the view somewhere a player cannot recover from.
+local MAX_KICK = 7
+local MAX_SHAKE = 4
+
+local started = false
+
+--[[
+	Kick the view, once, for one shot.
+
+	`degrees` comes from the weapon's own Recoil value, so a sniper shoves and
+	a minigun buzzes. The sideways component is randomised, which is what
+	stops a long burst from walking the camera in a perfectly straight line.
+]]
+function Feel.Kick(degrees: number)
+	if degrees <= 0 then
+		return
+	end
+	kickPitch = math.min(kickPitch + degrees, MAX_KICK)
+	kickYaw = math.clamp(kickYaw + (math.random() - 0.5) * degrees * 0.6, -MAX_KICK, MAX_KICK)
+end
+
+--[[ Rattle the camera: explosions, taking a hit, a heavy landing. ]]
+function Feel.Shake(degrees: number)
+	shake = math.min(math.max(shake, degrees), MAX_SHAKE)
+end
+
+--[[
+	Shake scaled by how far away the bang was.
+
+	A rocket at your feet should be violent and the same rocket across the map
+	should do nothing at all, which a flat shake for every explosion gets
+	wrong in both directions.
+]]
+function Feel.ShakeFrom(position: Vector3, degrees: number, falloff: number)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local distance = (camera.CFrame.Position - position).Magnitude
+	local scale = math.clamp(1 - distance / math.max(falloff, 1), 0, 1)
+	if scale > 0 then
+		Feel.Shake(degrees * scale * scale)
+	end
+end
+
+--[[
+	Start driving the camera.
+
+	This has to run AFTER Roblox's own camera update, or the engine would
+	overwrite the offset in the same frame and nothing would move. That is
+	what the priority is for.
+]]
+function Feel.Start()
+	if started then
+		return
+	end
+	started = true
+
+	RunService:BindToRenderStep("FeelCamera", Enum.RenderPriority.Camera.Value + 1, function(deltaTime: number)
+		local camera = Workspace.CurrentCamera
+		if not camera then
+			return
+		end
+
+		-- Exponential decay, framerate-independent: at 30fps and at 240fps
+		-- a kick takes the same amount of time to settle.
+		local kickFade = math.exp(-deltaTime / KICK_RECOVERY)
+		kickPitch *= kickFade
+		kickYaw *= kickFade
+
+		local shakeFade = math.exp(-deltaTime / SHAKE_RECOVERY)
+		shake *= shakeFade
+
+		-- Below a twentieth of a degree nobody can see it, and leaving it to
+		-- decay forever means every frame pays for arithmetic on nothing.
+		if kickPitch < 0.05 then kickPitch = 0 end
+		if kickYaw > -0.05 and kickYaw < 0.05 then kickYaw = 0 end
+		if shake < 0.05 then shake = 0 end
+
+		if kickPitch == 0 and kickYaw == 0 and shake == 0 then
+			return
+		end
+
+		local rattlePitch = (math.random() - 0.5) * shake
+		local rattleYaw = (math.random() - 0.5) * shake
+		local rattleRoll = (math.random() - 0.5) * shake * 0.5
+
+		camera.CFrame = camera.CFrame * CFrame.Angles(
+			math.rad(kickPitch + rattlePitch),
+			math.rad(kickYaw + rattleYaw),
+			math.rad(rattleRoll)
+		)
+	end)
+end
+
+--[[ Let go of the camera completely. Used by the tests. ]]
+function Feel.Stop()
+	if not started then
+		return
+	end
+	started = false
+	kickPitch, kickYaw, shake = 0, 0, 0
+	RunService:UnbindFromRenderStep("FeelCamera")
+end
+
+--[[ What the camera is currently doing, for tests and for the HUD. ]]
+function Feel.Debug(): { kick: number, yaw: number, shake: number }
+	return { kick = kickPitch, yaw = kickYaw, shake = shake }
+end
+
+return Feel
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="36">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--!strict
@@ -9691,6 +10074,7 @@ return Controls
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
@@ -9698,6 +10082,15 @@ local Util = require(Shared:WaitForChild("Util"))
 local player = Players.LocalPlayer
 
 local Hud = {}
+
+-- Low-health warning and the scoreboard, declared up here with the rest of
+-- the widgets so every function can reach them.
+local lowHealthHolder: Frame? = nil
+local vignetteStrength = 0
+local vignettePulse = 0
+local scoreboard: Frame? = nil
+local scoreboardRows: Frame? = nil
+local scoreboardTitle: TextLabel? = nil
 
 local screen: ScreenGui
 local healthFill: Frame
@@ -10136,6 +10529,111 @@ function Hud.Build()
 	toastLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	toastLayout.Padding = UDim.new(0, 6)
 	toastLayout.Parent = toastHolder
+
+	-- ------------------------------------------------- low-health vignette
+	--
+	-- Red creeping in from the edges when you are nearly dead. A number in
+	-- the corner is something you have to look at; this you cannot miss, and
+	-- it is the single clearest thing Halo did to tell you to break off.
+	--
+	-- Built from four edge gradients rather than an image, because an image
+	-- would need an asset ID, and an asset ID in a place that has never been
+	-- published is a thing that can silently fail to load.
+	local vignetteHolder = makeFrame(screen, {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Visible = false,
+		ZIndex = 4,
+	})
+	vignetteHolder.Name = "LowHealth"
+
+	for _, edge in {
+		{ size = UDim2.new(1, 0, 0, 150), pos = UDim2.new(0, 0, 0, 0), rot = 90 },
+		{ size = UDim2.new(1, 0, 0, 150), pos = UDim2.new(0, 0, 1, -150), rot = 270 },
+		{ size = UDim2.new(0, 220, 1, 0), pos = UDim2.new(0, 0, 0, 0), rot = 0 },
+		{ size = UDim2.new(0, 220, 1, 0), pos = UDim2.new(1, -220, 0, 0), rot = 180 },
+	} do
+		local band = makeFrame(vignetteHolder, {
+			Size = edge.size,
+			Position = edge.pos,
+			BackgroundColor3 = Color3.fromRGB(190, 24, 24),
+			BackgroundTransparency = 0.25,
+		})
+		local fade = Instance.new("UIGradient")
+		fade.Rotation = edge.rot
+		fade.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		fade.Parent = band
+	end
+
+	-- ------------------------------------------------------- the scoreboard
+	--
+	-- Held down, not toggled, the way Halo's was. In a game scored by points
+	-- rather than kills there is no way to tell whether you are winning
+	-- without one.
+	local board = makeFrame(screen, {
+		Size = UDim2.fromOffset(620, 460),
+		Position = UDim2.new(0.5, -310, 0.5, -230),
+		BackgroundColor3 = Color3.fromRGB(10, 14, 20),
+		BackgroundTransparency = 0.12,
+		Visible = false,
+		ZIndex = 20,
+	})
+	local border = Instance.new("UIStroke")
+	border.Color = Color3.fromRGB(120, 200, 255)
+	border.Thickness = 2
+	border.Transparency = 0.3
+	border.Parent = board
+
+	scoreboardTitle = makeLabel(board, {
+		Size = UDim2.new(1, -24, 0, 36),
+		Position = UDim2.fromOffset(12, 10),
+		Text = "SCOREBOARD",
+		TextSize = 24,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+
+	makeLabel(board, {
+		Size = UDim2.new(1, -24, 0, 18),
+		Position = UDim2.fromOffset(12, 48),
+		Text = "PLAYER                                 PTS    KILLS   DEATHS",
+		TextSize = 13,
+		TextColor3 = Color3.fromRGB(150, 165, 180),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+
+	local rows = makeFrame(board, {
+		Size = UDim2.new(1, -24, 1, -84),
+		Position = UDim2.fromOffset(12, 72),
+		BackgroundTransparency = 1,
+	})
+	local rowLayout = Instance.new("UIListLayout")
+	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rowLayout.Padding = UDim.new(0, 2)
+	rowLayout.Parent = rows
+
+	scoreboard = board
+	scoreboardRows = rows
+
+	-- Drive the vignette from the frame loop rather than from health events,
+	-- so the pulse is smooth no matter how often damage arrives.
+	RunService.RenderStepped:Connect(function(deltaTime: number)
+		if not vignetteHolder.Visible then
+			return
+		end
+		vignettePulse += deltaTime * 6
+		-- Faster and harder the closer to death you are.
+		local beat = 0.5 + 0.5 * math.sin(vignettePulse)
+		for _, band in vignetteHolder:GetChildren() do
+			if band:IsA("Frame") then
+				band.BackgroundTransparency = 0.72 - vignetteStrength * (0.32 + beat * 0.14)
+			end
+		end
+	end)
+
+	lowHealthHolder = vignetteHolder
 end
 
 -- ================================================================ UPDATING ==
@@ -10155,6 +10653,14 @@ function Hud.SetHealth(current: number, maximum: number)
 		then Color3.fromRGB(80, 200, 110)
 		elseif fraction > 0.3 then Color3.fromRGB(230, 170, 60)
 		else Color3.fromRGB(230, 70, 60)
+
+	-- The edge warning comes up below a third of health and gets stronger all
+	-- the way down, so "nearly dead" and "one more hit" look different.
+	if lowHealthHolder then
+		local danger = math.clamp((0.34 - fraction) / 0.34, 0, 1)
+		vignetteStrength = danger
+		lowHealthHolder.Visible = danger > 0.02 and current > 0
+	end
 end
 
 --[[ Tell the player their turbo is lit. ]]
@@ -10563,6 +11069,84 @@ function Hud.Medal(text: string)
 end
 
 --[[ Report control health on screen. Green when fine, red when not. ]]
+--[[
+	Show or hide the scoreboard.
+
+	Held down rather than toggled, so you can glance at it mid-fight and let
+	go, which is how Halo's worked and the reason it never got in the way.
+]]
+function Hud.ShowScoreboard(visible: boolean)
+	if scoreboard then
+		scoreboard.Visible = visible
+	end
+end
+
+--[[
+	Fill the scoreboard in.
+
+	`rows` arrives already sorted by the server, which is the only place that
+	knows everyone's score. Teams are kept apart and coloured, because in a
+	team game the question is not who is top but which half is winning.
+]]
+function Hud.SetScoreboard(
+	rows: { { name: string, team: string?, teamColor: Color3?, points: number, kills: number, deaths: number, isYou: boolean? } },
+	heading: string?
+)
+	local rowHolder = scoreboardRows
+	if not rowHolder then
+		return
+	end
+
+	for _, old in rowHolder:GetChildren() do
+		if not old:IsA("UIListLayout") then
+			old:Destroy()
+		end
+	end
+
+	if scoreboardTitle then
+		scoreboardTitle.Text = heading or "SCOREBOARD"
+	end
+
+	local lastTeam: string? = nil
+	local order = 0
+
+	for _, row in rows do
+		-- A heading each time the team changes, so the two sides read as two
+		-- sides rather than one long list.
+		if row.team and row.team ~= lastTeam then
+			lastTeam = row.team
+			order += 1
+			local header = makeLabel(rowHolder, {
+				Size = UDim2.new(1, 0, 0, 22),
+				Text = string.upper(row.team),
+				TextSize = 16,
+				TextColor3 = row.teamColor or Color3.fromRGB(200, 210, 220),
+				TextXAlignment = Enum.TextXAlignment.Left,
+			})
+			header.LayoutOrder = order
+		end
+
+		order += 1
+		local line = makeLabel(rowHolder, {
+			Size = UDim2.new(1, 0, 0, 20),
+			Text = string.format(
+				"%-30s %6d %7d %8d",
+				string.sub(row.name, 1, 30),
+				row.points,
+				row.kills,
+				row.deaths
+			),
+			TextSize = 15,
+			Font = Enum.Font.Code, -- monospaced, or the columns do not line up
+			TextColor3 = if row.isYou
+				then Color3.fromRGB(255, 240, 150)
+				else Color3.fromRGB(215, 225, 235),
+			TextXAlignment = Enum.TextXAlignment.Left,
+		})
+		line.LayoutOrder = order
+	end
+end
+
 function Hud.SetStatus(text: string, good: boolean)
 	if not statusText then
 		return
@@ -10595,7 +11179,7 @@ return Hud
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="35">
+  <Item class="Workspace" referent="37">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

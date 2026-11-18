@@ -173,10 +173,27 @@ end
 function RNG:NextInteger(a, b) return math.floor(a + self:_next() * (b - a + 1) - 1e-9) end
 
 -- --------------------------------------------------------------------- Enum
+-- Roblox's enum items carry a numeric Value as well as a Name, and real code
+-- does arithmetic on it: RenderPriority.Camera.Value + 1 is how you bind a
+-- step that runs after the engine's own camera update. Returning an item with
+-- no Value made that line throw.
+local ENUM_VALUES = {
+	RenderPriority = {
+		First = 0, Input = 100, Camera = 200, Character = 300, Last = 2000,
+	},
+}
+
 Enum = setmetatable({}, {
 	__index = function(t, category)
 		local group = setmetatable({}, {
-			__index = function(_, item) return { Name = item, EnumType = category } end,
+			__index = function(_, item)
+				local known = ENUM_VALUES[category]
+				return {
+					Name = item,
+					EnumType = category,
+					Value = (known and known[item]) or 0,
+				}
+			end,
 		})
 		rawset(t, category, group)
 		return group

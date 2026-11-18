@@ -139,7 +139,7 @@ Config.Combat = {
 Config.Weapons = {
 	-- ------------------------------------------------------------- SIDEARMS
 	Pistol = {
-		Slot = 1, Category = "Sidearm", DisplayName = "9mm Pistol",
+		Slot = 1, Category = "Sidearm", DisplayName = "9mm Pistol", Recoil = 0.9,
 		Kind = "Hitscan", Damage = 12, Cooldown = 0.28, Range = 400,
 		MagSize = 12, ReloadTime = 1.3, Spread = 1.2,
 		Color = Color3.fromRGB(90, 90, 96),
@@ -147,7 +147,7 @@ Config.Weapons = {
 		Points = 10,
 	},
 	Revolver = {
-		Slot = 1, Category = "Sidearm", DisplayName = ".44 Revolver",
+		Slot = 1, Category = "Sidearm", DisplayName = ".44 Revolver", Recoil = 2.6,
 		Kind = "Hitscan", Damage = 34, Cooldown = 0.7, Range = 500,
 		MagSize = 6, ReloadTime = 2.1, Spread = 0.8,
 		Color = Color3.fromRGB(150, 130, 90),
@@ -155,7 +155,7 @@ Config.Weapons = {
 		Points = 15,
 	},
 	Deagle = {
-		Slot = 1, Category = "Sidearm", DisplayName = "Hand Cannon",
+		Slot = 1, Category = "Sidearm", DisplayName = "Hand Cannon", Recoil = 2.9,
 		Kind = "Hitscan", Damage = 42, Cooldown = 0.75, Range = 480,
 		MagSize = 7, ReloadTime = 2.0, Spread = 1.0,
 		Color = Color3.fromRGB(200, 180, 110),
@@ -165,28 +165,28 @@ Config.Weapons = {
 
 	-- ------------------------------------------------------------ AUTOMATIC
 	SMG = {
-		Slot = 2, Category = "Automatic", DisplayName = "Backroad SMG",
+		Slot = 2, Category = "Automatic", DisplayName = "Backroad SMG", Recoil = 0.5,
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.075, Range = 380,
 		MagSize = 35, ReloadTime = 1.7, Spread = 2.6, Automatic = true,
 		Color = Color3.fromRGB(70, 76, 84),
 		Points = 8,
 	},
 	AssaultRifle = {
-		Slot = 2, Category = "Automatic", DisplayName = "Assault Rifle",
+		Slot = 2, Category = "Automatic", DisplayName = "Assault Rifle", Recoil = 0.7,
 		Kind = "Hitscan", Damage = 14, Cooldown = 0.11, Range = 700,
 		MagSize = 30, ReloadTime = 2.0, Spread = 1.5, Automatic = true,
 		Color = Color3.fromRGB(60, 68, 58),
 		Points = 10,
 	},
 	MachineGun = {
-		Slot = 2, Category = "Automatic", DisplayName = "Machine Gun",
+		Slot = 2, Category = "Automatic", DisplayName = "Machine Gun", Recoil = 0.6,
 		Kind = "Hitscan", Damage = 11, Cooldown = 0.09, Range = 650,
 		MagSize = 80, ReloadTime = 3.4, Spread = 2.2, Automatic = true,
 		Color = Color3.fromRGB(52, 54, 58),
 		Points = 10,
 	},
 	Minigun = {
-		Slot = 2, Category = "Automatic", DisplayName = "Mud Minigun",
+		Slot = 2, Category = "Automatic", DisplayName = "Mud Minigun", Recoil = 0.35,
 		Kind = "Hitscan", Damage = 9, Cooldown = 0.045, Range = 600,
 		MagSize = 200, ReloadTime = 5.0, Spread = 3.4, Automatic = true,
 		-- Slows you down while you hold the trigger, because it is enormous.
@@ -197,7 +197,7 @@ Config.Weapons = {
 
 	-- ------------------------------------------------------------- SHOTGUNS
 	Shotgun = {
-		Slot = 3, Category = "Shotgun", DisplayName = "Pump Shotgun",
+		Slot = 3, Category = "Shotgun", DisplayName = "Pump Shotgun", Recoil = 3.4,
 		Kind = "Hitscan", Damage = 9, Cooldown = 0.85, Range = 160,
 		MagSize = 6, ReloadTime = 2.6, Spread = 6.0, Pellets = 9,
 		Color = Color3.fromRGB(120, 84, 52),
@@ -205,7 +205,7 @@ Config.Weapons = {
 		Points = 14,
 	},
 	AutoShotgun = {
-		Slot = 3, Category = "Shotgun", DisplayName = "Auto Shotgun",
+		Slot = 3, Category = "Shotgun", DisplayName = "Auto Shotgun", Recoil = 2.2,
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.4, Range = 140,
 		MagSize = 8, ReloadTime = 3.0, Spread = 7.5, Pellets = 8, Automatic = true,
 		Color = Color3.fromRGB(90, 70, 60),
@@ -214,7 +214,7 @@ Config.Weapons = {
 
 	-- -------------------------------------------------------------- SNIPERS
 	Sniper = {
-		Slot = 4, Category = "Sniper", DisplayName = "Sniper Rifle",
+		Slot = 4, Category = "Sniper", DisplayName = "Sniper Rifle", Recoil = 3.2,
 		Kind = "Hitscan", Damage = 62, Cooldown = 1.5, Range = 2400,
 		MagSize = 4, ReloadTime = 2.8, Spread = 0.0,
 		-- Halo's sniper had two scope stages. This has four, because the ask
@@ -230,7 +230,7 @@ Config.Weapons = {
 		Points = 30,
 	},
 	AntiMaterial = {
-		Slot = 4, Category = "Sniper", DisplayName = "Anti-Truck Rifle",
+		Slot = 4, Category = "Sniper", DisplayName = "Anti-Truck Rifle", Recoil = 4.5,
 		Kind = "Projectile", Damage = 90, Cooldown = 2.4, Range = 2600, Speed = 1200,
 		MagSize = 3, ReloadTime = 3.6, Spread = 0.0,
 		ZoomLevels = { 2, 5, 10, 16 },
@@ -245,7 +245,7 @@ Config.Weapons = {
 
 	-- ------------------------------------------------------- THE STAR ITEM
 	DiamondGun = {
-		Slot = 5, Category = "Special", DisplayName = "Nuclear Diamond Gun",
+		Slot = 5, Category = "Special", DisplayName = "Nuclear Diamond Gun", Recoil = 1.6,
 		Kind = "Projectile", Damage = 10, Cooldown = 0.55, Range = 900, Speed = 320,
 		MagSize = 8, ReloadTime = 2.2, Spread = 0.0,
 		-- The whole point: it goes through things, and every thing it goes
@@ -263,7 +263,7 @@ Config.Weapons = {
 
 	-- --------------------------------------------------------- EXPLOSIVES
 	Grenade = {
-		Slot = 6, Category = "Explosive", DisplayName = "Frag Grenade",
+		Slot = 6, Category = "Explosive", DisplayName = "Frag Grenade", Recoil = 0.4,
 		Kind = "Arcing", Damage = 0, Cooldown = 1.1, Range = 220, Speed = 90,
 		MagSize = 3, ReloadTime = 4.0, Spread = 0.0,
 		-- Was 26. A literal ten-times radius would be 260 studs, which is a
@@ -274,7 +274,7 @@ Config.Weapons = {
 		Points = 20,
 	},
 	StickyGrenade = {
-		Slot = 6, Category = "Explosive", DisplayName = "Sticky Bomb",
+		Slot = 6, Category = "Explosive", DisplayName = "Sticky Bomb", Recoil = 0.4,
 		Kind = "Arcing", Damage = 0, Cooldown = 1.3, Range = 200, Speed = 80,
 		MagSize = 2, ReloadTime = 4.5, Spread = 0.0,
 		FuseTime = 2.5, BlastRadius = 110, BlastDamage = 170, Sticky = true,
@@ -282,7 +282,7 @@ Config.Weapons = {
 		Points = 22,
 	},
 	RPG = {
-		Slot = 6, Category = "Explosive", DisplayName = "Rocket Propelled Grenade",
+		Slot = 6, Category = "Explosive", DisplayName = "Rocket Propelled Grenade", Recoil = 3.0,
 		Kind = "Rocket", Damage = 0, Cooldown = 2.2, Range = 1400, Speed = 180,
 		MagSize = 1, ReloadTime = 3.2, Spread = 0.0,
 		BlastRadius = 90, BlastDamage = 150,
@@ -295,7 +295,7 @@ Config.Weapons = {
 	-- Both of these are found on the map rather than carried from spawn, and
 	-- neither reloads: what you pick up is what you have.
 	Poop = {
-		Slot = 7, Category = "Utility", DisplayName = "Elephant Poop",
+		Slot = 7, Category = "Utility", DisplayName = "Elephant Poop", Recoil = 0.2,
 		Kind = "Arcing", Damage = 6, Cooldown = 0.55, Range = 220, Speed = 88,
 		MagSize = 6, ReloadTime = 0, Spread = 1.5,
 		FuseTime = 0,
@@ -307,7 +307,7 @@ Config.Weapons = {
 		Points = 5,
 	},
 	Drone = {
-		Slot = 7, Category = "Utility", DisplayName = "Hunter Drone",
+		Slot = 7, Category = "Utility", DisplayName = "Hunter Drone", Recoil = 0.6,
 		Kind = "Homing", Damage = 0, Cooldown = 1.6, Range = 1000, Speed = 92,
 		MagSize = 2, ReloadTime = 0, Spread = 0,
 		BlastRadius = 28, BlastDamage = 95,
@@ -321,7 +321,7 @@ Config.Weapons = {
 	},
 
 	LandMine = {
-		Slot = 6, Category = "Explosive", DisplayName = "Land Mine",
+		Slot = 6, Category = "Explosive", DisplayName = "Land Mine", Recoil = 0.2,
 		Kind = "Arcing", Damage = 0, Cooldown = 1.0, Range = 90, Speed = 40,
 		MagSize = 4, ReloadTime = 3.0, Spread = 0.0,
 		-- Sits where it lands and waits. A long fuse is what makes it a mine
@@ -333,7 +333,7 @@ Config.Weapons = {
 		Color = Color3.fromRGB(90, 96, 70),
 	},
 	ClusterBomb = {
-		Slot = 6, Category = "Explosive", DisplayName = "Cluster Bomb",
+		Slot = 6, Category = "Explosive", DisplayName = "Cluster Bomb", Recoil = 0.5,
 		Kind = "Arcing", Damage = 0, Cooldown = 1.6, Range = 240, Speed = 95,
 		MagSize = 2, ReloadTime = 4.5, Spread = 0.0,
 		FuseTime = 2.2,
@@ -349,7 +349,7 @@ Config.Weapons = {
 	-- --------------------------------------------------- VEHICLE-MOUNTED
 	-- These are not carried on foot; they come attached to a vehicle seat.
 	FiftyCal = {
-		Slot = 0, Category = "Mounted", DisplayName = "50 Cal",
+		Slot = 0, Category = "Mounted", DisplayName = "50 Cal", Recoil = 1.1,
 		Kind = "Projectile", Damage = 28, Cooldown = 0.14, Range = 1600, Speed = 900,
 		MagSize = 100, ReloadTime = 4.0, Spread = 1.4, Automatic = true,
 		Pierces = 2, BlastRadius = 6, BlastDamage = 10,
@@ -359,7 +359,7 @@ Config.Weapons = {
 		Points = 18,
 	},
 	TankCannon = {
-		Slot = 0, Category = "Mounted", DisplayName = "Tank Cannon",
+		Slot = 0, Category = "Mounted", DisplayName = "Tank Cannon", Recoil = 4.0,
 		Kind = "Rocket", Damage = 0, Cooldown = 3.0, Range = 2000, Speed = 420,
 		MagSize = 1, ReloadTime = 3.0, Spread = 0.0,
 		BlastRadius = 40, BlastDamage = 130,
@@ -368,7 +368,7 @@ Config.Weapons = {
 		Points = 25,
 	},
 	PlaneGun = {
-		Slot = 0, Category = "Mounted", DisplayName = "Wing Guns",
+		Slot = 0, Category = "Mounted", DisplayName = "Wing Guns", Recoil = 0.5,
 		Kind = "Projectile", Damage = 16, Cooldown = 0.1, Range = 1200, Speed = 800,
 		MagSize = 150, ReloadTime = 5.0, Spread = 2.0, Automatic = true,
 		MountedOnly = true,
@@ -744,6 +744,7 @@ export type WeaponSpec = {
 	Kind: string,
 	Damage: number,
 	Cooldown: number,
+	Recoil: number?, -- camera kick in degrees, per shot
 	Range: number,
 	MagSize: number,
 	ReloadTime: number,

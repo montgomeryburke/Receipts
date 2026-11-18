@@ -16,6 +16,7 @@ local Sound = require(Shared:WaitForChild("Sound"))
 local modules = script:WaitForChild("modules")
 local Hud = require(modules:WaitForChild("Hud"))
 local Controls = require(modules:WaitForChild("Controls"))
+local Feel = require(modules:WaitForChild("Feel"))
 
 local player = Players.LocalPlayer
 
@@ -37,6 +38,12 @@ end
 local function startControls(): string
 	Controls.Start()
 	return "ok"
+end
+
+-- The camera reactions. Nothing else depends on this, so a failure here
+-- must not take the controls down with it.
+if not pcall(Feel.Start) then
+	warn("[Nuclear Mud Arena] Camera feel failed to start.")
 end
 
 local controlsOk, controlsErr = pcall(startControls)
@@ -69,12 +76,42 @@ local function watchCharacter(character: Model)
 		return
 	end
 
+	local lastHealth = humanoid.Health
+
 	local function refresh()
 		Hud.SetHealth(humanoid.Health, humanoid.MaxHealth)
+
+		-- Flinch when hit. Being shot at from somewhere you cannot see is
+		-- the one thing a HUD number alone never communicates in time.
+		local lost = lastHealth - humanoid.Health
+		lastHealth = humanoid.Health
+		if lost > 0 and humanoid.Health > 0 then
+			Feel.Shake(math.clamp(lost * 0.06, 0.3, 2.2))
+		end
 	end
 
 	humanoid.HealthChanged:Connect(refresh)
 	refresh()
+
+	-- A hard landing should land. Track where the fall started, because the
+	-- vertical velocity has already been zeroed by the time Roblox reports
+	-- the landing itself.
+	local fallFrom: number? = nil
+	humanoid.StateChanged:Connect(function(_, new)
+		local root = humanoid.RootPart
+		if new == Enum.HumanoidStateType.Freefall then
+			fallFrom = if root then root.Position.Y else nil
+		elseif new == Enum.HumanoidStateType.Landed then
+			local from = fallFrom
+			fallFrom = nil
+			if from and root then
+				local drop = from - root.Position.Y
+				if drop > 18 then
+					Feel.Shake(math.clamp(drop * 0.03, 0.4, 2.5))
+				end
+			end
+		end
+	end)
 end
 
 if player.Character then
@@ -146,6 +183,32 @@ Remotes.Event("PlayEffect").OnClientEvent:Connect(function(payload)
 	elseif payload.effect == "Splat" then
 		Hud.Splat(payload.duration or 4)
 	end
+end)
+
+--[[
+	Rattle the camera for every explosion, wherever it came from.
+
+	Watching for the replicated Explosion instances rather than sending a
+	message per blast means this covers grenades, rockets, mines, cluster
+	bombs, torpedoes, wrecked vehicles and the diamond mega-detonation
+	without any of them having to know the camera exists.
+]]
+workspace.DescendantAdded:Connect(function(descendant)
+	local blast = descendant :: Instance
+	if not blast:IsA("Explosion") then
+		return
+	end
+	local radius: number = blast.BlastRadius
+	-- Bigger blast, harder shake and felt from further away.
+	Feel.ShakeFrom(blast.Position, math.clamp(radius * 0.06, 0.8, 3.6), radius * 2.6)
+end)
+
+--[[ The scoreboard we asked for, or the one pushed at the end of a round. ]]
+Remotes.Event("Scoreboard").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" or typeof(payload.rows) ~= "table" then
+		return
+	end
+	Hud.SetScoreboard(payload.rows, payload.heading)
 end)
 
 --[[ A shot connected. Marker, number, and the right click in your ears. ]]
