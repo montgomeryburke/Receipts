@@ -483,9 +483,31 @@ end
 	A car. Tier decides how fast it is; the body style is a coin flip between
 	a truck and a Lamborghini, so what pulls up beside you varies.
 ]]
-function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Player?): Model
+function VehicleService.SpawnCar(
+	tierIndex: number,
+	position: Vector3,
+	owner: Player?,
+	bodyName: string?
+): Model
 	local tier = Config.CarTiers[math.clamp(tierIndex, 1, #Config.CarTiers)]
+
+	--[[
+		Which body turns up.
+
+		Normally a coin flip, so what pulls up beside you varies. Named
+		explicitly for the mountain, where the whole point is that the thing
+		waiting at the trailhead can actually climb it -- a Lamborghini at
+		the bottom of a mountain trail is a joke, not a vehicle.
+	]]
 	local body = Config.CarBodies[bodyPicker:NextInteger(1, #Config.CarBodies)]
+	if bodyName then
+		for _, candidate in Config.CarBodies do
+			if candidate.Name == bodyName then
+				body = candidate
+				break
+			end
+		end
+	end
 
 	local model, chassis, wheels = buildChassis(
 		`{body.Name}_{tier.Name}`,
@@ -517,6 +539,8 @@ function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Pl
 		maxSpeed = tier.MaxSpeed * body.SpeedBias,
 		torque = tier.Torque,
 		turnSpeed = tier.TurnSpeed,
+		offRoad = body.OffRoad == true,
+		climbAssist = body.ClimbAssist or 0,
 	}
 	return model
 end
@@ -1220,6 +1244,9 @@ function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 		return VehicleService.SpawnGlider(position)
 	elseif kind == "Skis" then
 		return VehicleService.SpawnSkis(position)
+	elseif kind == "G-Wagon" or kind == "Hummer" or kind == "Jeep" then
+		-- The off-roaders, by name, for the mountain pads.
+		return VehicleService.SpawnCar(3, position, nil, kind)
 	end
 	return nil
 end
@@ -1290,12 +1317,16 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 			state.groundIsMud = hit ~= nil
 				and (hit.Instance.Name == "Mud" or hit.Material == Enum.Material.Mud)
 			state.groundIsBoost = hit ~= nil and hit.Instance:GetAttribute("Boost") == true
+			-- Kept for the climb assist below, which needs to know how
+			-- steeply the ground under the car is tilted.
+			state.groundNormal = if hit then hit.Normal else nil
 		end
 	else
 		-- Parked: forget what it was standing on, so pulling away from a mud
 		-- pool does not carry the drag with it.
 		state.groundIsMud = false
 		state.groundIsBoost = false
+		state.groundNormal = nil
 		state.nextGroundSampleAt = 0
 		state.lastGroundSampleAt = nil
 	end
@@ -1369,9 +1400,37 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local flat = Vector3.new(look.X, 0, look.Z)
 	flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
 
+	--[[
+		Climb assist, for off-roaders only.
+
+		A dead-horizontal push cannot get a car up anything steep: it drives
+		into the hill rather than over it. So the G-Wagon, the Hummer and the
+		Jeep are allowed to tilt their drive axis a little way up the slope
+		they are standing on -- enough to take the mountain trail, and only
+		ever as much as the ground under them is actually tilted.
+
+		An ordinary car gets none of this on purpose. A non-flattened drive
+		axis is exactly what used to fire trucks into the sky, and the drive
+		test still asserts they stay down.
+	]]
+	local driveAxis = flat
+	local assist = state.climbAssist or 0
+	if assist > 0 and state.groundNormal then
+		local normal = state.groundNormal :: Vector3
+		-- A flat surface has a vertical normal, so this is zero there and
+		-- the assist simply does not engage.
+		local tilt = Vector3.new(normal.X, 0, normal.Z).Magnitude
+		if tilt > 0.12 then
+			local lifted = Vector3.new(flat.X, tilt * assist, flat.Z)
+			if lifted.Magnitude > 0.01 then
+				driveAxis = lifted.Unit
+			end
+		end
+	end
+
 	drive.Enabled = true
 	turn.Enabled = true
-	drive.LineDirection = flat
+	drive.LineDirection = driveAxis
 	drive.LineVelocity = current
 
 	-- The engine rises and falls with road speed.

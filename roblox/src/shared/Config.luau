@@ -681,6 +681,15 @@ Config.Turbo = {
 	The truck is slower but heavy and sits high; the Lamborghini is quick and
 	low. Both use the same tier speeds, so the choice is feel, not advantage.
 ]]
+--[[
+	Car bodies.
+
+	`OffRoad` bodies get a climb assist in driveWheeled, which is what lets
+	them take the mountain trail. Without it the drive direction is flattened
+	dead horizontal -- deliberately, because a non-flattened one is what used
+	to launch trucks into the sky -- and a horizontal push cannot get you up
+	anything steep.
+]]
 Config.CarBodies = {
 	{
 		Name = "Truck",
@@ -695,6 +704,35 @@ Config.CarBodies = {
 		RideHeight = 2,
 		SpeedBias = 1.15,
 		Color = Color3.fromRGB(240, 190, 30),
+	},
+	-- The off-roaders. Slower on the flat, and the only things that will get
+	-- you up the mountain trail under fire.
+	{
+		Name = "G-Wagon",
+		Size = Vector3.new(11, 6, 18),
+		RideHeight = 5,
+		SpeedBias = 0.88,
+		OffRoad = true,
+		ClimbAssist = 0.42,
+		Color = Color3.fromRGB(40, 42, 46),
+	},
+	{
+		Name = "Hummer",
+		Size = Vector3.new(13, 6.4, 20),
+		RideHeight = 5.5,
+		SpeedBias = 0.8,
+		OffRoad = true,
+		ClimbAssist = 0.5,
+		Color = Color3.fromRGB(168, 160, 120),
+	},
+	{
+		Name = "Jeep",
+		Size = Vector3.new(10, 5.4, 17),
+		RideHeight = 4.6,
+		SpeedBias = 0.95,
+		OffRoad = true,
+		ClimbAssist = 0.38,
+		Color = Color3.fromRGB(70, 110, 72),
 	},
 }
 
@@ -934,7 +972,15 @@ export type ConfigType = {
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
 	CarBodies: {
-		{ Name: string, Size: Vector3, RideHeight: number, SpeedBias: number, Color: Color3 }
+		{
+			Name: string,
+			Size: Vector3,
+			RideHeight: number,
+			SpeedBias: number,
+			Color: Color3,
+			OffRoad: boolean?,
+			ClimbAssist: number?,
+		}
 	},
 	Vehicles: { [string]: VehicleSpec },
 	MudSpeedFactor: number,

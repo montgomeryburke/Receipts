@@ -1066,6 +1066,20 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		})
 	end
 
+	-- Off-roaders at the lift stations, which is where you go to get up the
+	-- mountain. A Lamborghini at the bottom of a mountain trail is a joke.
+	local offRoaders = { "G-Wagon", "Hummer", "Jeep" }
+	for index, station in resort.liftStations do
+		table.insert(vehiclePads, {
+			position = station + Vector3.new(22, 2, 0),
+			kind = offRoaders[((index - 1) % #offRoaders) + 1],
+		})
+	end
+	table.insert(vehiclePads, {
+		position = resort.liftStations[1] + Vector3.new(-22, 2, 0),
+		kind = "Hummer",
+	})
+
 	-- Gear on the sniper towers, because climbing one should be worth it.
 	for index, top in resort.towerTops do
 		table.insert(pickupPads, {

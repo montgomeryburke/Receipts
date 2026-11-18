@@ -721,6 +721,15 @@ Config.Turbo = {
 	The truck is slower but heavy and sits high; the Lamborghini is quick and
 	low. Both use the same tier speeds, so the choice is feel, not advantage.
 ]]
+--[[
+	Car bodies.
+
+	`OffRoad` bodies get a climb assist in driveWheeled, which is what lets
+	them take the mountain trail. Without it the drive direction is flattened
+	dead horizontal -- deliberately, because a non-flattened one is what used
+	to launch trucks into the sky -- and a horizontal push cannot get you up
+	anything steep.
+]]
 Config.CarBodies = {
 	{
 		Name = "Truck",
@@ -735,6 +744,35 @@ Config.CarBodies = {
 		RideHeight = 2,
 		SpeedBias = 1.15,
 		Color = Color3.fromRGB(240, 190, 30),
+	},
+	-- The off-roaders. Slower on the flat, and the only things that will get
+	-- you up the mountain trail under fire.
+	{
+		Name = "G-Wagon",
+		Size = Vector3.new(11, 6, 18),
+		RideHeight = 5,
+		SpeedBias = 0.88,
+		OffRoad = true,
+		ClimbAssist = 0.42,
+		Color = Color3.fromRGB(40, 42, 46),
+	},
+	{
+		Name = "Hummer",
+		Size = Vector3.new(13, 6.4, 20),
+		RideHeight = 5.5,
+		SpeedBias = 0.8,
+		OffRoad = true,
+		ClimbAssist = 0.5,
+		Color = Color3.fromRGB(168, 160, 120),
+	},
+	{
+		Name = "Jeep",
+		Size = Vector3.new(10, 5.4, 17),
+		RideHeight = 4.6,
+		SpeedBias = 0.95,
+		OffRoad = true,
+		ClimbAssist = 0.38,
+		Color = Color3.fromRGB(70, 110, 72),
 	},
 }
 
@@ -974,7 +1012,15 @@ export type ConfigType = {
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
 	CarBodies: {
-		{ Name: string, Size: Vector3, RideHeight: number, SpeedBias: number, Color: Color3 }
+		{
+			Name: string,
+			Size: Vector3,
+			RideHeight: number,
+			SpeedBias: number,
+			Color: Color3,
+			OffRoad: boolean?,
+			ClimbAssist: number?,
+		}
 	},
 	Vehicles: { [string]: VehicleSpec },
 	MudSpeedFactor: number,
@@ -4517,11 +4563,12 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		table.insert(vehiclePads, { position = at, kind = "Tube" })
 	end
 	for index, at in resort.skiPads do
-		-- A glider beside the skis at the summit; the lower station gets one
-		-- too, so being shot down is not the end of flying for the round.
+		-- Skis at the summit, and a glider beside them. The lower lift
+		-- station gets a glider too, so being shot down is not the end of
+		-- flying for the whole round.
 		table.insert(vehiclePads, {
 			position = at + Vector3.new(0, 2, 0),
-			kind = if index == 1 then "Glider" else "Tube",
+			kind = if index == 2 then "Glider" else "Skis",
 		})
 	end
 
@@ -7629,6 +7676,8 @@ function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Pl
 		maxSpeed = tier.MaxSpeed * body.SpeedBias,
 		torque = tier.Torque,
 		turnSpeed = tier.TurnSpeed,
+		offRoad = body.OffRoad == true,
+		climbAssist = body.ClimbAssist or 0,
 	}
 	return model
 end
@@ -8402,12 +8451,16 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 			state.groundIsMud = hit ~= nil
 				and (hit.Instance.Name == "Mud" or hit.Material == Enum.Material.Mud)
 			state.groundIsBoost = hit ~= nil and hit.Instance:GetAttribute("Boost") == true
+			-- Kept for the climb assist below, which needs to know how
+			-- steeply the ground under the car is tilted.
+			state.groundNormal = if hit then hit.Normal else nil
 		end
 	else
 		-- Parked: forget what it was standing on, so pulling away from a mud
 		-- pool does not carry the drag with it.
 		state.groundIsMud = false
 		state.groundIsBoost = false
+		state.groundNormal = nil
 		state.nextGroundSampleAt = 0
 		state.lastGroundSampleAt = nil
 	end
@@ -8481,9 +8534,37 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local flat = Vector3.new(look.X, 0, look.Z)
 	flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
 
+	--[[
+		Climb assist, for off-roaders only.
+
+		A dead-horizontal push cannot get a car up anything steep: it drives
+		into the hill rather than over it. So the G-Wagon, the Hummer and the
+		Jeep are allowed to tilt their drive axis a little way up the slope
+		they are standing on -- enough to take the mountain trail, and only
+		ever as much as the ground under them is actually tilted.
+
+		An ordinary car gets none of this on purpose. A non-flattened drive
+		axis is exactly what used to fire trucks into the sky, and the drive
+		test still asserts they stay down.
+	]]
+	local driveAxis = flat
+	local assist = state.climbAssist or 0
+	if assist > 0 and state.groundNormal then
+		local normal = state.groundNormal :: Vector3
+		-- A flat surface has a vertical normal, so this is zero there and
+		-- the assist simply does not engage.
+		local tilt = Vector3.new(normal.X, 0, normal.Z).Magnitude
+		if tilt > 0.12 then
+			local lifted = Vector3.new(flat.X, tilt * assist, flat.Z)
+			if lifted.Magnitude > 0.01 then
+				driveAxis = lifted.Unit
+			end
+		end
+	end
+
 	drive.Enabled = true
 	turn.Enabled = true
-	drive.LineDirection = flat
+	drive.LineDirection = driveAxis
 	drive.LineVelocity = current
 
 	-- The engine rises and falls with road speed.
@@ -8752,14 +8833,20 @@ function stepTricks(model, state, rider, grounded, deltaTime)
 		return
 	end
 
-	local points = math.floor(airtime * TRICK_AIR_POINTS + state.spin * TRICK_SPIN_POINTS)
+	-- Taken into a local BEFORE the reset. Reading state.spin after zeroing
+	-- it meant every trick, however far it turned, came out named "BIG AIR"
+	-- while being paid for the spin -- the score was right and the shout was
+	-- wrong, which is the kind of thing nobody notices for months.
+	local spun = state.spin
 	state.spin = 0
+
+	local points = math.floor(airtime * TRICK_AIR_POINTS + spun * TRICK_SPIN_POINTS)
 	if points <= 0 then
 		return
 	end
 
 	local awarded = PlayerState.AwardPoints(rider, points)
-	VehicleService.TrickLanded.Fire(rider, trickName(state.spin), awarded, airtime)
+	VehicleService.TrickLanded.Fire(rider, trickName(spun), awarded, airtime)
 
 	local _ = deltaTime
 end
