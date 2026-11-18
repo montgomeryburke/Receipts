@@ -538,11 +538,6 @@ Config.CivilianLines = {
 }
 
 --[[
-	Boost arrows: chevrons painted on the approach to every jump. Drive over
-	them and you are flung up to this speed, which is what turns a ramp into
-	serious air.
-]]
---[[
 	The motion tracker.
 
 	Deliberately short-sighted, the way Halo's was: far enough that nobody
@@ -563,6 +558,11 @@ Config.Radar = {
 	VerticalRange = 60,
 }
 
+--[[
+	Boost arrows: chevrons painted on the approach to every jump. Drive over
+	them and you are flung up to this speed, which is what turns a ramp into
+	serious air.
+]]
 Config.Boost = {
 	-- Horizontal only. This used to be 190, which fired a truck off the
 	-- following ramp like a trampoline; the arrows are meant to make you

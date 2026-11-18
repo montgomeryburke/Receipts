@@ -22,6 +22,8 @@ import os
 import re
 import sys
 
+SPACING_TEST = '-- The pacing has to be by DISTANCE, not by time. A boost chevron is nine\n-- studs long. A fixed 20 Hz sample is ten studs apart at full speed, so the\n-- pads on the run-up to a ramp get stepped straight over and the jump beyond\n-- never works -- which is a silent failure, because the car still drives.\nDUMP("")\nDUMP("Probe spacing at speed:")\ndo\n\tlocal samples = {}\n\tlocal saved = rawget(workspace, "_props").Raycast\n\trawget(workspace, "_props").Raycast = function(_, origin)\n\t\ttable.insert(samples, origin)\n\t\treturn nil\n\tend\n\n\trunCar(1, 0, true, 4) -- full throttle, turbo, long enough to top out\n\trawget(workspace, "_props").Raycast = saved\n\n\tlocal widest = 0\n\tfor index = 2, #samples do\n\t\tlocal gap = (samples[index] - samples[index - 1]).Magnitude\n\t\twidest = math.max(widest, gap)\n\tend\n\n\t-- A boost chevron is nine studs long along the direction of travel, so\n\t-- the widest gap has to stay comfortably under that.\n\tcheck("samples are never more than a boost pad apart", widest <= 7,\n\t\tstring.format("widest gap %.1f studs over %d samples", widest, #samples))\n\tcheck("and it still is not sampling every frame", #samples < 240,\n\t\tstring.format("%d samples in 240 frames", #samples))\nend\n\n'
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, '..', 'src')
 
@@ -302,11 +304,13 @@ do
 
 	rawget(workspace, "_props").Raycast = saved
 
-	check("a moving car probes at about 20 Hz", driving > 20 and driving < 70,
+	check("a moving car probes, but not every frame", driving > 10 and driving < 110,
 		string.format("%d casts in 120 frames", driving))
 	check("a parked empty car does not probe at all", parked == 0,
 		string.format("%d casts", parked))
 end
+
+--[[SPACING]]
 
 DUMP("")
 DUMP("Steering:")
@@ -321,4 +325,4 @@ DUMP("")
 DUMP(if failures == 0 then "DRIVING WORKS" else failures .. " FAILURES")
 """
 
-sys.stdout.write(harness)
+sys.stdout.write(harness.replace('--[[SPACING]]', SPACING_TEST))

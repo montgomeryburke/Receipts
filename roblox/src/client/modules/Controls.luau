@@ -372,6 +372,23 @@ local function selectSlot(slot: number)
 	equip(names[nextIndex])
 end
 
+--[[
+	Open or close the scoreboard.
+
+	Shared by the Tab key and the touch button, because they used to track it
+	separately: a Tab press left the button's own flag stale, so on a tablet
+	with a keyboard the button then needed two taps to do anything.
+]]
+local scoreboardOpen = false
+
+local function setScoreboard(visible: boolean)
+	scoreboardOpen = visible
+	Hud.ShowScoreboard(visible)
+	if visible then
+		Remotes.Event("RequestScoreboard"):FireServer()
+	end
+end
+
 -- ===================================================================== INPUT ==
 
 local function onInputBegan(input: InputObject, processed: boolean)
@@ -420,8 +437,7 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	if input.KeyCode == Enum.KeyCode.Tab then
 		-- Held, not toggled. Ask for fresh numbers at the moment it opens,
 		-- rather than streaming a scoreboard to everyone continuously.
-		Hud.ShowScoreboard(true)
-		Remotes.Event("RequestScoreboard"):FireServer()
+		setScoreboard(true)
 		return
 	end
 
@@ -457,19 +473,8 @@ local function onInputBegan(input: InputObject, processed: boolean)
 end
 
 local function onInputEnded(input: InputObject)
-	if input.KeyCode == Enum.KeyCode.G then
-		-- The grenade key. Throws where you are aiming without changing what
-		-- is in your hands, the way Halo's did.
-		local _, direction = currentAimDirection()
-		if direction then
-			Remotes.Event("ThrowGrenade"):FireServer(direction)
-			Feel.Kick(1.2)
-		end
-		return
-	end
-
 	if input.KeyCode == Enum.KeyCode.Tab then
-		Hud.ShowScoreboard(false)
+		setScoreboard(false)
 		return
 	end
 
@@ -594,9 +599,6 @@ end
 	Entering a vehicle needs no button: Roblox puts its own tappable prompt
 	on screen for a ProximityPrompt on a touch device.
 ]]
-local touchGui: ScreenGui? = nil
-local scoreboardOpen = false
-
 local function roundButton(
 	gui: Instance,
 	text: string,
@@ -634,8 +636,10 @@ local function buildTouchButton()
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "TouchControls"
 	gui.ResetOnSpawn = false
+	-- Above the HUD on purpose. Without an explicit order the two layers
+	-- are drawn in creation order, which is not something to rely on.
+	gui.DisplayOrder = 10
 	gui.Parent = player:WaitForChild("PlayerGui")
-	touchGui = gui
 
 	-- ------------------------------------------------- right hand: shooting
 	local fire = roundButton(gui, "FIRE", Color3.fromRGB(200, 60, 50), 110, UDim2.new(1, -140, 1, -180))
@@ -706,11 +710,16 @@ local function buildTouchButton()
 		return button
 	end
 
-	pedal("GAS", Color3.fromRGB(120, 220, 130), UDim2.new(0, 30, 1, -150), 1)
-	pedal("BRAKE", Color3.fromRGB(230, 120, 110), UDim2.new(0, 140, 1, -150), -1)
+	-- Clear of the motion tracker, which owns x 24..188 and the bottom 284
+	-- pixels of the left edge. Putting a thumb button on top of the radar
+	-- costs you the radar.
+	local DIAL_RIGHT = 200
 
-	local turbo = roundButton(gui, "TURBO", Color3.fromRGB(255, 200, 80), 90, UDim2.new(1, -150, 1, -290))
-	turbo.Position = UDim2.new(0, 30, 1, -256)
+	pedal("GAS", Color3.fromRGB(120, 220, 130), UDim2.new(0, DIAL_RIGHT, 1, -120), 1)
+	pedal("BRAKE", Color3.fromRGB(230, 120, 110), UDim2.new(0, DIAL_RIGHT + 110, 1, -120), -1)
+
+	local turbo = roundButton(gui, "TURBO", Color3.fromRGB(255, 200, 80), 90,
+		UDim2.new(0, DIAL_RIGHT, 1, -222))
 	turbo.MouseButton1Down:Connect(function()
 		Remotes.Event("SetTurbo"):FireServer(true)
 		Hud.SetTurbo(true)
@@ -722,7 +731,8 @@ local function buildTouchButton()
 
 	-- Bail out of a vehicle or a rocket. Deploys the parachute, same as the
 	-- space bar, and is harmless on foot.
-	local bail = roundButton(gui, "BAIL", Color3.fromRGB(240, 160, 60), 86, UDim2.new(0, 140, 1, -256))
+	local bail = roundButton(gui, "BAIL", Color3.fromRGB(240, 160, 60), 86,
+		UDim2.new(0, DIAL_RIGHT + 104, 1, -220))
 	bail.Activated:Connect(function()
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -733,13 +743,10 @@ local function buildTouchButton()
 
 	-- Tapped rather than held: holding a button down to read a scoreboard is
 	-- fine with a thumb on Tab and miserable with a thumb on glass.
-	local scores = roundButton(gui, "SCORE", Color3.fromRGB(120, 150, 200), 78, UDim2.new(0.5, -39, 1, -96))
+	local scores = roundButton(gui, "SCORE", Color3.fromRGB(120, 150, 200), 78,
+		UDim2.new(0.5, -39, 1, -96))
 	scores.Activated:Connect(function()
-		scoreboardOpen = not scoreboardOpen
-		Hud.ShowScoreboard(scoreboardOpen)
-		if scoreboardOpen then
-			Remotes.Event("RequestScoreboard"):FireServer()
-		end
+		setScoreboard(not scoreboardOpen)
 	end)
 end
 
@@ -794,6 +801,11 @@ end
 --[[ What the HUD needs to know about the gun in your hands. ]]
 function Controls.EquippedName(): string
 	return equipped
+end
+
+--[[ Whether the scoreboard is up, for tests. ]]
+function Controls.ScoreboardOpenForTests(): boolean
+	return scoreboardOpen
 end
 
 function Controls.EquippedEntry(): ArsenalEntry?

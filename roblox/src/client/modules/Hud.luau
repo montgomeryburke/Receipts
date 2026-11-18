@@ -52,6 +52,7 @@ local scoreLabel: TextLabel
 local crosshair: Frame
 local votePanel: Frame
 local deathOverlay: Frame
+local deathTitle: TextLabel? = nil
 local respawnLabel: TextLabel? = nil
 local respawnToken = 0
 local wienerOverlay: TextLabel
@@ -245,7 +246,8 @@ function Hud.Build()
 		Visible = false,
 		ZIndex = 20,
 	})
-	makeLabel(deathOverlay, {
+	deathTitle = makeLabel(deathOverlay, {
+		Name = "DeathTitle",
 		Size = UDim2.fromScale(1, 1),
 		Text = "YOU MELTED",
 		TextSize = 64,
@@ -258,6 +260,7 @@ function Hud.Build()
 	-- whether the game has stopped responding, and the guess is always that
 	-- it has.
 	respawnLabel = makeLabel(deathOverlay, {
+		Name = "RespawnClock",
 		Size = UDim2.fromScale(1, 0.2),
 		Position = UDim2.fromScale(0, 0.58),
 		Text = "",
@@ -751,9 +754,14 @@ function Hud.ShowDeath(duration: number, killerName: string?)
 		return
 	end
 
-	local label = deathOverlay:FindFirstChildOfClass("TextLabel")
-	if label then
-		label.Text = if killerName then `MELTED BY {string.upper(killerName)}` else "YOU MELTED"
+	-- Held directly rather than looked up by class. The overlay has two
+	-- TextLabels now, and FindFirstChildOfClass could hand back the
+	-- countdown instead -- putting the killer's name in the clock and
+	-- leaving the title saying whatever it said last.
+	if deathTitle then
+		deathTitle.Text = if killerName
+			then `MELTED BY {string.upper(killerName)}`
+			else "YOU MELTED"
 	end
 
 	deathOverlay.Visible = true

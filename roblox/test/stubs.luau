@@ -231,16 +231,31 @@ local ENUM_VALUES = {
 	},
 }
 
+-- Enum items must be CACHED, not built fresh on every index.
+--
+-- Roblox enum items are singletons, and real code compares them by identity:
+--     if input.KeyCode == Enum.KeyCode.G then
+-- Handing back a new table each time made every one of those comparisons
+-- false forever, so no keyboard or mouse handling in this game was testable
+-- at all -- a test could fire an input event and the code under test would
+-- simply ignore it, which looks exactly like a passing no-op.
 Enum = setmetatable({}, {
 	__index = function(t, category)
+		local items = {}
 		local group = setmetatable({}, {
 			__index = function(_, item)
+				local existing = items[item]
+				if existing then
+					return existing
+				end
 				local known = ENUM_VALUES[category]
-				return {
+				local made = {
 					Name = item,
 					EnumType = category,
 					Value = (known and known[item]) or 0,
 				}
+				items[item] = made
+				return made
 			end,
 		})
 		rawset(t, category, group)

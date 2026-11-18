@@ -26,6 +26,20 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 
 -- Shared between every vehicle, every frame: see driveWheeled.
+--
+-- The probe is paced by DISTANCE, not by time. A fixed 20 Hz looks like a
+-- safe saving until you work out how far a car travels between samples: at
+-- two hundred studs a second that is ten studs, and a boost chevron is nine
+-- studs long, so the pads on the run-up to a ramp get stepped straight over
+-- and the jump beyond never works.
+--
+-- The threshold is not the gap: a sample fires once the car has moved this
+-- far, so the real gap is this plus one frame of travel, which at top speed
+-- under turbo is another two studs. Four studs keeps the actual spacing
+-- around six, with genuine margin against a nine-stud pad rather than the
+-- eight-point-something that six studs produced.
+local GROUND_SAMPLE_STUDS = 4
+-- And a floor on the rate, so a crawling vehicle still notices mud.
 local GROUND_SAMPLE_INTERVAL = 1 / 20
 local GROUND_PROBE = Vector3.new(0, -14, 0)
 local groundParams = RaycastParams.new()
@@ -851,10 +865,16 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local rolling = math.abs(state.currentSpeed) > 1 or seat.Occupant ~= nil
 	if rolling then
 		local now = os.clock()
-		if now >= state.nextGroundSampleAt then
+		local here = chassis.Position
+		local moved = if state.lastGroundSampleAt
+			then (here - state.lastGroundSampleAt).Magnitude
+			else math.huge
+
+		if moved >= GROUND_SAMPLE_STUDS or now >= state.nextGroundSampleAt then
 			state.nextGroundSampleAt = now + GROUND_SAMPLE_INTERVAL
+			state.lastGroundSampleAt = here
 			groundParams.FilterDescendantsInstances = { model }
-			local hit = workspace:Raycast(chassis.Position, GROUND_PROBE, groundParams)
+			local hit = workspace:Raycast(here, GROUND_PROBE, groundParams)
 			state.groundIsMud = hit ~= nil
 				and (hit.Instance.Name == "Mud" or hit.Material == Enum.Material.Mud)
 			state.groundIsBoost = hit ~= nil and hit.Instance:GetAttribute("Boost") == true
@@ -865,6 +885,7 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		state.groundIsMud = false
 		state.groundIsBoost = false
 		state.nextGroundSampleAt = 0
+		state.lastGroundSampleAt = nil
 	end
 
 	if state.groundIsMud then

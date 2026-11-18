@@ -578,11 +578,6 @@ Config.CivilianLines = {
 }
 
 --[[
-	Boost arrows: chevrons painted on the approach to every jump. Drive over
-	them and you are flung up to this speed, which is what turns a ramp into
-	serious air.
-]]
---[[
 	The motion tracker.
 
 	Deliberately short-sighted, the way Halo's was: far enough that nobody
@@ -603,6 +598,11 @@ Config.Radar = {
 	VerticalRange = 60,
 }
 
+--[[
+	Boost arrows: chevrons painted on the approach to every jump. Drive over
+	them and you are flung up to this speed, which is what turns a ramp into
+	serious air.
+]]
 Config.Boost = {
 	-- Horizontal only. This used to be 190, which fired a truck off the
 	-- following ramp like a trampoline; the arrows are meant to make you
@@ -6160,6 +6160,20 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 
 -- Shared between every vehicle, every frame: see driveWheeled.
+--
+-- The probe is paced by DISTANCE, not by time. A fixed 20 Hz looks like a
+-- safe saving until you work out how far a car travels between samples: at
+-- two hundred studs a second that is ten studs, and a boost chevron is nine
+-- studs long, so the pads on the run-up to a ramp get stepped straight over
+-- and the jump beyond never works.
+--
+-- The threshold is not the gap: a sample fires once the car has moved this
+-- far, so the real gap is this plus one frame of travel, which at top speed
+-- under turbo is another two studs. Four studs keeps the actual spacing
+-- around six, with genuine margin against a nine-stud pad rather than the
+-- eight-point-something that six studs produced.
+local GROUND_SAMPLE_STUDS = 4
+-- And a floor on the rate, so a crawling vehicle still notices mud.
 local GROUND_SAMPLE_INTERVAL = 1 / 20
 local GROUND_PROBE = Vector3.new(0, -14, 0)
 local groundParams = RaycastParams.new()
@@ -6985,10 +6999,16 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local rolling = math.abs(state.currentSpeed) > 1 or seat.Occupant ~= nil
 	if rolling then
 		local now = os.clock()
-		if now >= state.nextGroundSampleAt then
+		local here = chassis.Position
+		local moved = if state.lastGroundSampleAt
+			then (here - state.lastGroundSampleAt).Magnitude
+			else math.huge
+
+		if moved >= GROUND_SAMPLE_STUDS or now >= state.nextGroundSampleAt then
 			state.nextGroundSampleAt = now + GROUND_SAMPLE_INTERVAL
+			state.lastGroundSampleAt = here
 			groundParams.FilterDescendantsInstances = { model }
-			local hit = workspace:Raycast(chassis.Position, GROUND_PROBE, groundParams)
+			local hit = workspace:Raycast(here, GROUND_PROBE, groundParams)
 			state.groundIsMud = hit ~= nil
 				and (hit.Instance.Name == "Mud" or hit.Material == Enum.Material.Mud)
 			state.groundIsBoost = hit ~= nil and hit.Instance:GetAttribute("Boost") == true
@@ -6999,6 +7019,7 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		state.groundIsMud = false
 		state.groundIsBoost = false
 		state.nextGroundSampleAt = 0
+		state.lastGroundSampleAt = nil
 	end
 
 	if state.groundIsMud then
@@ -7950,7 +7971,6 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 	PlayerState.Changed.Fire(player)
 end
 
---[[ Swap guns. In free mode every gun in the config is yours from the start. ]]
 local function handleFire(player: Player, requestedDirection: any)
 	fireWeapon(player, equippedWeaponName(player), requestedDirection)
 end
@@ -7984,6 +8004,7 @@ local function handleThrowGrenade(player: Player, requestedDirection: any)
 	fireWeapon(player, weaponName, requestedDirection)
 end
 
+--[[ Swap guns. In free mode every gun in the config is yours from the start. ]]
 local function handleEquip(player: Player, weaponName: any)
 	if typeof(weaponName) ~= "string" then
 		return
@@ -8191,12 +8212,12 @@ function WeaponService.Start()
 	end
 end
 
---[[ Unused for now, but kept so the origin check has a home when we tighten it. ]]
 --[[ What a player currently has in their hands, for tests. ]]
 function WeaponService.EquippedForTests(player: Player): string
 	return equippedWeaponName(player)
 end
 
+--[[ Unused for now, but kept so the origin check has a home when we tighten it. ]]
 function WeaponService.MaxOriginDrift(): number
 	return MAX_ORIGIN_DRIFT
 end
@@ -9706,6 +9727,23 @@ local function selectSlot(slot: number)
 	equip(names[nextIndex])
 end
 
+--[[
+	Open or close the scoreboard.
+
+	Shared by the Tab key and the touch button, because they used to track it
+	separately: a Tab press left the button's own flag stale, so on a tablet
+	with a keyboard the button then needed two taps to do anything.
+]]
+local scoreboardOpen = false
+
+local function setScoreboard(visible: boolean)
+	scoreboardOpen = visible
+	Hud.ShowScoreboard(visible)
+	if visible then
+		Remotes.Event("RequestScoreboard"):FireServer()
+	end
+end
+
 -- ===================================================================== INPUT ==
 
 local function onInputBegan(input: InputObject, processed: boolean)
@@ -9754,8 +9792,7 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	if input.KeyCode == Enum.KeyCode.Tab then
 		-- Held, not toggled. Ask for fresh numbers at the moment it opens,
 		-- rather than streaming a scoreboard to everyone continuously.
-		Hud.ShowScoreboard(true)
-		Remotes.Event("RequestScoreboard"):FireServer()
+		setScoreboard(true)
 		return
 	end
 
@@ -9791,19 +9828,8 @@ local function onInputBegan(input: InputObject, processed: boolean)
 end
 
 local function onInputEnded(input: InputObject)
-	if input.KeyCode == Enum.KeyCode.G then
-		-- The grenade key. Throws where you are aiming without changing what
-		-- is in your hands, the way Halo's did.
-		local _, direction = currentAimDirection()
-		if direction then
-			Remotes.Event("ThrowGrenade"):FireServer(direction)
-			Feel.Kick(1.2)
-		end
-		return
-	end
-
 	if input.KeyCode == Enum.KeyCode.Tab then
-		Hud.ShowScoreboard(false)
+		setScoreboard(false)
 		return
 	end
 
@@ -9928,9 +9954,6 @@ end
 	Entering a vehicle needs no button: Roblox puts its own tappable prompt
 	on screen for a ProximityPrompt on a touch device.
 ]]
-local touchGui: ScreenGui? = nil
-local scoreboardOpen = false
-
 local function roundButton(
 	gui: Instance,
 	text: string,
@@ -9968,8 +9991,10 @@ local function buildTouchButton()
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "TouchControls"
 	gui.ResetOnSpawn = false
+	-- Above the HUD on purpose. Without an explicit order the two layers
+	-- are drawn in creation order, which is not something to rely on.
+	gui.DisplayOrder = 10
 	gui.Parent = player:WaitForChild("PlayerGui")
-	touchGui = gui
 
 	-- ------------------------------------------------- right hand: shooting
 	local fire = roundButton(gui, "FIRE", Color3.fromRGB(200, 60, 50), 110, UDim2.new(1, -140, 1, -180))
@@ -10040,11 +10065,16 @@ local function buildTouchButton()
 		return button
 	end
 
-	pedal("GAS", Color3.fromRGB(120, 220, 130), UDim2.new(0, 30, 1, -150), 1)
-	pedal("BRAKE", Color3.fromRGB(230, 120, 110), UDim2.new(0, 140, 1, -150), -1)
+	-- Clear of the motion tracker, which owns x 24..188 and the bottom 284
+	-- pixels of the left edge. Putting a thumb button on top of the radar
+	-- costs you the radar.
+	local DIAL_RIGHT = 200
 
-	local turbo = roundButton(gui, "TURBO", Color3.fromRGB(255, 200, 80), 90, UDim2.new(1, -150, 1, -290))
-	turbo.Position = UDim2.new(0, 30, 1, -256)
+	pedal("GAS", Color3.fromRGB(120, 220, 130), UDim2.new(0, DIAL_RIGHT, 1, -120), 1)
+	pedal("BRAKE", Color3.fromRGB(230, 120, 110), UDim2.new(0, DIAL_RIGHT + 110, 1, -120), -1)
+
+	local turbo = roundButton(gui, "TURBO", Color3.fromRGB(255, 200, 80), 90,
+		UDim2.new(0, DIAL_RIGHT, 1, -222))
 	turbo.MouseButton1Down:Connect(function()
 		Remotes.Event("SetTurbo"):FireServer(true)
 		Hud.SetTurbo(true)
@@ -10056,7 +10086,8 @@ local function buildTouchButton()
 
 	-- Bail out of a vehicle or a rocket. Deploys the parachute, same as the
 	-- space bar, and is harmless on foot.
-	local bail = roundButton(gui, "BAIL", Color3.fromRGB(240, 160, 60), 86, UDim2.new(0, 140, 1, -256))
+	local bail = roundButton(gui, "BAIL", Color3.fromRGB(240, 160, 60), 86,
+		UDim2.new(0, DIAL_RIGHT + 104, 1, -220))
 	bail.Activated:Connect(function()
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -10067,13 +10098,10 @@ local function buildTouchButton()
 
 	-- Tapped rather than held: holding a button down to read a scoreboard is
 	-- fine with a thumb on Tab and miserable with a thumb on glass.
-	local scores = roundButton(gui, "SCORE", Color3.fromRGB(120, 150, 200), 78, UDim2.new(0.5, -39, 1, -96))
+	local scores = roundButton(gui, "SCORE", Color3.fromRGB(120, 150, 200), 78,
+		UDim2.new(0.5, -39, 1, -96))
 	scores.Activated:Connect(function()
-		scoreboardOpen = not scoreboardOpen
-		Hud.ShowScoreboard(scoreboardOpen)
-		if scoreboardOpen then
-			Remotes.Event("RequestScoreboard"):FireServer()
-		end
+		setScoreboard(not scoreboardOpen)
 	end)
 end
 
@@ -10128,6 +10156,11 @@ end
 --[[ What the HUD needs to know about the gun in your hands. ]]
 function Controls.EquippedName(): string
 	return equipped
+end
+
+--[[ Whether the scoreboard is up, for tests. ]]
+function Controls.ScoreboardOpenForTests(): boolean
+	return scoreboardOpen
 end
 
 function Controls.EquippedEntry(): ArsenalEntry?
@@ -10345,6 +10378,7 @@ local scoreLabel: TextLabel
 local crosshair: Frame
 local votePanel: Frame
 local deathOverlay: Frame
+local deathTitle: TextLabel? = nil
 local respawnLabel: TextLabel? = nil
 local respawnToken = 0
 local wienerOverlay: TextLabel
@@ -10538,7 +10572,8 @@ function Hud.Build()
 		Visible = false,
 		ZIndex = 20,
 	})
-	makeLabel(deathOverlay, {
+	deathTitle = makeLabel(deathOverlay, {
+		Name = "DeathTitle",
 		Size = UDim2.fromScale(1, 1),
 		Text = "YOU MELTED",
 		TextSize = 64,
@@ -10551,6 +10586,7 @@ function Hud.Build()
 	-- whether the game has stopped responding, and the guess is always that
 	-- it has.
 	respawnLabel = makeLabel(deathOverlay, {
+		Name = "RespawnClock",
 		Size = UDim2.fromScale(1, 0.2),
 		Position = UDim2.fromScale(0, 0.58),
 		Text = "",
@@ -11044,9 +11080,14 @@ function Hud.ShowDeath(duration: number, killerName: string?)
 		return
 	end
 
-	local label = deathOverlay:FindFirstChildOfClass("TextLabel")
-	if label then
-		label.Text = if killerName then `MELTED BY {string.upper(killerName)}` else "YOU MELTED"
+	-- Held directly rather than looked up by class. The overlay has two
+	-- TextLabels now, and FindFirstChildOfClass could hand back the
+	-- countdown instead -- putting the killer's name in the clock and
+	-- leaving the title saying whatever it said last.
+	if deathTitle then
+		deathTitle.Text = if killerName
+			then `MELTED BY {string.upper(killerName)}`
+			else "YOU MELTED"
 	end
 
 	deathOverlay.Visible = true

@@ -484,7 +484,6 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 	PlayerState.Changed.Fire(player)
 end
 
---[[ Swap guns. In free mode every gun in the config is yours from the start. ]]
 local function handleFire(player: Player, requestedDirection: any)
 	fireWeapon(player, equippedWeaponName(player), requestedDirection)
 end
@@ -518,6 +517,7 @@ local function handleThrowGrenade(player: Player, requestedDirection: any)
 	fireWeapon(player, weaponName, requestedDirection)
 end
 
+--[[ Swap guns. In free mode every gun in the config is yours from the start. ]]
 local function handleEquip(player: Player, weaponName: any)
 	if typeof(weaponName) ~= "string" then
 		return
@@ -725,12 +725,12 @@ function WeaponService.Start()
 	end
 end
 
---[[ Unused for now, but kept so the origin check has a home when we tighten it. ]]
 --[[ What a player currently has in their hands, for tests. ]]
 function WeaponService.EquippedForTests(player: Player): string
 	return equippedWeaponName(player)
 end
 
+--[[ Unused for now, but kept so the origin check has a home when we tighten it. ]]
 function WeaponService.MaxOriginDrift(): number
 	return MAX_ORIGIN_DRIFT
 end
