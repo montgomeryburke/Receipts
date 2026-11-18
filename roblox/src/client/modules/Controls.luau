@@ -1278,7 +1278,14 @@ function Controls.Start()
 	end
 	controlsStarted = true
 	local cam = getCamera()
-	defaultFov = if cam then cam.FieldOfView else 70
+	-- From Config, not from whatever the camera happened to be on. Reading
+	-- it off the camera meant the base FOV depended on whether Visuals had
+	-- started yet, so the scope sometimes un-zoomed to 70 and sometimes to
+	-- 75 -- a difference you feel and cannot explain.
+	defaultFov = Config.Visuals.BaseFieldOfView
+	if cam then
+		cam.FieldOfView = defaultFov
+	end
 
 	-- Built straight from Config rather than asked for over the network.
 	--

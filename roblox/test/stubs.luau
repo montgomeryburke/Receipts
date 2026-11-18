@@ -447,6 +447,30 @@ local function newInstance(class)
 	-- ones abort whatever thread they are in, which hides real behaviour
 	-- behind an error that has nothing to do with the thing being tested.
 	local props = rawget(self, "_props")
+
+	--[[
+		Every instance can be watched for a property change.
+
+		This existed only in the server stand-ins, so anything on the client
+		that watches a property -- a player's Team changing, a seat's
+		occupant changing -- threw the moment it started. Inside a pcall
+		that reads as a feature quietly declining to work, which is the
+		worst way for a harness to fail.
+
+		The SAME signal comes back for the same property, as in Roblox. A
+		fresh one per call means the module that connects and the test that
+		fires are holding two unrelated signals, and the wiring reads dead.
+	]]
+	local changedSignals = {}
+	props.GetPropertyChangedSignal = function(_, property)
+		local existing = changedSignals[property]
+		if existing then
+			return existing
+		end
+		local made = anySignal()
+		changedSignals[property] = made
+		return made
+	end
 	if class == "Team" then
 		props.GetPlayers = function(self)
 			local out = {}

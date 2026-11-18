@@ -685,6 +685,28 @@ Config.Bots = {
 	ThinkInterval = 0.25,
 }
 
+--[[
+	How readable the fight is.
+
+	Both of these are about what one pair of eyes can see rather than about
+	the world, so they are applied on the client -- but they live here
+	because the scope code tweens BACK to the base field of view, and two
+	places disagreeing about what that is shows up as a scope that un-zooms
+	to the wrong place.
+]]
+Config.Visuals = {
+	-- Wider than Roblox's 70. More of the map on screen and a stronger
+	-- sense of speed, which is most of why a modern shooter feels quick.
+	BaseFieldOfView = 75,
+	-- Enemies and team-mates are told apart by colour, not just by having
+	-- an outline. Knowing somebody is there is half the information;
+	-- knowing whether to shoot them is the other half. These match the
+	-- motion tracker's colours so the two readouts never disagree.
+	EnemyOutline = Color3.fromRGB(255, 70, 70),
+	FriendlyOutline = Color3.fromRGB(90, 230, 140),
+	OutlineTransparency = 0.15,
+}
+
 Config.Movement = {
 	JumpPower = 62,
 	-- How much a headshot multiplies damage by. Was hardcoded in two
@@ -1123,6 +1145,12 @@ export type ConfigType = {
 	GrenadeKeyWeapon: string,
 	WeaponsAlwaysAvailable: boolean,
 	Movement: { JumpPower: number, HeadshotMultiplier: number, ScopedSpeedFactor: number },
+	Visuals: {
+		BaseFieldOfView: number,
+		EnemyOutline: Color3,
+		FriendlyOutline: Color3,
+		OutlineTransparency: number,
+	},
 	Carnival: {
 		BalloonPoints: number, BalloonClearBonus: number,
 		BottlePoints: number, BottleStackBonus: number,

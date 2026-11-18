@@ -282,6 +282,10 @@ check("every sound the code asks for exists", #missingReferenced == 0,
 	own checks, on the specific behaviours that have already bitten.
 ]]
 print("")
+print("Lighting ownership:")
+--[[LIGHTINGCHECK]]
+
+print("")
 print("The harness itself:")
 
 do
@@ -420,8 +424,60 @@ if failures > 0 then
 end
 """
 
+
+# ----------------------------------------------------------------------------
+# Who writes Lighting?
+#
+# Global lighting is one shared resource with no merge: the last writer wins
+# and the loser cannot tell it lost. Two modules each setting a look they are
+# happy with produces a third look neither wanted, and which one you get
+# depends on service start order -- so it changes between runs and cannot be
+# reproduced. GraphicsService owns it; a venue that wants its own mood uses
+# local SpotLight and PointLight rigs inside itself.
+#
+# This is checked by reading the source rather than by watching writes at run
+# time, because the writes that matter are the ones in code paths a test may
+# never reach.
+LIGHTING_OWNER = "GraphicsService.luau"
+
+
+def lighting_trespassers():
+    offenders = []
+    for folder in ("server", "client", "shared"):
+        base = os.path.join(SRC, folder)
+        if not os.path.isdir(base):
+            continue
+        for root, _dirs, names in os.walk(base):
+            for name in sorted(names):
+                if not name.endswith(".luau") or name == LIGHTING_OWNER:
+                    continue
+                path = os.path.join(root, name)
+                with open(path, encoding="utf-8") as handle:
+                    for number, line in enumerate(handle, 1):
+                        stripped = line.strip()
+                        # Comments are allowed to mention it; prose about the
+                        # rule is not a violation of the rule.
+                        if stripped.startswith("--"):
+                            continue
+                        if re.search(r"\bLighting\.\w+\s*=", line) or re.search(
+                            r'GetService\(\s*"Lighting"\s*\)', line
+                        ):
+                            offenders.append("%s:%d" % (name, number))
+    return offenders
+
+
+TRESPASSERS = lighting_trespassers()
+LIGHTING_CHECK = (
+    'check("GraphicsService is the only module that touches Lighting", %s, %s)'
+    % (
+        "true" if not TRESPASSERS else "false",
+        '""' if not TRESPASSERS else '"' + ", ".join(TRESPASSERS) + '"',
+    )
+)
+
 harness = (
     TEMPLATE
+    .replace("--[[LIGHTINGCHECK]]", LIGHTING_CHECK)
     .replace("--[[STUBS]]", read(HERE, "stubs.luau"))
     .replace("--[[CONFIG]]", strip(read(SRC, "shared", "Config.luau")))
     .replace("--[[SOUND]]", strip(read(SRC, "shared", "Sound.luau")))
