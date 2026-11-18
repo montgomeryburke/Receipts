@@ -478,6 +478,32 @@ Config.Driving = {
 	Coast = 34,
 	-- Below this fraction of top speed, steering is reduced.
 	SteerGripSpeed = 0.35,
+
+	--[[
+		The drivetrain.
+
+		The wheels drive the car now, through hinge motors, with real springs
+		holding it up and a servo steering the front pair. So these are the
+		numbers of an actual car rather than the numbers of a push: torque
+		accelerates, friction grips, and the spring decides whether it rides
+		like a truck or a go-kart.
+	]]
+	MotorTorque = 15000,
+	BrakeTorque = 25000,
+	SuspensionHeight = 2,
+	SuspensionTravel = 1,
+	SpringStiffness = 8000,
+	-- Around a tenth of the stiffness. Much less and it pogos.
+	SpringDamping = 800,
+	MaxSteerAngle = 32,
+	-- Less lock at speed, or a twitch at 100 studs a second rolls the car.
+	MinSteerAngle = 10,
+	SteerSpeed = 6,
+	SteerTorque = 100000,
+	-- Grip. Lower is driftier; the weight makes tire friction beat whatever
+	-- the road material claims.
+	WheelFriction = 1.5,
+	WheelFrictionWeight = 5,
 }
 
 --[[
@@ -1109,6 +1135,12 @@ export type ConfigType = {
 	Driving: {
 		Acceleration: number, BrakeDeceleration: number,
 		Coast: number, SteerGripSpeed: number,
+		MotorTorque: number, BrakeTorque: number,
+		SuspensionHeight: number, SuspensionTravel: number,
+		SpringStiffness: number, SpringDamping: number,
+		MaxSteerAngle: number, MinSteerAngle: number,
+		SteerSpeed: number, SteerTorque: number,
+		WheelFriction: number, WheelFrictionWeight: number,
 	},
 	Wildlife: {
 		ElephantCount: number, ElephantSpeed: number,
@@ -10392,6 +10424,13 @@ local GROUND_SAMPLE_STUDS = 4
 -- And a floor on the rate, so a crawling vehicle still notices mud.
 local GROUND_SAMPLE_INTERVAL = 1 / 20
 local GROUND_PROBE = Vector3.new(0, -14, 0)
+
+-- How far a wheel may travel up or down on its spring.
+local SUSPENSION_TRAVEL = 2.2
+-- Its own params object, reused, for the same reason the ground probe has
+-- one: four wheels per car per frame is a lot of garbage otherwise.
+local suspensionParams = RaycastParams.new()
+suspensionParams.FilterType = Enum.RaycastFilterType.Exclude
 local groundParams = RaycastParams.new()
 groundParams.FilterType = Enum.RaycastFilterType.Exclude
 local Remotes = require(Shared:WaitForChild("Remotes"))
@@ -10493,43 +10532,62 @@ end
 	The chassis is what actually rests on the ground.
 ]]
 --[[
-	A wheel that stays on the car.
+	A driven wheel, on a real suspension.
 
-	The old ones were ANCHORED and had their CFrame written from the chassis
-	once per Heartbeat. That is why they looked like they were falling off:
-	the chassis is moved by physics, continuously and interpolated on the
-	client, while an anchored part teleports sixty times a second from a
-	position that is already stale. At any real speed the wheels visibly
-	trailed the car they belonged to.
+	This is the rig that matters, and it replaces two earlier attempts.
 
-	These are unanchored, massless, non-colliding, and held on by a
-	HingeConstraint. Roblox's own solver keeps them attached and the client
-	interpolates them, so they cannot lag or detach -- and because the hinge
-	is a MOTOR, the spin comes from setting one angular velocity rather than
-	rewriting a CFrame every frame.
+	  1. Anchored wheels whose CFrame was rewritten from the chassis each
+	     frame. They visibly trailed the car, which is what "the wheels were
+	     falling off" was.
+	  2. Unanchored wheels on a plain hinge, spun to match a velocity
+	     constraint that shoved the chassis along. Attached, but the car was
+	     still being pushed rather than driven: it slid round corners, it
+	     could not climb without a fudge, and jumps needed the drive
+	     switching off mid-air to stop it flying flat.
 
-	Massless and non-colliding matters: a wheel with mass and collision
-	fights the drive constraint, which is what made the cars feel like they
-	were dragging an anchor.
+	Now the wheels drive the car. Each corner gets:
+
+	  - a KNUCKLE, an invisible part the wheel hangs off
+	  - a CylindricalConstraint from chassis to knuckle, which gives vertical
+	    suspension travel and, on the front, doubles as the steering servo
+	  - a SpringConstraint across the same two attachments, which is what
+	    actually holds the car up and soaks up bumps
+	  - a HingeConstraint motor from knuckle to wheel, which is the engine
+
+	Everything else follows from that. Traction is tire friction, so it
+	climbs because it grips, it drifts if you ask it to, and in mid-air the
+	wheels spin freely and the car arcs because nothing is pushing it. All
+	the special cases go away.
+
+	Rigged from code pasted in by the project owner, adapted to this
+	module's own part names and tuning.
 ]]
-local function addWheel(model: Model, chassis: BasePart, offset: Vector3)
+local function addWheel(model: Model, chassis: BasePart, offset: Vector3, isFront: boolean)
+	local driving = Config.Driving
+	local radius = WHEEL_DIAMETER * 0.5
+
 	local wheel = Util.Part({
 		Name = "Wheel",
 		Size = Vector3.new(WHEEL_WIDTH, WHEEL_DIAMETER, WHEEL_DIAMETER),
-		-- A cylinder's flat faces point along its own X, which is already the
-		-- car's left-right axis, so it is already oriented to roll.
+		-- A cylinder's flat faces point along its own X, which is already
+		-- the car's left-right axis, so it is already oriented to roll.
 		CFrame = chassis.CFrame * CFrame.new(offset),
 		Shape = Enum.PartType.Cylinder,
 		Color = Color3.fromRGB(26, 26, 30),
 		Material = Enum.Material.Rubber,
 		Anchored = false,
-		CanCollide = false,
-		CanQuery = false,
-		Massless = true,
+		-- Grippy, and weighted so tire friction wins over whatever the road
+		-- material says. This is where traction comes from now.
+		CustomPhysicalProperties = PhysicalProperties.new(
+			1,
+			driving.WheelFriction,
+			0.1,
+			driving.WheelFrictionWeight,
+			1
+		),
 		Parent = model,
 	})
 
-	-- A pale hub, welded on, so the rotation is actually visible from outside.
 	local hub = Util.Part({
 		Name = "Hub",
 		Size = Vector3.new(WHEEL_WIDTH + 0.5, WHEEL_DIAMETER * 0.5, WHEEL_DIAMETER * 0.5),
@@ -10545,32 +10603,99 @@ local function addWheel(model: Model, chassis: BasePart, offset: Vector3)
 	})
 	Util.Weld(wheel, hub)
 
-	-- The axle. Both attachments keep their part's own X as the hinge axis,
-	-- which for the chassis is left-right and for the cylinder is the way it
-	-- rolls -- so no extra orientation is needed.
-	local hubAttachment = Instance.new("Attachment")
-	hubAttachment.Name = "AxleHub"
-	hubAttachment.Position = offset
-	hubAttachment.Parent = chassis
+	-- The knuckle: what the suspension pushes on and the wheel spins in.
+	local knuckle = Util.Part({
+		Name = "Knuckle",
+		Size = Vector3.new(1, 1, 1),
+		CFrame = CFrame.new(wheel.Position) * chassis.CFrame.Rotation,
+		Transparency = 1,
+		Anchored = false,
+		CanCollide = false,
+		CanQuery = false,
+		CustomPhysicalProperties = PhysicalProperties.new(0.5, 0.3, 0.2, 1, 1),
+		Parent = model,
+	})
 
-	local wheelAttachment = Instance.new("Attachment")
-	wheelAttachment.Name = "AxleWheel"
-	wheelAttachment.Parent = wheel
+	-- Suspension attachments. The primary axis points DOWN, because that is
+	-- the direction a CylindricalConstraint slides along.
+	local chassisMount = Instance.new("Attachment")
+	chassisMount.Name = "SuspensionTop"
+	chassisMount.Position = offset + Vector3.new(0, driving.SuspensionHeight, 0)
+	chassisMount.Axis = Vector3.new(0, -1, 0)
+	chassisMount.SecondaryAxis = Vector3.new(0, 0, -1)
+	chassisMount.Parent = chassis
+
+	local knuckleMount = Instance.new("Attachment")
+	knuckleMount.Name = "SuspensionBottom"
+	knuckleMount.Axis = Vector3.new(0, -1, 0)
+	knuckleMount.SecondaryAxis = Vector3.new(0, 0, -1)
+	knuckleMount.Parent = knuckle
+
+	local slider = Instance.new("CylindricalConstraint")
+	slider.Name = if isFront then "SteerSlider" else "Slider"
+	slider.Attachment0 = chassisMount
+	slider.Attachment1 = knuckleMount
+	slider.LimitsEnabled = true
+	slider.LowerLimit = driving.SuspensionHeight - driving.SuspensionTravel
+	slider.UpperLimit = driving.SuspensionHeight + driving.SuspensionTravel * 0.5
+
+	if isFront then
+		-- The front slider is also the steering servo.
+		slider.AngularActuatorType = Enum.ActuatorType.Servo
+		slider.ServoMaxTorque = driving.SteerTorque
+		slider.AngularSpeed = driving.SteerSpeed
+	else
+		-- The rears must not steer themselves.
+		slider.AngularLimitsEnabled = true
+		slider.LowerAngle = 0
+		slider.UpperAngle = 0
+	end
+	slider.Parent = chassis
+
+	local spring = Instance.new("SpringConstraint")
+	spring.Name = "Spring"
+	spring.Attachment0 = chassisMount
+	spring.Attachment1 = knuckleMount
+	spring.Stiffness = driving.SpringStiffness
+	spring.Damping = driving.SpringDamping
+	-- Slightly longer than the rest height, so the car sits on a preload
+	-- rather than hanging from the limit.
+	spring.FreeLength = driving.SuspensionHeight + 0.4
+	spring.Parent = chassis
+
+	-- And the motor, which is the engine.
+	local knuckleAxle = Instance.new("Attachment")
+	knuckleAxle.Name = "AxleKnuckle"
+	knuckleAxle.Axis = Vector3.new(1, 0, 0)
+	knuckleAxle.Parent = knuckle
+
+	local wheelAxle = Instance.new("Attachment")
+	wheelAxle.Name = "AxleWheel"
+	wheelAxle.Axis = Vector3.new(1, 0, 0)
+	wheelAxle.Parent = wheel
 
 	local axle = Instance.new("HingeConstraint")
 	axle.Name = "Axle"
-	axle.Attachment0 = hubAttachment
-	axle.Attachment1 = wheelAttachment
+	axle.Attachment0 = knuckleAxle
+	axle.Attachment1 = wheelAxle
+	-- All four driven: this map is mud, snow and a mountain trail, and
+	-- rear-wheel drive on any of those is a recipe for going nowhere.
 	axle.ActuatorType = Enum.ActuatorType.Motor
+	axle.MotorMaxTorque = driving.MotorTorque
 	axle.AngularVelocity = 0
-	-- Enough torque to hold the spin against nothing in particular; the
-	-- wheels do not drive the car, they only have to look right.
-	axle.MotorMaxAcceleration = math.huge
-	axle.MotorMaxTorque = 120000
-	axle.LimitsEnabled = false
-	axle.Parent = chassis
+	axle.Parent = knuckle
 
-	return wheel, hub, axle
+	return {
+		part = wheel,
+		hub = hub,
+		knuckle = knuckle,
+		axle = axle,
+		slider = slider,
+		spring = spring,
+		front = isFront,
+		radius = radius,
+		home = offset,
+	}
 end
 
 local function buildChassis(
@@ -10580,7 +10705,7 @@ local function buildChassis(
 	color: Color3,
 	wheelbase: number,
 	track: number
-): (Model, BasePart, { { part: Part, hub: Part, axle: HingeConstraint } })
+): (Model, BasePart, { any })
 	local model = Instance.new("Model")
 	model.Name = name
 
@@ -10669,8 +10794,8 @@ local function buildChassis(
 		Vector3.new(-halfTrack, axleDrop, halfBase),
 		Vector3.new(halfTrack, axleDrop, halfBase),
 	} do
-		local wheel, hub, axle = addWheel(model, chassis, corner)
-		table.insert(wheels, { part = wheel, hub = hub, axle = axle })
+		-- Negative Z is the nose, so those two steer.
+		table.insert(wheels, addWheel(model, chassis, corner, corner.Z < 0))
 	end
 
 	return model, chassis, wheels
@@ -12018,214 +12143,115 @@ end
 	it does not turn on a coin at walking pace.
 ]]
 local function driveWheeled(model: Model, state: any, deltaTime: number)
-	local seat = state.seat :: VehicleSeat
 	local chassis = state.chassis :: BasePart
-
-	local drive = chassis:FindFirstChild("DriveVelocity") :: LinearVelocity?
-	local turn = chassis:FindFirstChild("TurnVelocity") :: AngularVelocity?
-	if not drive or not turn then
+	local seat = state.seat :: VehicleSeat
+	if not chassis.Parent or not seat then
 		return
 	end
 
-	state.currentSpeed = state.currentSpeed or 0
-	state.nextGroundSampleAt = state.nextGroundSampleAt or 0
+	local driving = Config.Driving
 
-	local throttle = if seat.Occupant then seat.Throttle else 0
-	local steer = if seat.Occupant then seat.Steer else 0
+	-- Float inputs rather than the stepped ones: steering that eases in is
+	-- most of the difference between driving and twitching.
+	local throttle = if seat.Occupant then seat.ThrottleFloat else 0
+	local steer = if seat.Occupant then seat.SteerFloat else 0
 
-	-- On a phone there is no W key, so the on-screen pedals send their value
-	-- here and it overrides the seat's own throttle when pressed.
+	-- A pedal from the on-screen mobile controls overrides the keyboard.
 	local pedal = model:GetAttribute("Pedal")
 	if seat.Occupant and typeof(pedal) == "number" and math.abs(pedal) > 0.01 then
 		throttle = math.clamp(pedal, -1, 1)
 	end
 
-	-- Mud drags you down and boost chevrons fling you forward. Both come
-	-- from looking at what is actually under the wheels rather than
-	-- trusting a flag.
-	--
-	-- This used to allocate a fresh RaycastParams and cast every frame for
-	-- every vehicle on the map. With a car spawning beside each of twenty
-	-- players that is about two thousand casts and two thousand throwaway
-	-- objects a second, for a question whose answer is a 50-stud mud pool.
-	-- So: one shared params object, and a sample at 20 Hz while actually
-	-- moving. At full speed that is ten studs between looks, well inside
-	-- the smallest thing worth noticing.
-	local speedFactor = 1
-	local boosted = false
-
-	local rolling = math.abs(state.currentSpeed) > 1 or seat.Occupant ~= nil
-	if rolling then
-		local now = os.clock()
-		local here = chassis.Position
-		local moved = if state.lastGroundSampleAt
-			then (here - state.lastGroundSampleAt).Magnitude
-			else math.huge
-
-		if moved >= GROUND_SAMPLE_STUDS or now >= state.nextGroundSampleAt then
-			state.nextGroundSampleAt = now + GROUND_SAMPLE_INTERVAL
-			state.lastGroundSampleAt = here
-			groundParams.FilterDescendantsInstances = { model }
-			local hit = workspace:Raycast(here, GROUND_PROBE, groundParams)
-			state.groundIsMud = hit ~= nil
-				and (hit.Instance.Name == "Mud" or hit.Material == Enum.Material.Mud)
-			state.groundIsBoost = hit ~= nil and hit.Instance:GetAttribute("Boost") == true
-			-- Kept for the climb assist below, which needs to know how
-			-- steeply the ground under the car is tilted.
-			state.groundNormal = if hit then hit.Normal else nil
-		end
-	else
-		-- Parked: forget what it was standing on, so pulling away from a mud
-		-- pool does not carry the drag with it.
-		state.groundIsMud = false
-		state.groundIsBoost = false
-		state.groundNormal = nil
-		state.nextGroundSampleAt = 0
-		state.lastGroundSampleAt = nil
+	-- The chairlift locks a car to its deck.
+	if model:GetAttribute("LiftLocked") == true then
+		throttle = 0
+		steer = 0
 	end
 
+	--[[
+		How fast it is actually going, along its own nose.
+
+		Measured rather than tracked. The old loop kept its own idea of
+		speed and fed it to a velocity constraint, which meant the number and
+		the car could disagree -- and when they did, the car won and the
+		number went on being wrong.
+	]]
+	local velocity = chassis.AssemblyLinearVelocity
+	local forward = chassis.CFrame.LookVector
+	local roadSpeed = velocity:Dot(forward)
+
+	-- Mud, boost pads and turbo, all as multipliers on the speed the motors
+	-- are asked for.
+	local speedFactor = 1
 	if state.groundIsMud then
 		speedFactor = Config.MudSpeedFactor
 	end
-	if state.groundIsBoost then
-		boosted = true
-	end
-
-	-- Turbo, held by the driver.
 	if model:GetAttribute("Turbo") == true then
 		speedFactor *= Config.Turbo.Multiplier
 	end
+	local boosted = state.groundIsBoost == true
+	if boosted then
+		speedFactor = math.max(speedFactor, Config.Boost.Speed / math.max(state.maxSpeed, 1))
+	end
 
 	local topSpeed = state.maxSpeed * speedFactor
-	local target = throttle * topSpeed
-	local current = state.currentSpeed
-
-	-- Winding up, braking and coasting are three different rates.
-	local rate
-	if throttle == 0 then
-		rate = Config.Driving.Coast
-	elseif (target > current and current < 0) or (target < current and current > 0) then
-		rate = Config.Driving.BrakeDeceleration
-	else
-		rate = Config.Driving.Acceleration
-	end
-
-	local difference = target - current
-	local step = rate * deltaTime
-	current = if math.abs(difference) <= step then target else current + math.sign(difference) * step
-
-	-- A boost pad overrides the gradual wind-up entirely: you leave it fast.
-	if boosted and throttle >= 0 then
-		if current < Config.Boost.Speed * 0.9 then
-			Sound.At("Boost", chassis.Position)
-		end
-		current = math.max(current, Config.Boost.Speed)
-	end
-
-	state.currentSpeed = current
-
-	-- An empty car rolls to a stop and then stops asking for anything. Its
-	-- wheels still have to be kept glued to it, or they are left behind.
-	if not seat.Occupant and math.abs(current) < 0.5 then
-		state.currentSpeed = 0
-		drive.Enabled = false
-		turn.Enabled = false
-		local idleEngine = chassis:FindFirstChild("Engine")
-		if idleEngine and idleEngine:IsA("Sound") and idleEngine.IsPlaying then
-			idleEngine:Stop()
-		end
-		if state.wheels then
-			for _, wheel in state.wheels do
-				-- Parked: stop the wheels turning. Nothing is repositioned,
-				-- because the hinge is what holds them on now.
-				if wheel.axle then
-					wheel.axle.AngularVelocity = 0
-				end
-			end
-		end
-		return
-	end
-
-	if model:GetAttribute("LiftLocked") == true then
-		drive.Enabled = false
-		turn.Enabled = false
-		return
-	end
-
-	-- The drive axis: the chassis's forward, flattened onto the horizontal.
-	-- Flattening is what guarantees the car drives along the ground instead
-	-- of nosing into the sky when it tips on a ramp.
-	local look = chassis.CFrame.LookVector
-	local flat = Vector3.new(look.X, 0, look.Z)
-	flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
+	local speedRatio = math.clamp(math.abs(roadSpeed) / math.max(topSpeed, 1), 0, 1)
 
 	--[[
-		Climb assist, for off-roaders only.
+		Steering: less lock the faster you go, and Ackermann on top.
 
-		A dead-horizontal push cannot get a car up anything steep: it drives
-		into the hill rather than over it. So the G-Wagon, the Hummer and the
-		Jeep are allowed to tilt their drive axis a little way up the slope
-		they are standing on -- enough to take the mountain trail, and only
-		ever as much as the ground under them is actually tilted.
-
-		An ordinary car gets none of this on purpose. A non-flattened drive
-		axis is exactly what used to fire trucks into the sky, and the drive
-		test still asserts they stay down.
+		Full lock at 100 studs a second rolls the car, so the available
+		angle falls away with speed. The inner wheel turning slightly
+		sharper than the outer is what stops the front end scrubbing
+		through a tight corner.
 	]]
-	local driveAxis = flat
-	local assist = state.climbAssist or 0
-	if assist > 0 and state.groundNormal then
-		local normal = state.groundNormal :: Vector3
-		-- A flat surface has a vertical normal, so this is zero there and
-		-- the assist simply does not engage.
-		local tilt = Vector3.new(normal.X, 0, normal.Z).Magnitude
-		if tilt > 0.12 then
-			local lifted = Vector3.new(flat.X, tilt * assist, flat.Z)
-			if lifted.Magnitude > 0.01 then
-				driveAxis = lifted.Unit
-			end
+	local lock = driving.MaxSteerAngle
+		- (driving.MaxSteerAngle - driving.MinSteerAngle) * speedRatio
+	local targetAngle = -steer * lock
+
+	for _, wheel in state.wheels do
+		if not wheel.front or not wheel.slider then
+			continue
 		end
+		local inner = (steer > 0 and wheel.home.X > 0) or (steer < 0 and wheel.home.X < 0)
+		wheel.slider.TargetAngle = targetAngle * (if inner then 1.15 else 1)
 	end
 
 	--[[
-		Off a jump, let it FLY.
+		Drive, brake, or coast.
 
-		The drive constraint pins the car's velocity to a horizontal line. In
-		the air that is exactly wrong: it keeps forcing horizontal speed while
-		gravity pulls down, which flattens the arc into a shove off the lip
-		and a drop. Switching the constraints off the moment the wheels leave
-		the ground lets the car follow a real ballistic curve, which is the
-		difference between hitting a jump and falling off a ramp.
+		Braking is asking the motors for zero with a lot of torque, which is
+		what a brake is. Coasting is asking for zero with very little, which
+		is engine braking. Nothing here pushes the chassis: if the wheels are
+		off the ground they spin freely and the car arcs, which is why
+		jumping needs no special case any more.
 	]]
-	--[[
-		Airborne, from physics rather than from a raycast.
+	local braking = (throttle < 0 and roadSpeed > 2) or (throttle > 0 and roadSpeed < -2)
 
-		The first attempt read `state.groundNormal == nil`, which is wrong
-		twice over: that probe is paced by DISTANCE so its answer is up to
-		four studs stale, and a miss means "the probe did not hit", not "the
-		car is flying". It also meant a car on ground the probe happened to
-		miss switched its own drive off and coasted to a halt.
-
-		Vertical speed needs no raycast and cannot be stale. A car on the
-		ground sits at essentially zero on Y; one that has left a ramp is
-		moving up or down hard.
-	]]
-	local verticalSpeed = chassis.AssemblyLinearVelocity.Y
-	local airborne = math.abs(verticalSpeed) > 22
-	if airborne then
-		drive.Enabled = false
-		turn.Enabled = false
-	else
-		drive.Enabled = true
-		turn.Enabled = true
-		drive.LineDirection = driveAxis
-		drive.LineVelocity = current
+	for _, wheel in state.wheels do
+		local axle = wheel.axle
+		if not axle then
+			continue
+		end
+		if braking then
+			axle.AngularVelocity = 0
+			axle.MotorMaxTorque = driving.BrakeTorque
+		elseif math.abs(throttle) > 0.05 then
+			-- Linear studs/sec to angular radians/sec at the tire.
+			axle.AngularVelocity = -(throttle * topSpeed) / wheel.radius
+			axle.MotorMaxTorque = driving.MotorTorque * (if boosted then 1.6 else 1)
+		else
+			axle.AngularVelocity = 0
+			axle.MotorMaxTorque = driving.MotorTorque * 0.1
+		end
 	end
 
-	-- The engine rises and falls with road speed.
+	-- Kept for anything that still asks, and for the engine note below.
+	state.currentSpeed = roadSpeed
+
 	local engine = chassis:FindFirstChild("Engine")
 	if engine and engine:IsA("Sound") then
-		local fraction = math.abs(current) / math.max(topSpeed, 1)
+		local fraction = math.abs(roadSpeed) / math.max(topSpeed, 1)
 		engine.PlaybackSpeed = 0.45 + fraction * 1.5
 		engine.Volume = 0.2 + fraction * 0.4
 		if not engine.IsPlaying then
@@ -12233,28 +12259,7 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		end
 	end
 
-	-- Roll the wheels at whatever speed the car is actually doing, by telling
-	-- the axle motors how fast to turn. One number each, and the hinge keeps
-	-- the wheel attached -- rather than rewriting four CFrames a frame from a
-	-- chassis position that is already stale, which is what made them look
-	-- like they were coming off.
-	if state.wheels then
-		local radius = WHEEL_DIAMETER * 0.5
-		local spinRate = current / radius
-		for _, wheel in state.wheels do
-			if wheel.axle then
-				wheel.axle.AngularVelocity = spinRate
-			end
-		end
-	end
-
-	-- Steering bites less the slower you are going, and reverses when you
-	-- are reversing, the way a real car does.
-	local speedFraction = math.abs(current) / math.max(topSpeed, 1)
-	local grip = math.clamp(speedFraction / Config.Driving.SteerGripSpeed, 0, 1)
-	local direction = if current < 0 then -1 else 1
-	turn.AngularVelocity =
-		Vector3.new(0, -steer * math.rad(state.turnSpeed) * grip * direction, 0)
+	local _ = deltaTime
 end
 
 --[[

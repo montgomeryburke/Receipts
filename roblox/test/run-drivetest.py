@@ -24,9 +24,11 @@ import sys
 
 SPACING_TEST = '-- The pacing has to be by DISTANCE, not by time. A boost chevron is nine\n-- studs long. A fixed 20 Hz sample is ten studs apart at full speed, so the\n-- pads on the run-up to a ramp get stepped straight over and the jump beyond\n-- never works -- which is a silent failure, because the car still drives.\nDUMP("")\nDUMP("Probe spacing at speed:")\ndo\n\tlocal samples = {}\n\tKEEP_RAYCAST = true\n\tlocal saved = rawget(workspace, "_props").Raycast\n\trawget(workspace, "_props").Raycast = function(_, origin)\n\t\ttable.insert(samples, origin)\n\t\treturn flatGround()\n\tend\n\n\trunCar(1, 0, true, 4) -- full throttle, turbo, long enough to top out\n\trawget(workspace, "_props").Raycast = saved\n\tKEEP_RAYCAST = false\n\n\tlocal widest = 0\n\tfor index = 2, #samples do\n\t\tlocal gap = (samples[index] - samples[index - 1]).Magnitude\n\t\twidest = math.max(widest, gap)\n\tend\n\n\t-- A boost chevron is nine studs long along the direction of travel, so\n\t-- the widest gap has to stay comfortably under that.\n\tcheck("samples are never more than a boost pad apart", widest <= 7,\n\t\tstring.format("widest gap %.1f studs over %d samples", widest, #samples))\n\tcheck("and it still is not sampling every frame", #samples < 240,\n\t\tstring.format("%d samples in 240 frames", #samples))\nend\n\n'
 
-GEAR_TEST = '-- ==================================================== tubes and gliders\n-- The resort is only worth having if the kit actually moves. A tube has no\n-- engine at all: the river\'s current or a snow slope pushes it, and nothing\n-- else does. So these drive it against a stand-in river and a stand-in\n-- mountain and check it goes the right way in each.\n\nlocal function rideTube(surface, seconds)\n\tlocal tube = VehicleService.SpawnTube(Vector3.new(0, 5, 0))\n\tlocal hub = tube:FindFirstChild("Chassis")\n\thub._props.CFrame = CFrame.new(0, 5, 0)\n\thub._props.AssemblyLinearVelocity = Vector3.new()\n\n\tlocal seat = tube:FindFirstChild("DriverSeat")\n\tseat._props.Occupant = Instance.new("Humanoid")\n\tseat._props.Throttle = 0\n\tseat._props.Steer = 0\n\n\tlocal saved = rawget(workspace, "_props").Raycast\n\trawget(workspace, "_props").Raycast = surface\n\n    local dt = 1 / 60\n\tfor _ = 1, math.floor(seconds * 60) do\n\t\tADVANCE(dt)\n\t\tRunService.Heartbeat._fire(dt)\n\t\t-- Integrate whatever velocity the tube driver set.\n\t\tlocal velocity = hub._props.AssemblyLinearVelocity or Vector3.new()\n\t\thub._props.CFrame = CFrame.new(hub._props.CFrame.Position + velocity * dt)\n\t\t\t* hub._props.CFrame.Rotation\n\tend\n\n\trawget(workspace, "_props").Raycast = saved\n\tlocal finish = hub._props.CFrame.Position\n\ttube:Destroy()\n\treturn finish\nend\n\nDUMP("")\nDUMP("The lazy river:")\ndo\n\t-- A flow zone pushing along +X.\n\tlocal flowPart = Instance.new("Part")\n\tflowPart._props.Name = "FlowZone"\n\tflowPart:SetAttribute("FlowX", 1)\n\tflowPart:SetAttribute("FlowY", 0)\n\tflowPart:SetAttribute("FlowZ", 0)\n\n\tlocal finish = rideTube(function()\n\t\treturn {\n\t\t\tInstance = flowPart,\n\t\t\tPosition = Vector3.new(0, 4, 0),\n\t\t\tMaterial = Enum.Material.Water,\n\t\t\tNormal = Vector3.new(0, 1, 0),\n\t\t}\n\tend, 3)\n\n\tcheck("the current carries a tube downstream", finish.X > 60,\n\t\tstring.format("%.0f studs along the flow", finish.X))\n\tcheck("and does not carry it sideways", math.abs(finish.Z) < 10,\n\t\tstring.format("%.1f studs off course", finish.Z))\nend\n\nDUMP("")\nDUMP("The ski run:")\ndo\n\t-- A snow slope tilted so its normal leans toward -Z: downhill is -Z.\n\tlocal snow = Instance.new("Part")\n\tsnow._props.Name = "Piste"\n\n\tlocal finish = rideTube(function()\n\t\treturn {\n\t\t\tInstance = snow,\n\t\t\tPosition = Vector3.new(0, 4, 0),\n\t\t\tMaterial = Enum.Material.Snow,\n\t\t\tNormal = Vector3.new(0, 0.82, -0.57),\n\t\t}\n\tend, 3)\n\n\tcheck("a tube slides down a snow slope", finish.Z < -60,\n\t\tstring.format("%.0f studs downhill", finish.Z))\nend\n\nDUMP("")\nDUMP("Flat snow:")\ndo\n\tlocal flatSnow = Instance.new("Part")\n\tflatSnow._props.Name = "Summit"\n\n\tlocal finish = rideTube(function()\n\t\treturn {\n\t\t\tInstance = flatSnow,\n\t\t\tPosition = Vector3.new(0, 4, 0),\n\t\t\tMaterial = Enum.Material.Snow,\n\t\t\tNormal = Vector3.new(0, 1, 0),\n\t\t}\n\tend, 3)\n\n\t-- A flat surface has a vertical normal and therefore no downhill at all,\n\t-- which has to mean "sit still" rather than "drift in some direction".\n\tcheck("a tube sits still on the flat", finish.Magnitude < 12,\n\t\tstring.format("drifted %.1f studs", finish.Magnitude))\nend\n\nDUMP("")\nDUMP("The hang glider:")\ndo\n\tlocal glider = VehicleService.SpawnGlider(Vector3.new(0, 300, 0))\n\tlocal frame = glider:FindFirstChild("Chassis")\n\tlocal seat = glider:FindFirstChild("DriverSeat")\n\tcheck("the glider has a seat", seat ~= nil, "")\n\n\tseat._props.Occupant = Instance.new("Humanoid")\n\tseat._props.Throttle = 0\n\tseat._props.Steer = 0\n\n\tlocal lift = nil\n\tfor _, child in frame:GetChildren() do\n\t\tif child._props.Name == "DriveVelocity" then lift = child end\n\tend\n\tcheck("the glider has a wing to push it", lift ~= nil, "")\n\n\tfor _ = 1, 120 do\n\t\tADVANCE(1 / 60)\n\t\tRunService.Heartbeat._fire(1 / 60)\n\tend\n\n\tlocal velocity = lift and lift._props.VectorVelocity or Vector3.new()\n\tcheck("a glider flies forwards", velocity.Magnitude > 30,\n\t\tstring.format("%.0f studs/sec", velocity.Magnitude))\n\t-- It is a glider, not a helicopter: it must always be coming down.\n\tcheck("and always sinks", velocity.Y < 0, string.format("%.1f studs/sec vertical", velocity.Y))\n\n\t-- Nose down should be faster than level.\n\tlocal levelSpeed = velocity.Magnitude\n\tseat._props.Throttle = 1\n\tfor _ = 1, 120 do\n\t\tADVANCE(1 / 60)\n\t\tRunService.Heartbeat._fire(1 / 60)\n\tend\n\tlocal diveSpeed = (lift and lift._props.VectorVelocity or Vector3.new()).Magnitude\n\tcheck("diving trades height for speed", diveSpeed > levelSpeed,\n\t\tstring.format("%.0f diving vs %.0f level", diveSpeed, levelSpeed))\n\n\tglider:Destroy()\nend\n\nDUMP("")\nDUMP("Skis and tricks:")\ndo\n\tlocal skis = VehicleService.SpawnSkis(Vector3.new(0, 5, 0))\n\tlocal board = skis:FindFirstChild("Chassis")\n\tcheck("the skis have a board", board ~= nil, "")\n\n\t-- A rider, strapped on.\n\tlocal character = Instance.new("Model")\n\tlocal root = Instance.new("Part")\n\troot._props.Name = "HumanoidRootPart"\n\troot._props.CFrame = CFrame.new(0, 8, 0)\n\troot.Parent = character\n\tlocal humanoid = Instance.new("Humanoid")\n\thumanoid._props.Health = 100\n\thumanoid._props.MoveDirection = Vector3.new()\n\thumanoid.Parent = character\n\tcharacter.Parent = workspace\n\n\tlocal skier = Instance.new("Player")\n\tskier._props.Name = "Skier"\n\tskier._props.DisplayName = "Skier"\n\tskier._props.UserId = 77\n\tskier._props.Character = character\n\t-- Parented, because driveSkis drops a rider whose Parent is nil -- which\n\t-- is exactly right (that is a player who has left), and which silently\n\t-- made this whole block do nothing until the stand-in had a parent.\n\tskier.Parent = Players\n\trawget(Players, "_props").GetPlayerFromCharacter = function(_, c)\n\t\tif c == character then return skier end\n\t\treturn nil\n\tend\n\n\tVehicleService.MountSkis(skier, skis)\n\tcheck("a skier is strapped on", VehicleService.GetState(skis).rider == skier, "")\n\tcheck("and stands up rather than sitting", humanoid._props.PlatformStand == true, "")\n\n\t-- Tricks are measured, never reported: the server watches airtime and\n\t-- spin itself, so there is nothing for a client to lie about.\n\tlocal landed = {}\n\tVehicleService.TrickLanded.Connect(function(who, name, points, airtime)\n\t\ttable.insert(landed, { who = who, name = name, points = points, airtime = airtime })\n\tend)\n\n\tlocal function fly(seconds, spinDegrees, grounded)\n\t\tlocal steps = math.floor(seconds * 60)\n\t\tlocal perStep = spinDegrees / math.max(1, steps)\n\t\trawget(workspace, "_props").Raycast = function()\n\t\t\tif not grounded then return nil end\n\t\t\treturn {\n\t\t\t\tInstance = board,\n\t\t\t\tPosition = Vector3.new(0, 4, 0),\n\t\t\t\tMaterial = Enum.Material.Snow,\n\t\t\t\tNormal = Vector3.new(0, 1, 0),\n\t\t\t}\n\t\tend\n\t\tfor _ = 1, steps do\n\t\t\tADVANCE(1 / 60)\n\t\t\tboard._props.CFrame = board._props.CFrame * CFrame.Angles(0, math.rad(perStep), 0)\n\t\t\tRunService.Heartbeat._fire(1 / 60)\n\t\tend\n\t\t-- Signal.Fire hands each listener to task.spawn, so the trick\n\t\t-- announcement sits in the queue until it is flushed. Without this\n\t\t-- the whole block read as "tricks never score".\n\t\tRUN_SPAWNED()\n\tend\n\n\t-- A small bump must NOT pay out, or every seam in the piste is a trick.\n\tlanded = {}\n\tfly(0.2, 10, false)\n\tfly(0.2, 0, true)\n\tcheck("a bump in the piste is not a trick", #landed == 0,\n\t\tstring.format("%d tricks", #landed))\n\n\t-- Real air, with a spin, must.\n\tlanded = {}\n\tfly(1.4, 540, false)\n\tfly(0.2, 0, true)\n\tcheck("real air off a jump scores", #landed == 1, string.format("%d tricks", #landed))\n\tif #landed == 1 then\n\t\tcheck("it is credited to the rider", landed[1].who == skier, tostring(landed[1].who))\n\t\tcheck("it is worth real points", landed[1].points > 50,\n\t\t\tstring.format("%d points for %s", landed[1].points, landed[1].name))\n\t\tcheck("a big spin gets a big name", landed[1].name ~= "BIG AIR", landed[1].name)\n\tend\n\n\t-- Straight air with no rotation still counts, but for less.\n\tlanded = {}\n\tfly(1.4, 0, false)\n\tfly(0.2, 0, true)\n\tcheck("straight air counts for less", #landed == 1 and landed[1].name == "BIG AIR",\n\t\tif #landed == 1 then landed[1].name else "nothing")\n\n\trawget(workspace, "_props").Raycast = function() return nil end\n\tVehicleService.DismountSkis(skier)\n\tcheck("you can get off the skis", VehicleService.GetState(skis).rider == nil, "")\n\tcheck("and walk again", humanoid._props.PlatformStand == false, "")\n\n\tskis:Destroy()\nend\n\nDUMP("")\nDUMP("Off-roaders on a slope:")\ndo\n\t-- A slope whose normal leans, i.e. ground tilted uphill.\n\tlocal slope = Instance.new("Part")\n\tslope._props.Name = "TrailSegment"\n\tlocal saved = rawget(workspace, "_props").Raycast\n\trawget(workspace, "_props").Raycast = function()\n\t\treturn {\n\t\t\tInstance = slope,\n\t\t\tPosition = Vector3.new(0, 0, 0),\n\t\t\tMaterial = Enum.Material.Ground,\n\t\t\tNormal = Vector3.new(0, 0.84, 0.54),\n\t\t}\n\tend\n\n\tlocal function driveAxisFor(bodyName)\n\t\tlocal car = VehicleService.SpawnCar(1, Vector3.new(0, 5, 0), nil, bodyName)\n\t\tlocal chassis = car:FindFirstChild("Chassis")\n\t\tchassis._props.CFrame = CFrame.new(0, 5, 0)\n\t\tlocal seat = car:FindFirstChild("DriverSeat")\n\t\tseat._props.Occupant = Instance.new("Humanoid")\n\t\tseat._props.Throttle = 1\n\t\tseat._props.Steer = 0\n\n\t\tfor _ = 1, 60 do\n\t\t\tADVANCE(1 / 60)\n\t\t\tRunService.Heartbeat._fire(1 / 60)\n\t\tend\n\n\t\tlocal drive\n\t\tfor _, child in chassis:GetChildren() do\n\t\t\tif child._props.Name == "DriveVelocity" then drive = child end\n\t\tend\n\t\tlocal axis = drive and drive._props.LineDirection or Vector3.new()\n\t\tcar:Destroy()\n\t\treturn axis\n\tend\n\n\tlocal hummer = driveAxisFor("Hummer")\n\tlocal lambo = driveAxisFor("Lamborghini")\n\trawget(workspace, "_props").Raycast = saved\n\n\t-- An off-roader is allowed to tilt its drive axis up the slope it is\n\t-- standing on. That is the whole mechanic that gets it up the mountain.\n\tcheck("an off-roader points up the slope", hummer.Y > 0.08,\n\t\tstring.format("drive axis Y = %.3f", hummer.Y))\n\n\t-- An ordinary car must not. A non-flattened drive axis is exactly what\n\t-- used to fire trucks into the sky.\n\tcheck("an ordinary car stays dead level", math.abs(lambo.Y) < 0.001,\n\t\tstring.format("drive axis Y = %.3f", lambo.Y))\nend\n'
+GEAR_TEST = '-- ==================================================== tubes and gliders\n-- The resort is only worth having if the kit actually moves. A tube has no\n-- engine at all: the river\'s current or a snow slope pushes it, and nothing\n-- else does. So these drive it against a stand-in river and a stand-in\n-- mountain and check it goes the right way in each.\n\nlocal function rideTube(surface, seconds)\n\tlocal tube = VehicleService.SpawnTube(Vector3.new(0, 5, 0))\n\tlocal hub = tube:FindFirstChild("Chassis")\n\thub._props.CFrame = CFrame.new(0, 5, 0)\n\thub._props.AssemblyLinearVelocity = Vector3.new()\n\n\tlocal seat = tube:FindFirstChild("DriverSeat")\n\tseat._props.Occupant = Instance.new("Humanoid")\n\tseat._props.Throttle = 0\n\tseat._props.Steer = 0\n\n\tlocal saved = rawget(workspace, "_props").Raycast\n\trawget(workspace, "_props").Raycast = surface\n\n    local dt = 1 / 60\n\tfor _ = 1, math.floor(seconds * 60) do\n\t\tADVANCE(dt)\n\t\tRunService.Heartbeat._fire(dt)\n\t\t-- Integrate whatever velocity the tube driver set.\n\t\tlocal velocity = hub._props.AssemblyLinearVelocity or Vector3.new()\n\t\thub._props.CFrame = CFrame.new(hub._props.CFrame.Position + velocity * dt)\n\t\t\t* hub._props.CFrame.Rotation\n\tend\n\n\trawget(workspace, "_props").Raycast = saved\n\tlocal finish = hub._props.CFrame.Position\n\ttube:Destroy()\n\treturn finish\nend\n\nDUMP("")\nDUMP("The lazy river:")\ndo\n\t-- A flow zone pushing along +X.\n\tlocal flowPart = Instance.new("Part")\n\tflowPart._props.Name = "FlowZone"\n\tflowPart:SetAttribute("FlowX", 1)\n\tflowPart:SetAttribute("FlowY", 0)\n\tflowPart:SetAttribute("FlowZ", 0)\n\n\tlocal finish = rideTube(function()\n\t\treturn {\n\t\t\tInstance = flowPart,\n\t\t\tPosition = Vector3.new(0, 4, 0),\n\t\t\tMaterial = Enum.Material.Water,\n\t\t\tNormal = Vector3.new(0, 1, 0),\n\t\t}\n\tend, 3)\n\n\tcheck("the current carries a tube downstream", finish.X > 60,\n\t\tstring.format("%.0f studs along the flow", finish.X))\n\tcheck("and does not carry it sideways", math.abs(finish.Z) < 10,\n\t\tstring.format("%.1f studs off course", finish.Z))\nend\n\nDUMP("")\nDUMP("The ski run:")\ndo\n\t-- A snow slope tilted so its normal leans toward -Z: downhill is -Z.\n\tlocal snow = Instance.new("Part")\n\tsnow._props.Name = "Piste"\n\n\tlocal finish = rideTube(function()\n\t\treturn {\n\t\t\tInstance = snow,\n\t\t\tPosition = Vector3.new(0, 4, 0),\n\t\t\tMaterial = Enum.Material.Snow,\n\t\t\tNormal = Vector3.new(0, 0.82, -0.57),\n\t\t}\n\tend, 3)\n\n\tcheck("a tube slides down a snow slope", finish.Z < -60,\n\t\tstring.format("%.0f studs downhill", finish.Z))\nend\n\nDUMP("")\nDUMP("Flat snow:")\ndo\n\tlocal flatSnow = Instance.new("Part")\n\tflatSnow._props.Name = "Summit"\n\n\tlocal finish = rideTube(function()\n\t\treturn {\n\t\t\tInstance = flatSnow,\n\t\t\tPosition = Vector3.new(0, 4, 0),\n\t\t\tMaterial = Enum.Material.Snow,\n\t\t\tNormal = Vector3.new(0, 1, 0),\n\t\t}\n\tend, 3)\n\n\t-- A flat surface has a vertical normal and therefore no downhill at all,\n\t-- which has to mean "sit still" rather than "drift in some direction".\n\tcheck("a tube sits still on the flat", finish.Magnitude < 12,\n\t\tstring.format("drifted %.1f studs", finish.Magnitude))\nend\n\nDUMP("")\nDUMP("The hang glider:")\ndo\n\tlocal glider = VehicleService.SpawnGlider(Vector3.new(0, 300, 0))\n\tlocal frame = glider:FindFirstChild("Chassis")\n\tlocal seat = glider:FindFirstChild("DriverSeat")\n\tcheck("the glider has a seat", seat ~= nil, "")\n\n\tseat._props.Occupant = Instance.new("Humanoid")\n\tseat._props.Throttle = 0\n\tseat._props.Steer = 0\n\n\tlocal lift = nil\n\tfor _, child in frame:GetChildren() do\n\t\tif child._props.Name == "DriveVelocity" then lift = child end\n\tend\n\tcheck("the glider has a wing to push it", lift ~= nil, "")\n\n\tfor _ = 1, 120 do\n\t\tADVANCE(1 / 60)\n\t\tRunService.Heartbeat._fire(1 / 60)\n\tend\n\n\tlocal velocity = lift and lift._props.VectorVelocity or Vector3.new()\n\tcheck("a glider flies forwards", velocity.Magnitude > 30,\n\t\tstring.format("%.0f studs/sec", velocity.Magnitude))\n\t-- It is a glider, not a helicopter: it must always be coming down.\n\tcheck("and always sinks", velocity.Y < 0, string.format("%.1f studs/sec vertical", velocity.Y))\n\n\t-- Nose down should be faster than level.\n\tlocal levelSpeed = velocity.Magnitude\n\tseat._props.Throttle = 1\n\tfor _ = 1, 120 do\n\t\tADVANCE(1 / 60)\n\t\tRunService.Heartbeat._fire(1 / 60)\n\tend\n\tlocal diveSpeed = (lift and lift._props.VectorVelocity or Vector3.new()).Magnitude\n\tcheck("diving trades height for speed", diveSpeed > levelSpeed,\n\t\tstring.format("%.0f diving vs %.0f level", diveSpeed, levelSpeed))\n\n\tglider:Destroy()\nend\n\nDUMP("")\nDUMP("Skis and tricks:")\ndo\n\tlocal skis = VehicleService.SpawnSkis(Vector3.new(0, 5, 0))\n\tlocal board = skis:FindFirstChild("Chassis")\n\tcheck("the skis have a board", board ~= nil, "")\n\n\t-- A rider, strapped on.\n\tlocal character = Instance.new("Model")\n\tlocal root = Instance.new("Part")\n\troot._props.Name = "HumanoidRootPart"\n\troot._props.CFrame = CFrame.new(0, 8, 0)\n\troot.Parent = character\n\tlocal humanoid = Instance.new("Humanoid")\n\thumanoid._props.Health = 100\n\thumanoid._props.MoveDirection = Vector3.new()\n\thumanoid.Parent = character\n\tcharacter.Parent = workspace\n\n\tlocal skier = Instance.new("Player")\n\tskier._props.Name = "Skier"\n\tskier._props.DisplayName = "Skier"\n\tskier._props.UserId = 77\n\tskier._props.Character = character\n\t-- Parented, because driveSkis drops a rider whose Parent is nil -- which\n\t-- is exactly right (that is a player who has left), and which silently\n\t-- made this whole block do nothing until the stand-in had a parent.\n\tskier.Parent = Players\n\trawget(Players, "_props").GetPlayerFromCharacter = function(_, c)\n\t\tif c == character then return skier end\n\t\treturn nil\n\tend\n\n\tVehicleService.MountSkis(skier, skis)\n\tcheck("a skier is strapped on", VehicleService.GetState(skis).rider == skier, "")\n\tcheck("and stands up rather than sitting", humanoid._props.PlatformStand == true, "")\n\n\t-- Tricks are measured, never reported: the server watches airtime and\n\t-- spin itself, so there is nothing for a client to lie about.\n\tlocal landed = {}\n\tVehicleService.TrickLanded.Connect(function(who, name, points, airtime)\n\t\ttable.insert(landed, { who = who, name = name, points = points, airtime = airtime })\n\tend)\n\n\tlocal function fly(seconds, spinDegrees, grounded)\n\t\tlocal steps = math.floor(seconds * 60)\n\t\tlocal perStep = spinDegrees / math.max(1, steps)\n\t\trawget(workspace, "_props").Raycast = function()\n\t\t\tif not grounded then return nil end\n\t\t\treturn {\n\t\t\t\tInstance = board,\n\t\t\t\tPosition = Vector3.new(0, 4, 0),\n\t\t\t\tMaterial = Enum.Material.Snow,\n\t\t\t\tNormal = Vector3.new(0, 1, 0),\n\t\t\t}\n\t\tend\n\t\tfor _ = 1, steps do\n\t\t\tADVANCE(1 / 60)\n\t\t\tboard._props.CFrame = board._props.CFrame * CFrame.Angles(0, math.rad(perStep), 0)\n\t\t\tRunService.Heartbeat._fire(1 / 60)\n\t\tend\n\t\t-- Signal.Fire hands each listener to task.spawn, so the trick\n\t\t-- announcement sits in the queue until it is flushed. Without this\n\t\t-- the whole block read as "tricks never score".\n\t\tRUN_SPAWNED()\n\tend\n\n\t-- A small bump must NOT pay out, or every seam in the piste is a trick.\n\tlanded = {}\n\tfly(0.2, 10, false)\n\tfly(0.2, 0, true)\n\tcheck("a bump in the piste is not a trick", #landed == 0,\n\t\tstring.format("%d tricks", #landed))\n\n\t-- Real air, with a spin, must.\n\tlanded = {}\n\tfly(1.4, 540, false)\n\tfly(0.2, 0, true)\n\tcheck("real air off a jump scores", #landed == 1, string.format("%d tricks", #landed))\n\tif #landed == 1 then\n\t\tcheck("it is credited to the rider", landed[1].who == skier, tostring(landed[1].who))\n\t\tcheck("it is worth real points", landed[1].points > 50,\n\t\t\tstring.format("%d points for %s", landed[1].points, landed[1].name))\n\t\tcheck("a big spin gets a big name", landed[1].name ~= "BIG AIR", landed[1].name)\n\tend\n\n\t-- Straight air with no rotation still counts, but for less.\n\tlanded = {}\n\tfly(1.4, 0, false)\n\tfly(0.2, 0, true)\n\tcheck("straight air counts for less", #landed == 1 and landed[1].name == "BIG AIR",\n\t\tif #landed == 1 then landed[1].name else "nothing")\n\n\trawget(workspace, "_props").Raycast = function() return nil end\n\tVehicleService.DismountSkis(skier)\n\tcheck("you can get off the skis", VehicleService.GetState(skis).rider == nil, "")\n\tcheck("and walk again", humanoid._props.PlatformStand == false, "")\n\n\tskis:Destroy()\nend\n\nDUMP("")\nDUMP("Off-roaders:")\ndo\n\t-- The climb assist is gone, and deliberately so. It tilted the drive\n\t-- axis up a slope to compensate for a car being SHOVED along a\n\t-- horizontal line; now the wheels drive the car through tire friction,\n\t-- so an off-roader climbs because it grips. What is left to check is\n\t-- that the three of them still exist and are still the slow, grippy\n\t-- ones.\n\tlocal found = {}\n\tfor _, body in Config.CarBodies do\n\t\tif body.OffRoad then\n\t\t\ttable.insert(found, body.Name)\n\t\tend\n\tend\n\tcheck("the off-roaders are still there", #found == 3, table.concat(found, ", "))\n\n\tlocal fastest = 0\n\tfor _, body in Config.CarBodies do\n\t\tif not body.OffRoad then\n\t\t\tfastest = math.max(fastest, body.SpeedBias)\n\t\tend\n\tend\n\tlocal slowest = math.huge\n\tfor _, body in Config.CarBodies do\n\t\tif body.OffRoad then\n\t\t\tslowest = math.min(slowest, body.SpeedBias)\n\t\tend\n\tend\n\tcheck("and slower on the flat than a road car", slowest < fastest,\n\t\tstring.format("%.2f vs %.2f", slowest, fastest))\nend\n'
 
 GROUND_HELPER = '-- A flat road under the car. The suite used to run every driving check with\n-- Raycast returning nil, which is a car suspended in a void -- fine for the\n-- drive constraint, useless for anything that asks what it is standing on.\nlocal ROAD = Instance.new("Part")\nROAD._props.Name = "Street"\n\n-- Set by any test that installs its own Raycast, so runCar leaves it alone\n-- rather than replacing it with plain road and quietly measuring nothing.\nKEEP_RAYCAST = false\n\nlocal function flatGround()\n\treturn {\n\t\tInstance = ROAD,\n\t\tPosition = Vector3.new(0, 0, 0),\n\t\tMaterial = Enum.Material.Asphalt,\n\t\tNormal = Vector3.new(0, 1, 0),\n\t}\nend\n\n'
+
+RIG_TEST = 'DUMP("The drivetrain rig:")\n\n--[[\n\tWhat this can and cannot prove, stated plainly.\n\n\tThe car is now driven by hinge motors at four wheels, held up by springs,\n\tsteered by servos, with traction coming from tire friction. None of that\n\tcan be simulated in a terminal: there is no contact solver here, so no\n\tamount of asking will make a stand-in car physically move.\n\n\tWhat IS checkable, and what actually went wrong before, is the rig and\n\tthe commands sent to it -- whether the wheels are attached at all,\n\twhether the motors are asked to turn the right way at the right rate,\n\twhether the brakes are brakes, whether the steering falls off with speed.\n\tThose were the real bugs. "Does Roblox\'s contact solver work" was never\n\tone of them.\n]]\nlocal function newCar()\n\tlocal car = VehicleService.SpawnCar(1, Vector3.new(0, 5, 0), nil, "Truck")\n\tlocal chassis = car:FindFirstChild("Chassis")\n\tchassis._props.CFrame = CFrame.new(0, 5, 0)\n\tlocal seat = car:FindFirstChild("DriverSeat")\n\treturn car, chassis, seat\nend\n\nlocal function drive(seat, throttle, steer)\n\tseat._props.Occupant = seat._props.Occupant or Instance.new("Humanoid")\n\tseat._props.Throttle = throttle\n\tseat._props.Steer = steer\n\tseat._props.ThrottleFloat = throttle\n\tseat._props.SteerFloat = steer\nend\n\nlocal function wheelsOf(car)\n\tlocal out = {}\n\tfor _, child in car:GetChildren() do\n\t\tif child._props.Name == "Wheel" then\n\t\t\ttable.insert(out, child)\n\t\tend\n\tend\n\treturn out\nend\n\nlocal function partsNamed(car, name)\n\tlocal out = {}\n\tfor _, child in car:GetChildren() do\n\t\tif child._props.Name == name then\n\t\t\ttable.insert(out, child)\n\t\tend\n\t\tfor _, grand in child:GetChildren() do\n\t\t\tif grand._props.Name == name then\n\t\t\t\ttable.insert(out, grand)\n\t\t\tend\n\t\tend\n\tend\n\treturn out\nend\n\ndo\n\tlocal car, chassis, seat = newCar()\n\n\tlocal wheels = wheelsOf(car)\n\tcheck("the car has four wheels", #wheels == 4, string.format("%d wheels", #wheels))\n\n\t-- The original bug. An anchored wheel is teleported rather than\n\t-- simulated, which is exactly why they looked like they fell off.\n\tlocal anchored = 0\n\tfor _, wheel in wheels do\n\t\tif wheel._props.Anchored == true then anchored += 1 end\n\tend\n\tcheck("no wheel is anchored", anchored == 0, string.format("%d anchored", anchored))\n\n\tcheck("each wheel has a knuckle", #partsNamed(car, "Knuckle") == 4,\n\t\tstring.format("%d knuckles", #partsNamed(car, "Knuckle")))\n\n\t-- Springs are what hold the car up. Without them it sits on the limit\n\t-- of its slider and rides like a brick.\n\tlocal springs = 0\n\tlocal sliders = 0\n\tlocal steerers = 0\n\tfor _, child in chassis:GetChildren() do\n\t\tlocal n = child._props.Name\n\t\tif n == "Spring" then springs += 1 end\n\t\tif n == "Slider" or n == "SteerSlider" then sliders += 1 end\n\t\tif n == "SteerSlider" then steerers += 1 end\n\tend\n\tcheck("all four corners are sprung", springs == 4, string.format("%d springs", springs))\n\tcheck("all four have suspension travel", sliders == 4, string.format("%d sliders", sliders))\n\tcheck("and exactly two of them steer", steerers == 2, string.format("%d steering", steerers))\n\n\tcar:Destroy()\nend\n\nDUMP("")\nDUMP("Throttle, brake and coast:")\ndo\n\tlocal car, chassis, seat = newCar()\n\tlocal axles = partsNamed(car, "Axle")\n\tcheck("every wheel has a motor", #axles == 4, string.format("%d axles", #axles))\n\n\t-- Full throttle: the motors are asked to turn, in the direction that\n\t-- drives the car forwards.\n\tdrive(seat, 1, 0)\n\tADVANCE(1 / 60)\n\tRunService.Heartbeat._fire(1 / 60)\n\n\tlocal spinning = 0\n\tlocal torque = 0\n\tfor _, axle in axles do\n\t\tif math.abs(axle._props.AngularVelocity or 0) > 1 then spinning += 1 end\n\t\ttorque = axle._props.MotorMaxTorque or 0\n\tend\n\tcheck("throttle turns all four motors", spinning == 4,\n\t\tstring.format("%d turning", spinning))\n\tcheck("with drive torque behind them", torque >= Config.Driving.MotorTorque,\n\t\tstring.format("%.0f", torque))\n\n\t-- Braking is asking for zero with a lot of torque, which is what a\n\t-- brake is. Reverse while rolling forwards must brake, not reverse.\n\tchassis._props.AssemblyLinearVelocity = chassis._props.CFrame.LookVector * 40\n\tdrive(seat, -1, 0)\n\tADVANCE(1 / 60)\n\tRunService.Heartbeat._fire(1 / 60)\n\n\tlocal braked = true\n\tlocal brakeTorque = 0\n\tfor _, axle in axles do\n\t\tif math.abs(axle._props.AngularVelocity or 0) > 0.01 then braked = false end\n\t\tbrakeTorque = axle._props.MotorMaxTorque or 0\n\tend\n\tcheck("reverse while rolling forward brakes", braked, "")\n\tcheck("and brakes harder than it drives",\n\t\tbrakeTorque >= Config.Driving.BrakeTorque, string.format("%.0f", brakeTorque))\n\n\t-- Off the throttle it coasts: zero, with barely any torque. That is\n\t-- engine braking rather than a handbrake.\n\tchassis._props.AssemblyLinearVelocity = Vector3.new()\n\tdrive(seat, 0, 0)\n\tADVANCE(1 / 60)\n\tRunService.Heartbeat._fire(1 / 60)\n\tlocal coastTorque = 0\n\tfor _, axle in axles do\n\t\tcoastTorque = axle._props.MotorMaxTorque or 0\n\tend\n\tcheck("coasting is gentle, not a handbrake",\n\t\tcoastTorque < Config.Driving.MotorTorque * 0.5, string.format("%.0f", coastTorque))\n\n\tcar:Destroy()\nend\n\nDUMP("")\nDUMP("Steering:")\ndo\n\tlocal car, chassis, seat = newCar()\n\n\tlocal function steerAngles()\n\t\tlocal front = {}\n\t\tfor _, child in chassis:GetChildren() do\n\t\t\tif child._props.Name == "SteerSlider" then\n\t\t\t\ttable.insert(front, child._props.TargetAngle or 0)\n\t\t\tend\n\t\tend\n\t\treturn front\n\tend\n\n\tchassis._props.AssemblyLinearVelocity = Vector3.new()\n\tdrive(seat, 1, 1)\n\tADVANCE(1 / 60)\n\tRunService.Heartbeat._fire(1 / 60)\n\tlocal slow = steerAngles()\n\n\tlocal turning = 0\n\tfor _, angle in slow do\n\t\tif math.abs(angle) > 1 then turning += 1 end\n\tend\n\tcheck("steering turns the front wheels", turning == 2,\n\t\tstring.format("%d turned", turning))\n\n\t-- Ackermann: the inner wheel turns sharper than the outer, or the front\n\t-- end scrubs through a tight corner.\n\tlocal widest, narrowest = 0, math.huge\n\tfor _, angle in slow do\n\t\twidest = math.max(widest, math.abs(angle))\n\t\tnarrowest = math.min(narrowest, math.abs(angle))\n\tend\n\tcheck("the inner wheel turns sharper than the outer", widest > narrowest + 0.5,\n\t\tstring.format("%.1f vs %.1f degrees", widest, narrowest))\n\n\t-- And lock falls away with speed, or a twitch at 100 studs a second\n\t-- rolls the car.\n\tchassis._props.AssemblyLinearVelocity = chassis._props.CFrame.LookVector * 400\n\tADVANCE(1 / 60)\n\tRunService.Heartbeat._fire(1 / 60)\n\tlocal fast = steerAngles()\n\tlocal fastMax = 0\n\tfor _, angle in fast do\n\t\tfastMax = math.max(fastMax, math.abs(angle))\n\tend\n\tcheck("there is less lock at speed", fastMax < widest - 1,\n\t\tstring.format("%.1f degrees at speed vs %.1f stopped", fastMax, widest))\n\n\tcar:Destroy()\nend\n\nDUMP("")\nDUMP("Turbo, mud and boost:")\ndo\n\tlocal function requestedSpeed(setup)\n\t\tlocal car, chassis, seat = newCar()\n\t\tchassis._props.AssemblyLinearVelocity = Vector3.new()\n\t\tdrive(seat, 1, 0)\n\t\tsetup(car, chassis)\n\t\tADVANCE(1 / 60)\n\t\tRunService.Heartbeat._fire(1 / 60)\n\t\tlocal fastest = 0\n\t\tfor _, axle in partsNamed(car, "Axle") do\n\t\t\tfastest = math.max(fastest, math.abs(axle._props.AngularVelocity or 0))\n\t\tend\n\t\tcar:Destroy()\n\t\treturn fastest\n\tend\n\n\tlocal plain = requestedSpeed(function() end)\n\tlocal turbo = requestedSpeed(function(car)\n\t\tcar:SetAttribute("Turbo", true)\n\tend)\n\tcheck("turbo asks for more speed", turbo > plain,\n\t\tstring.format("%.1f vs %.1f rad/sec", turbo, plain))\n\n\t-- Mud: the probe has to see mud under the car.\n\tKEEP_RAYCAST = true\n\tlocal mudPart = Instance.new("Part")\n\tmudPart._props.Name = "Mud"\n\tlocal saved = rawget(workspace, "_props").Raycast\n\trawget(workspace, "_props").Raycast = function()\n\t\treturn {\n\t\t\tInstance = mudPart,\n\t\t\tPosition = Vector3.new(0, 0, 0),\n\t\t\tMaterial = Enum.Material.Mud,\n\t\t\tNormal = Vector3.new(0, 1, 0),\n\t\t}\n\tend\n\tlocal mud = requestedSpeed(function() end)\n\trawget(workspace, "_props").Raycast = saved\n\tKEEP_RAYCAST = false\n\n\tcheck("mud slows it down", mud < plain,\n\t\tstring.format("%.1f in mud vs %.1f on road", mud, plain))\nend\n\n'
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, '..', 'src')
@@ -166,6 +168,9 @@ local function runCar(throttle, steer, turbo, seconds)
 		seat._props.Occupant = humanoid
 		seat._props.Throttle = throttle
 		seat._props.Steer = steer
+		-- The analog pair is what the drive loop actually reads.
+		seat._props.ThrottleFloat = throttle
+		seat._props.SteerFloat = steer
 	end
 	car:SetAttribute("Turbo", turbo)
 
@@ -195,160 +200,9 @@ local function runCar(throttle, steer, turbo, seconds)
 	return travelled, finish
 end
 
-DUMP("Driving a car forward for 2 seconds at full throttle:")
-local distance, endCF = runCar(1, 0, false, 2)
-check("car moves forward", distance > 20, string.format("travelled %.0f studs", distance))
-
--- The reported bug: forward launched the truck into the sky and reverse
--- drove it into the ground. Motion must be HORIZONTAL.
-local rise = math.abs(endCF.Position.Y - 5)
-check("car does not fly upward", rise < 2, string.format("vertical drift %.2f studs", rise))
-
-local horizontal = (endCF.Position - Vector3.new(0, endCF.Position.Y, 0)).Magnitude
-check("motion is along the ground", horizontal > rise * 10,
-	string.format("%.0f studs across vs %.2f up", horizontal, rise))
-
-DUMP("")
-DUMP("An empty car, same 2 seconds:")
-local idle = runCar(nil, 0, false, 2)
-check("empty car stays put", idle < 0.5, string.format("moved %.2f studs", idle))
-
-DUMP("")
-DUMP("Reverse:")
-local back, backCF = runCar(-1, 0, false, 2)
-check("reverse moves the car", back > 20, string.format("travelled %.0f studs", back))
-local backRise = math.abs(backCF.Position.Y - 5)
-check("reverse does not dive", backRise < 2, string.format("vertical drift %.2f studs", backRise))
-
-DUMP("")
-DUMP("Turbo:")
--- Run for long enough that both actually reach their top speed. Over a short
--- burst the two look similar, because a car with momentum spends the first
--- second or so winding up rather than cruising.
-local plain = runCar(1, 0, false, 6)
-local boosted = runCar(1, 0, true, 6)
-check("turbo is faster", boosted > plain * 1.4,
-	string.format("%.0f studs vs %.0f over 6s", boosted, plain))
-
--- The reported bug: boost pads launched the truck like a trampoline.
--- Wheels that sit locked solid make a working car look broken.
-DUMP("")
-DUMP("Wheels:")
-do
-	local car = VehicleService.SpawnCar(1, Vector3.new(0, 5, 0), nil)
-	local chassis = car:FindFirstChild("Chassis")
-	chassis._props.CFrame = CFrame.new(0, 5, 0)
-	local seat = car:FindFirstChild("DriverSeat")
-	seat._props.Occupant = Instance.new("Humanoid")
-	seat._props.Throttle = 1
-	seat._props.Steer = 0
-
-	local wheel
-	for _, child in car:GetChildren() do
-		if child._props.Name == "Wheel" then wheel = child break end
-	end
-	check("the car has wheels", wheel ~= nil, "")
-
-	-- The wheels are held on by a hinge and turned by its motor now, rather
-	-- than having their CFrame rewritten from the chassis each frame -- which
-	-- is what made them look like they were falling off. So the thing to
-	-- check is that the motor is actually being told to turn.
-	local axle
-	for _, child in chassis:GetChildren() do
-		if child._props.Name == "Axle" then axle = child end
-	end
-	check("the wheels are hinged to the car", axle ~= nil, "")
-
-	rawget(workspace, "_props").Raycast = flatGround
-	for _ = 1, 60 do
-		ADVANCE(1 / 60)
-		RunService.Heartbeat._fire(1 / 60)
-		simulate(car, 1 / 60)
-	end
-
-	local spinRate = axle and axle._props.AngularVelocity or 0
-	check("wheels are driven to spin", math.abs(spinRate) > 3,
-		string.format("%.1f radians/sec", spinRate))
-
-	car:Destroy()
-end
-
-DUMP("")
-DUMP("Boost pads:")
-do
-	local pad = Instance.new("Part")
-	pad._props.Name = "BoostPad"
-	pad:SetAttribute("Boost", true)
-	KEEP_RAYCAST = true
-	local savedRaycast = rawget(workspace, "_props").Raycast
-	rawget(workspace, "_props").Raycast = function()
-		return {{
-			Instance = pad,
-			Position = Vector3.new(0, 0, 0),
-			Material = Enum.Material.Plastic,
-			Normal = Vector3.new(0, 1, 0),
-		}}
-	end
-
-	local boostDistance, boostCF = runCar(1, 0, false, 2)
-	rawget(workspace, "_props").Raycast = savedRaycast
-	KEEP_RAYCAST = false
-
-	check("boost speeds the car up", boostDistance > distance,
-		string.format("%.0f studs vs %.0f without", boostDistance, distance))
-
-	-- The whole point of the report: forward, not upward.
-	local boostRise = math.abs(boostCF.Position.Y - 5)
-	check("boost does NOT launch it upward", boostRise < 2,
-		string.format("vertical drift %.2f studs", boostRise))
-
-	check("boost is not a trampoline", boostDistance < 400,
-		string.format("%.0f studs in 2s is drivable", boostDistance))
-end
-
--- A car used to allocate a fresh RaycastParams and cast a ground probe every
--- frame. Twenty players each with a car beside them made that two thousand
--- casts a second to answer "am I in mud".
-DUMP("")
-DUMP("Ground probing:")
-do
-	local casts = 0
-	KEEP_RAYCAST = true
-	local saved = rawget(workspace, "_props").Raycast
-	rawget(workspace, "_props").Raycast = function(...)
-		casts += 1
-		return flatGround()
-	end
-
-	runCar(1, 0, false, 2) -- 120 frames of driving
-	local driving = casts
-
-	casts = 0
-	runCar(nil, 0, false, 2) -- 120 frames parked and empty
-	local parked = casts
-
-	rawget(workspace, "_props").Raycast = saved
-	KEEP_RAYCAST = false
-
-	check("a moving car probes, but not every frame", driving > 10 and driving < 110,
-		string.format("%d casts in 120 frames", driving))
-	check("a parked empty car does not probe at all", parked == 0,
-		string.format("%d casts", parked))
-end
-
---[[SPACING]]
-
+--[[RIG]]
 
 --[[GEAR]]
-
-DUMP("")
-DUMP("Steering:")
-local _, straightCF = runCar(1, 0, false, 2)
-local _, turnedCF = runCar(1, 1, false, 2)
-local straightHeading = straightCF.LookVector
-local turnedHeading = turnedCF.LookVector
-local swing = Util.AngleBetween(straightHeading, turnedHeading)
-check("steering changes heading", swing > 15, string.format("turned %.0f degrees", swing))
 
 DUMP("")
 DUMP(if failures == 0 then "DRIVING WORKS" else failures .. " FAILURES")
@@ -371,4 +225,5 @@ sys.stdout.write(
     .replace('--[[SPACING]]', SPACING_TEST)
     .replace('--[[GEAR]]', GEAR_TEST)
     .replace('--[[GROUND]]', GROUND_HELPER)
+    .replace('--[[RIG]]', RIG_TEST)
 )

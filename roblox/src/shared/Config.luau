@@ -438,6 +438,32 @@ Config.Driving = {
 	Coast = 34,
 	-- Below this fraction of top speed, steering is reduced.
 	SteerGripSpeed = 0.35,
+
+	--[[
+		The drivetrain.
+
+		The wheels drive the car now, through hinge motors, with real springs
+		holding it up and a servo steering the front pair. So these are the
+		numbers of an actual car rather than the numbers of a push: torque
+		accelerates, friction grips, and the spring decides whether it rides
+		like a truck or a go-kart.
+	]]
+	MotorTorque = 15000,
+	BrakeTorque = 25000,
+	SuspensionHeight = 2,
+	SuspensionTravel = 1,
+	SpringStiffness = 8000,
+	-- Around a tenth of the stiffness. Much less and it pogos.
+	SpringDamping = 800,
+	MaxSteerAngle = 32,
+	-- Less lock at speed, or a twitch at 100 studs a second rolls the car.
+	MinSteerAngle = 10,
+	SteerSpeed = 6,
+	SteerTorque = 100000,
+	-- Grip. Lower is driftier; the weight makes tire friction beat whatever
+	-- the road material claims.
+	WheelFriction = 1.5,
+	WheelFrictionWeight = 5,
 }
 
 --[[
@@ -1069,6 +1095,12 @@ export type ConfigType = {
 	Driving: {
 		Acceleration: number, BrakeDeceleration: number,
 		Coast: number, SteerGripSpeed: number,
+		MotorTorque: number, BrakeTorque: number,
+		SuspensionHeight: number, SuspensionTravel: number,
+		SpringStiffness: number, SpringDamping: number,
+		MaxSteerAngle: number, MinSteerAngle: number,
+		SteerSpeed: number, SteerTorque: number,
+		WheelFriction: number, WheelFrictionWeight: number,
 	},
 	Wildlife: {
 		ElephantCount: number, ElephantSpeed: number,

@@ -396,6 +396,15 @@ local function newInstance(class)
 		-- is a crash in the harness for code that is perfectly correct.
 		local partProps = rawget(self, "_props")
 		partProps.AssemblyLinearVelocity = Vector3.new()
+		if class == "VehicleSeat" then
+			-- Roblox gives a VehicleSeat both stepped and analog inputs, and
+			-- the analog pair is what smooth steering reads. Missing, every
+			-- read of them came back nil and the drive loop threw.
+			partProps.Throttle = 0
+			partProps.Steer = 0
+			partProps.ThrottleFloat = 0
+			partProps.SteerFloat = 0
+		end
 		partProps.AssemblyAngularVelocity = Vector3.new()
 		partProps.Velocity = Vector3.new()
 	end
