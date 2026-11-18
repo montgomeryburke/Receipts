@@ -63,11 +63,15 @@ Config.Modes = {
 		Id = "Slayer",
 		Name = "Slayer",
 		Blurb = "Shoot everything. Most points wins.",
+		-- Roughly a hundred kills' worth, so the clock usually decides it.
+		ScoreLimit = 3000,
 	},
 	{
 		Id = "CTF",
 		Name = "Capture the Flag",
 		Blurb = "Take theirs. Defend yours.",
+		-- Three captures, plus whatever the kills add.
+		ScoreLimit = 1600,
 	},
 }
 
@@ -92,16 +96,23 @@ Config.Match = {
 	IntermissionDuration = 15,
 	MapChoices = 3,
 	MinPlayers = 1,
-	ScoreLimit = 80,
-	PointsPerKill = 2,
+	-- Fallback only; each mode carries its own. This was 80 back when a kill
+	-- was worth 2 points, and once weapons started scoring 10 to 35 apiece it
+	-- meant a round ended after about three kills.
+	ScoreLimit = 3000,
+	PointsPerKill = 10,
 }
 
 -- ================================================================== COMBAT ==
 
 Config.Combat = {
 	MaxHealth = 100,
-	ShieldRegenDelay = 6,
-	ShieldRegenPerSecond = 8,
+	-- Halo's rhythm: a few seconds of not being shot, then a fast refill. It
+	-- is what makes ducking behind cover mid-fight worth doing, and at the
+	-- old 6 seconds and 8 a second a 50-point shield took seven seconds to
+	-- come back, which is longer than most fights last.
+	ShieldRegenDelay = 3,
+	ShieldRegenPerSecond = 26,
 	SpawnProtection = 3,
 	-- Auto-aim only grabs targets inside this cone, in degrees, and this far.
 	AutoAimConeDegrees = 12,
@@ -757,7 +768,7 @@ export type ConfigType = {
 	Products: { [string]: number },
 	ProductGrants: { MegaDetonations: number, InstantTopCarTier: number },
 
-	Modes: { { Id: string, Name: string, Blurb: string } },
+	Modes: { { Id: string, Name: string, Blurb: string, ScoreLimit: number } },
 	CTF: {
 		CapturePoints: number, FlagTakenPoints: number, FlagReturnPoints: number,
 		DroppedReturnDelay: number, RequireOwnFlagHome: boolean,

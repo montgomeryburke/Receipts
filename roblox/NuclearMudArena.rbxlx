@@ -103,11 +103,15 @@ Config.Modes = {
 		Id = "Slayer",
 		Name = "Slayer",
 		Blurb = "Shoot everything. Most points wins.",
+		-- Roughly a hundred kills' worth, so the clock usually decides it.
+		ScoreLimit = 3000,
 	},
 	{
 		Id = "CTF",
 		Name = "Capture the Flag",
 		Blurb = "Take theirs. Defend yours.",
+		-- Three captures, plus whatever the kills add.
+		ScoreLimit = 1600,
 	},
 }
 
@@ -132,8 +136,11 @@ Config.Match = {
 	IntermissionDuration = 15,
 	MapChoices = 3,
 	MinPlayers = 1,
-	ScoreLimit = 80,
-	PointsPerKill = 2,
+	-- Fallback only; each mode carries its own. This was 80 back when a kill
+	-- was worth 2 points, and once weapons started scoring 10 to 35 apiece it
+	-- meant a round ended after about three kills.
+	ScoreLimit = 3000,
+	PointsPerKill = 10,
 }
 
 -- ================================================================== COMBAT ==
@@ -797,7 +804,7 @@ export type ConfigType = {
 	Products: { [string]: number },
 	ProductGrants: { MegaDetonations: number, InstantTopCarTier: number },
 
-	Modes: { { Id: string, Name: string, Blurb: string } },
+	Modes: { { Id: string, Name: string, Blurb: string, ScoreLimit: number } },
 	CTF: {
 		CapturePoints: number, FlagTakenPoints: number, FlagReturnPoints: number,
 		DroppedReturnDelay: number, RequireOwnFlagHome: boolean,
@@ -1412,7 +1419,6 @@ local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Util = require(Shared:WaitForChild("Util"))
 
@@ -3794,6 +3800,11 @@ local function deployPlayer(player: Player, keepProgress: boolean)
 
 	local teamIndex = TeamService.IndexOf(player)
 	local spawns = build.teamSpawns[teamIndex]
+	if not spawns or #spawns == 0 then
+		-- No spawn line for this team; drop them in the middle rather than
+		-- erroring out of the whole deploy.
+		spawns = { Vector3.new(0, 8, 0) }
+	end
 	local spot = spawns[rng:NextInteger(1, #spawns)]
 
 	root.CFrame = CFrame.new(spot + Vector3.new(0, 5, 0))
@@ -3918,7 +3929,9 @@ local function runRound()
 
 	while os.clock() < phaseEndsAt do
 		broadcast()
-		if scores[1] >= Config.Match.ScoreLimit or scores[2] >= Config.Match.ScoreLimit then
+		-- Each mode has its own target.
+		local limit = currentMode.ScoreLimit or Config.Match.ScoreLimit
+		if scores[1] >= limit or scores[2] >= limit then
 			break
 		end
 		task.wait(0.5)
@@ -4646,11 +4659,13 @@ function PlayerState.Reset(player: Player, keepProgress: boolean)
 		friesUntil = 0,
 		spawnProtectedUntil = os.clock() + Config.Combat.SpawnProtection,
 		nextMeleeAt = 0,
-		points = if previous then previous.points else 0,
+		-- Points, kills and deaths are per ROUND, so they survive a respawn
+		-- but are wiped when a new round deploys everybody fresh.
+		points = if keepProgress and previous then previous.points else 0,
 		multiplierUntil = if keepProgress and previous then previous.multiplierUntil else 0,
 		multiplierAmount = if keepProgress and previous then previous.multiplierAmount else 1,
-		kills = if previous then previous.kills else 0,
-		deaths = if previous then previous.deaths else 0,
+		kills = if keepProgress and previous then previous.kills else 0,
+		deaths = if keepProgress and previous then previous.deaths else 0,
 		vehicle = nil,
 		seatRole = nil,
 	}
@@ -8120,7 +8135,9 @@ Remotes.Event("MatchState").OnClientEvent:Connect(function(payload)
 		payload.phase or "Warmup",
 		payload.timeLeft or 0,
 		payload.scores or { 0, 0 },
-		payload.mapName or "—"
+		payload.mapName or "—",
+		payload.modeName,
+		payload.flags
 	)
 	-- The ballot only belongs on screen while voting is actually open, and
 	-- the cursor has to come free to click it.
@@ -9360,13 +9377,21 @@ function Hud.SetStats(keys: number, carTierName: string, megaCharges: number, ki
 	}, "\n")
 end
 
-function Hud.SetMatch(phase: string, timeLeft: number, scores: { number }, mapName: string)
+function Hud.SetMatch(
+	phase: string,
+	timeLeft: number,
+	scores: { number },
+	mapName: string,
+	modeName: string?,
+	flags: { string }?
+)
 	if not clockLabel then
 		return
 	end
 
 	if phase == "Playing" then
-		clockLabel.Text = `{mapName}  ·  {Util.FormatClock(timeLeft)}`
+		local mode = if modeName then `{modeName} · ` else ""
+		clockLabel.Text = `{mode}{mapName}  ·  {Util.FormatClock(timeLeft)}`
 	elseif phase == "Voting" then
 		clockLabel.Text = `VOTING  ·  {Util.FormatClock(timeLeft)}`
 	elseif phase == "Intermission" then
@@ -9375,7 +9400,15 @@ function Hud.SetMatch(phase: string, timeLeft: number, scores: { number }, mapNa
 		clockLabel.Text = "WAITING FOR PLAYERS"
 	end
 
-	scoreLabel.Text = `RED {scores[1] or 0}   —   BLUE {scores[2] or 0}`
+	-- In Capture the Flag the scoreboard also says where each flag is, which
+	-- is the single most useful thing to know at a glance.
+	if flags then
+		local red = flags[1] or "?"
+		local blue = flags[2] or "?"
+		scoreLabel.Text = `RED {scores[1] or 0} [{string.upper(red)}]   —   [{string.upper(blue)}] BLUE {scores[2] or 0}`
+	else
+		scoreLabel.Text = `RED {scores[1] or 0}   —   BLUE {scores[2] or 0}`
+	end
 end
 
 --[[ Show the map ballot, and call back with whichever one gets clicked. ]]

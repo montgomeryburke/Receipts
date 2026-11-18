@@ -86,11 +86,13 @@ function PlayerState.Reset(player: Player, keepProgress: boolean)
 		friesUntil = 0,
 		spawnProtectedUntil = os.clock() + Config.Combat.SpawnProtection,
 		nextMeleeAt = 0,
-		points = if previous then previous.points else 0,
+		-- Points, kills and deaths are per ROUND, so they survive a respawn
+		-- but are wiped when a new round deploys everybody fresh.
+		points = if keepProgress and previous then previous.points else 0,
 		multiplierUntil = if keepProgress and previous then previous.multiplierUntil else 0,
 		multiplierAmount = if keepProgress and previous then previous.multiplierAmount else 1,
-		kills = if previous then previous.kills else 0,
-		deaths = if previous then previous.deaths else 0,
+		kills = if keepProgress and previous then previous.kills else 0,
+		deaths = if keepProgress and previous then previous.deaths else 0,
 		vehicle = nil,
 		seatRole = nil,
 	}

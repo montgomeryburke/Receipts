@@ -123,6 +123,11 @@ local function deployPlayer(player: Player, keepProgress: boolean)
 
 	local teamIndex = TeamService.IndexOf(player)
 	local spawns = build.teamSpawns[teamIndex]
+	if not spawns or #spawns == 0 then
+		-- No spawn line for this team; drop them in the middle rather than
+		-- erroring out of the whole deploy.
+		spawns = { Vector3.new(0, 8, 0) }
+	end
 	local spot = spawns[rng:NextInteger(1, #spawns)]
 
 	root.CFrame = CFrame.new(spot + Vector3.new(0, 5, 0))
@@ -247,7 +252,9 @@ local function runRound()
 
 	while os.clock() < phaseEndsAt do
 		broadcast()
-		if scores[1] >= Config.Match.ScoreLimit or scores[2] >= Config.Match.ScoreLimit then
+		-- Each mode has its own target.
+		local limit = currentMode.ScoreLimit or Config.Match.ScoreLimit
+		if scores[1] >= limit or scores[2] >= limit then
 			break
 		end
 		task.wait(0.5)
