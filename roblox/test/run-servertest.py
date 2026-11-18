@@ -153,6 +153,49 @@ ScoreboardService.PushAll()
 check("the round end pushes to everyone", #FIRED_TO("Scoreboard") == 2,
 	string.format("%d pushes", #FIRED_TO("Scoreboard")))
 
+-- --------------------------------------------------------------- zombies
+-- Every zombie used to walk the whole player list itself, every frame. The
+-- scan is shared now, so this checks the behaviour that change could break:
+-- that a zombie still finds the nearest living player and closes on them,
+-- and still ignores a dead one.
+WildlifeService.Populate(900)
+check("the map is populated", WildlifeService.CountOf("Zombie") > 0,
+	string.format("%d zombies, %d civilians",
+		WildlifeService.CountOf("Zombie"), WildlifeService.CountOf("Civilian")))
+
+do
+	-- Put the prey somewhere definite and well inside the chase range.
+	local preyRoot = prey._props.Character:FindFirstChild("HumanoidRootPart")
+	preyRoot._props.CFrame = CFrame.new(0, 5, 0)
+	local killerRoot = killer._props.Character:FindFirstChild("HumanoidRootPart")
+	killerRoot._props.CFrame = CFrame.new(2000, 5, 2000) -- far away, not the target
+
+	local zombie = WildlifeService.NearestZombieForTests(Vector3.new(0, 5, 0))
+	check("a zombie exists to chase", zombie ~= nil, "")
+
+	if zombie then
+		local before = (zombie.position - Vector3.new(0, 5, 0)).Magnitude
+		for _ = 1, 120 do
+			ADVANCE(1 / 60)
+			RunService.Heartbeat._fire(1 / 60)
+		end
+		local after = (zombie.position - Vector3.new(0, 5, 0)).Magnitude
+		check("a zombie closes on the nearest player", after < before - 5,
+			string.format("%.0f studs away, was %.0f", after, before))
+
+		-- A dead player is not prey.
+		prey._props.Character:FindFirstChildOfClass("Humanoid")._props.Health = 0
+		local stalled = (zombie.position - Vector3.new(0, 5, 0)).Magnitude
+		for _ = 1, 120 do
+			ADVANCE(1 / 60)
+			RunService.Heartbeat._fire(1 / 60)
+		end
+		local wandered = (zombie.position - Vector3.new(0, 5, 0)).Magnitude
+		check("a dead player is not chased", wandered >= stalled - 1,
+			string.format("%.0f studs away, was %.0f", wandered, stalled))
+	end
+end
+
 DUMP(if failures == 0 then "MEDALS WORK" else failures .. " MEDAL FAILURES")
 '''
 

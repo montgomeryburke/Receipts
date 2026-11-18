@@ -6131,6 +6131,12 @@ local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+
+-- Shared between every vehicle, every frame: see driveWheeled.
+local GROUND_SAMPLE_INTERVAL = 1 / 20
+local GROUND_PROBE = Vector3.new(0, -14, 0)
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
@@ -6923,6 +6929,7 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	end
 
 	state.currentSpeed = state.currentSpeed or 0
+	state.nextGroundSampleAt = state.nextGroundSampleAt or 0
 
 	local throttle = if seat.Occupant then seat.Throttle else 0
 	local steer = if seat.Occupant then seat.Steer else 0
@@ -6934,21 +6941,43 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		throttle = math.clamp(pedal, -1, 1)
 	end
 
-	-- Mud drags you down. We look at what is actually under the wheels
-	-- rather than trusting a flag.
+	-- Mud drags you down and boost chevrons fling you forward. Both come
+	-- from looking at what is actually under the wheels rather than
+	-- trusting a flag.
+	--
+	-- This used to allocate a fresh RaycastParams and cast every frame for
+	-- every vehicle on the map. With a car spawning beside each of twenty
+	-- players that is about two thousand casts and two thousand throwaway
+	-- objects a second, for a question whose answer is a 50-stud mud pool.
+	-- So: one shared params object, and a sample at 20 Hz while actually
+	-- moving. At full speed that is ten studs between looks, well inside
+	-- the smallest thing worth noticing.
 	local speedFactor = 1
-	local groundParams = RaycastParams.new()
-	groundParams.FilterType = Enum.RaycastFilterType.Exclude
-	groundParams.FilterDescendantsInstances = { model }
-	local ground = workspace:Raycast(chassis.Position, Vector3.new(0, -14, 0), groundParams)
-	if ground and (ground.Instance.Name == "Mud" or ground.Material == Enum.Material.Mud) then
-		speedFactor = Config.MudSpeedFactor
+	local boosted = false
+
+	local rolling = math.abs(state.currentSpeed) > 1 or seat.Occupant ~= nil
+	if rolling then
+		local now = os.clock()
+		if now >= state.nextGroundSampleAt then
+			state.nextGroundSampleAt = now + GROUND_SAMPLE_INTERVAL
+			groundParams.FilterDescendantsInstances = { model }
+			local hit = workspace:Raycast(chassis.Position, GROUND_PROBE, groundParams)
+			state.groundIsMud = hit ~= nil
+				and (hit.Instance.Name == "Mud" or hit.Material == Enum.Material.Mud)
+			state.groundIsBoost = hit ~= nil and hit.Instance:GetAttribute("Boost") == true
+		end
+	else
+		-- Parked: forget what it was standing on, so pulling away from a mud
+		-- pool does not carry the drag with it.
+		state.groundIsMud = false
+		state.groundIsBoost = false
+		state.nextGroundSampleAt = 0
 	end
 
-	-- Boost chevrons. Driving over one flings you forward, which is what
-	-- makes the jump beyond it worth hitting.
-	local boosted = false
-	if ground and ground.Instance:GetAttribute("Boost") then
+	if state.groundIsMud then
+		speedFactor = Config.MudSpeedFactor
+	end
+	if state.groundIsBoost then
 		boosted = true
 	end
 
@@ -8702,20 +8731,40 @@ end
 
 -- ================================================================= MOVEMENT ==
 
-local function nearestPlayer(from: Vector3): (Player?, Vector3?, number)
-	local best: Player? = nil
-	local bestPosition: Vector3? = nil
-	local bestDistance = math.huge
+--[[
+	Everybody alive, gathered once.
 
+	Every zombie used to walk the whole player list itself, every frame. Ten
+	zombies and twenty players is two hundred character lookups a frame, each
+	one a FindFirstChild and a FindFirstChildOfClass -- the expensive part,
+	far more than the arithmetic. Gathering the list once a frame and sharing
+	it makes that twenty lookups instead of two hundred, and the answer is
+	identical.
+]]
+type LivingPlayer = { player: Player, position: Vector3 }
+local living: { LivingPlayer } = {}
+
+local function refreshLiving()
+	table.clear(living)
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
-			local distance = (root.Position - from).Magnitude
-			if distance < bestDistance then
-				best, bestPosition, bestDistance = player, root.Position, distance
-			end
+			table.insert(living, { player = player, position = root.Position })
+		end
+	end
+end
+
+local function nearestLiving(from: Vector3): (Player?, Vector3?, number)
+	local best: Player? = nil
+	local bestPosition: Vector3? = nil
+	local bestDistance = math.huge
+
+	for _, entry in living do
+		local distance = (entry.position - from).Magnitude
+		if distance < bestDistance then
+			best, bestPosition, bestDistance = entry.player, entry.position, distance
 		end
 	end
 
@@ -8743,7 +8792,7 @@ local function stepDweller(dweller: Dweller, deltaTime: number)
 	local goal: Vector3
 	if dweller.kind == "Zombie" then
 		-- Zombies come for whoever is closest.
-		local player, position, distance = nearestPlayer(dweller.position)
+		local player, position, distance = nearestLiving(dweller.position)
 		if position and distance < 320 then
 			goal = position
 
@@ -8790,6 +8839,9 @@ local function stepDweller(dweller: Dweller, deltaTime: number)
 end
 
 local function step(deltaTime: number)
+	-- One player scan for the whole crowd, before anybody moves.
+	refreshLiving()
+
 	for index = #dwellers, 1, -1 do
 		local dweller = dwellers[index]
 		if not dweller.model.Parent then
@@ -8871,6 +8923,26 @@ function WildlifeService.CountOf(kind: string): number
 		end
 	end
 	return total
+end
+
+--[[
+	The zombie closest to a point, for the tests.
+
+	The chase logic is shared between every zombie through one player scan a
+	frame, so a test has to be able to watch one of them actually move.
+]]
+function WildlifeService.NearestZombieForTests(from: Vector3): any
+	local best: any = nil
+	local bestDistance = math.huge
+	for _, dweller in dwellers do
+		if dweller.kind == "Zombie" and not dweller.dead then
+			local distance = (dweller.position - from).Magnitude
+			if distance < bestDistance then
+				best, bestDistance = dweller, distance
+			end
+		end
+	end
+	return best
 end
 
 RunService.Heartbeat:Connect(step)

@@ -161,8 +161,13 @@ local function runCar(throttle, steer, turbo, seconds)
 	end
 	car:SetAttribute("Turbo", turbo)
 
+	-- Advance the virtual clock with the frames, not just the frame count.
+	-- Without this os.clock() stood still for the whole run, so every piece
+	-- of time-based logic in the drive code -- the throttled ground probe,
+	-- anything on a cooldown -- was only ever tested at a single instant.
 	local dt = 1 / 60
 	for _ = 1, math.floor(seconds * 60) do
+		ADVANCE(dt)
 		RunService.Heartbeat._fire(dt)
 		simulate(car, dt)
 	end
@@ -273,6 +278,34 @@ do
 
 	check("boost is not a trampoline", boostDistance < 400,
 		string.format("%.0f studs in 2s is drivable", boostDistance))
+end
+
+-- A car used to allocate a fresh RaycastParams and cast a ground probe every
+-- frame. Twenty players each with a car beside them made that two thousand
+-- casts a second to answer "am I in mud".
+DUMP("")
+DUMP("Ground probing:")
+do
+	local casts = 0
+	local saved = rawget(workspace, "_props").Raycast
+	rawget(workspace, "_props").Raycast = function(...)
+		casts += 1
+		return nil
+	end
+
+	runCar(1, 0, false, 2) -- 120 frames of driving
+	local driving = casts
+
+	casts = 0
+	runCar(nil, 0, false, 2) -- 120 frames parked and empty
+	local parked = casts
+
+	rawget(workspace, "_props").Raycast = saved
+
+	check("a moving car probes at about 20 Hz", driving > 20 and driving < 70,
+		string.format("%d casts in 120 frames", driving))
+	check("a parked empty car does not probe at all", parked == 0,
+		string.format("%d casts", parked))
 end
 
 DUMP("")

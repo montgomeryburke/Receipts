@@ -597,20 +597,40 @@ end
 
 -- ================================================================= MOVEMENT ==
 
-local function nearestPlayer(from: Vector3): (Player?, Vector3?, number)
-	local best: Player? = nil
-	local bestPosition: Vector3? = nil
-	local bestDistance = math.huge
+--[[
+	Everybody alive, gathered once.
 
+	Every zombie used to walk the whole player list itself, every frame. Ten
+	zombies and twenty players is two hundred character lookups a frame, each
+	one a FindFirstChild and a FindFirstChildOfClass -- the expensive part,
+	far more than the arithmetic. Gathering the list once a frame and sharing
+	it makes that twenty lookups instead of two hundred, and the answer is
+	identical.
+]]
+type LivingPlayer = { player: Player, position: Vector3 }
+local living: { LivingPlayer } = {}
+
+local function refreshLiving()
+	table.clear(living)
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if root and root:IsA("BasePart") and humanoid and humanoid.Health > 0 then
-			local distance = (root.Position - from).Magnitude
-			if distance < bestDistance then
-				best, bestPosition, bestDistance = player, root.Position, distance
-			end
+			table.insert(living, { player = player, position = root.Position })
+		end
+	end
+end
+
+local function nearestLiving(from: Vector3): (Player?, Vector3?, number)
+	local best: Player? = nil
+	local bestPosition: Vector3? = nil
+	local bestDistance = math.huge
+
+	for _, entry in living do
+		local distance = (entry.position - from).Magnitude
+		if distance < bestDistance then
+			best, bestPosition, bestDistance = entry.player, entry.position, distance
 		end
 	end
 
@@ -638,7 +658,7 @@ local function stepDweller(dweller: Dweller, deltaTime: number)
 	local goal: Vector3
 	if dweller.kind == "Zombie" then
 		-- Zombies come for whoever is closest.
-		local player, position, distance = nearestPlayer(dweller.position)
+		local player, position, distance = nearestLiving(dweller.position)
 		if position and distance < 320 then
 			goal = position
 
@@ -685,6 +705,9 @@ local function stepDweller(dweller: Dweller, deltaTime: number)
 end
 
 local function step(deltaTime: number)
+	-- One player scan for the whole crowd, before anybody moves.
+	refreshLiving()
+
 	for index = #dwellers, 1, -1 do
 		local dweller = dwellers[index]
 		if not dweller.model.Parent then
@@ -766,6 +789,26 @@ function WildlifeService.CountOf(kind: string): number
 		end
 	end
 	return total
+end
+
+--[[
+	The zombie closest to a point, for the tests.
+
+	The chase logic is shared between every zombie through one player scan a
+	frame, so a test has to be able to watch one of them actually move.
+]]
+function WildlifeService.NearestZombieForTests(from: Vector3): any
+	local best: any = nil
+	local bestDistance = math.huge
+	for _, dweller in dwellers do
+		if dweller.kind == "Zombie" and not dweller.dead then
+			local distance = (dweller.position - from).Magnitude
+			if distance < bestDistance then
+				best, bestDistance = dweller, distance
+			end
+		end
+	end
+	return best
 end
 
 RunService.Heartbeat:Connect(step)

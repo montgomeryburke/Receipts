@@ -24,6 +24,12 @@ local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+
+-- Shared between every vehicle, every frame: see driveWheeled.
+local GROUND_SAMPLE_INTERVAL = 1 / 20
+local GROUND_PROBE = Vector3.new(0, -14, 0)
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
@@ -816,6 +822,7 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	end
 
 	state.currentSpeed = state.currentSpeed or 0
+	state.nextGroundSampleAt = state.nextGroundSampleAt or 0
 
 	local throttle = if seat.Occupant then seat.Throttle else 0
 	local steer = if seat.Occupant then seat.Steer else 0
@@ -827,21 +834,43 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		throttle = math.clamp(pedal, -1, 1)
 	end
 
-	-- Mud drags you down. We look at what is actually under the wheels
-	-- rather than trusting a flag.
+	-- Mud drags you down and boost chevrons fling you forward. Both come
+	-- from looking at what is actually under the wheels rather than
+	-- trusting a flag.
+	--
+	-- This used to allocate a fresh RaycastParams and cast every frame for
+	-- every vehicle on the map. With a car spawning beside each of twenty
+	-- players that is about two thousand casts and two thousand throwaway
+	-- objects a second, for a question whose answer is a 50-stud mud pool.
+	-- So: one shared params object, and a sample at 20 Hz while actually
+	-- moving. At full speed that is ten studs between looks, well inside
+	-- the smallest thing worth noticing.
 	local speedFactor = 1
-	local groundParams = RaycastParams.new()
-	groundParams.FilterType = Enum.RaycastFilterType.Exclude
-	groundParams.FilterDescendantsInstances = { model }
-	local ground = workspace:Raycast(chassis.Position, Vector3.new(0, -14, 0), groundParams)
-	if ground and (ground.Instance.Name == "Mud" or ground.Material == Enum.Material.Mud) then
-		speedFactor = Config.MudSpeedFactor
+	local boosted = false
+
+	local rolling = math.abs(state.currentSpeed) > 1 or seat.Occupant ~= nil
+	if rolling then
+		local now = os.clock()
+		if now >= state.nextGroundSampleAt then
+			state.nextGroundSampleAt = now + GROUND_SAMPLE_INTERVAL
+			groundParams.FilterDescendantsInstances = { model }
+			local hit = workspace:Raycast(chassis.Position, GROUND_PROBE, groundParams)
+			state.groundIsMud = hit ~= nil
+				and (hit.Instance.Name == "Mud" or hit.Material == Enum.Material.Mud)
+			state.groundIsBoost = hit ~= nil and hit.Instance:GetAttribute("Boost") == true
+		end
+	else
+		-- Parked: forget what it was standing on, so pulling away from a mud
+		-- pool does not carry the drag with it.
+		state.groundIsMud = false
+		state.groundIsBoost = false
+		state.nextGroundSampleAt = 0
 	end
 
-	-- Boost chevrons. Driving over one flings you forward, which is what
-	-- makes the jump beyond it worth hitting.
-	local boosted = false
-	if ground and ground.Instance:GetAttribute("Boost") then
+	if state.groundIsMud then
+		speedFactor = Config.MudSpeedFactor
+	end
+	if state.groundIsBoost then
 		boosted = true
 	end
 
