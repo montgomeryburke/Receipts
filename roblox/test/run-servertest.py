@@ -52,6 +52,11 @@ local function makeFighter(name, userId)
 	player._props.Character = character
 	player._props.CharacterAdded = SIGNAL()
 	player._props.LoadCharacterAsync = function() end
+	-- Parented, because plenty of real code treats a nil Parent as "this
+	-- player has left" and bails -- correctly. Without it a hockey fight was
+	-- discarded as an abandoned one instead of being settled, and the skis
+	-- dropped their rider on the first frame.
+	player.Parent = Players
 	return player
 end
 
@@ -247,6 +252,66 @@ do
 		string.format("%.0f health", preyHumanoid._props.Health))
 end
 
+-- ------------------------------------------------------------- the rink
+DUMP("")
+DUMP("Hockey:")
+do
+	HockeyService.Build(1900)
+	local thePuck = HockeyService.Puck()
+	check("a puck is dropped", thePuck ~= nil, "")
+
+	-- Shooting the puck IS playing hockey here, so a bullet has to move it.
+	if thePuck then
+		thePuck._props.AssemblyLinearVelocity = Vector3.new()
+		local handled = HockeyService.RegisterHit(thePuck, killer, Vector3.new(0, 0, -1))
+		check("a bullet moves the puck", handled
+			and thePuck._props.AssemblyLinearVelocity.Magnitude > 50,
+			string.format("%.0f studs/sec", thePuck._props.AssemblyLinearVelocity.Magnitude))
+		check("and the shooter is credited for the touch",
+			thePuck:GetAttribute("LastTouchUserId") == killer._props.UserId, "")
+	end
+
+	-- Fights. Both players mash; whoever swings most wins, the loser goes
+	-- down, and the winner's stick may break into a weapon.
+	PlayerState.Reset(killer, false)
+	PlayerState.Reset(prey, false)
+
+	local settled = {}
+	HockeyService.FightOver.Connect(function(winner, loser, brokeStick)
+		table.insert(settled, { winner = winner, loser = loser, brokeStick = brokeStick })
+	end)
+
+	check("a fight starts between opponents", HockeyService.StartFight(killer, prey),
+		string.format("%d running", HockeyService.FightCount()))
+	check("and not twice over", HockeyService.StartFight(killer, prey) == false, "")
+
+	-- The killer mashes harder.
+	for _ = 1, 9 do HockeyService.Swing(killer) end
+	for _ = 1, 3 do HockeyService.Swing(prey) end
+
+	-- A fight must still run while it is on, and settle when the clock is up.
+	check("the fight is still running", HockeyService.FightCount() == 1, "")
+	ADVANCE(Config.Hockey.FightSeconds + 1)
+	RunService.Heartbeat._fire(1 / 60)
+	RUN_SPAWNED()
+
+	check("the fight settles", #settled == 1, string.format("%d results", #settled))
+	if #settled == 1 then
+		check("whoever swung most wins", settled[1].winner == killer,
+			tostring(settled[1].winner and settled[1].winner._props.Name))
+		check("the loser is knocked down, not killed",
+			prey._props.Character:FindFirstChildOfClass("Humanoid")._props.Health > 0,
+			string.format("%.0f health",
+				prey._props.Character:FindFirstChildOfClass("Humanoid")._props.Health))
+		check("the winner takes points", PlayerState.Get(killer).points > 0,
+			string.format("%d points", PlayerState.Get(killer).points))
+	end
+
+	-- A fight with a team-mate is not a fight.
+	prey._props.Team = killer._props.Team
+	check("you cannot fight your own team", HockeyService.StartFight(killer, prey) == false, "")
+end
+
 DUMP(if failures == 0 then "MEDALS WORK" else failures .. " MEDAL FAILURES")
 '''
 
@@ -266,7 +331,7 @@ def strip(s):
     return '\n'.join(out)
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
-SERVER = ['PlayerState', 'ResortService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
+SERVER = ['PlayerState', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'ProjectileService', 'WeaponService', 'TeamService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',
           'GraphicsService']

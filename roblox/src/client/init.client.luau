@@ -231,6 +231,24 @@ Remotes.Event("ShotFired").OnClientEvent:Connect(function(payload)
 	end
 end)
 
+--[[ A hockey fight. Mash F -- and your guns still work, so consider those. ]]
+Remotes.Event("FightStarted").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Controls.SetFighting(true)
+	Hud.ShowFight(tostring(payload.opponent or "SOMEBODY"), payload.duration or 4)
+	Sound.Flat("MeleeSwing")
+end)
+
+Remotes.Event("FightResult").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Controls.SetFighting(false)
+	Hud.FightResult(payload.won == true, payload.draw == true, payload.brokeStick == true)
+end)
+
 --[[ The scoreboard we asked for, or the one pushed at the end of a round. ]]
 Remotes.Event("Scoreboard").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" or typeof(payload.rows) ~= "table" then

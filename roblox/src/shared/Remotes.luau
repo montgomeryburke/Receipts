@@ -42,6 +42,11 @@ local EVENT_NAMES = {
 	-- Cosmetic only: the shooter already drew their own shot locally, this
 	-- tells everybody nearby what it looked like. Cheaper than replicating
 	-- the parts, and far less laggy than drawing them server-side.
+	-- The hockey fight scene: the server starts one, the client mashes, the
+	-- server says who won.
+	"FightStarted",
+	"FightSwing",
+	"FightResult",
 	"ShotFired",
 	"ThrowGrenade",
 	"RequestScoreboard",

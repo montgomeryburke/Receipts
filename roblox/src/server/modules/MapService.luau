@@ -19,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
 local ResortService = require(script.Parent:WaitForChild("ResortService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local MapService = {}
 
@@ -656,6 +657,8 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	-- city is laid down.
 	local resort = ResortService.Build(size, model)
 	local resortReserved = ResortService.ReservedAreas(size)
+	-- The rink builds its own model, but the city has to know where it is.
+	table.insert(resortReserved, HockeyService.ReservedArea(size))
 
 	-- Walls, so nobody drives off the edge of the world.
 	local wallHeight = 160

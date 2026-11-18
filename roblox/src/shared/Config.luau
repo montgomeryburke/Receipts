@@ -294,6 +294,31 @@ Config.Weapons = {
 	-- ------------------------------------------------------------- UTILITY
 	-- Both of these are found on the map rather than carried from spawn, and
 	-- neither reloads: what you pick up is what you have.
+	--[[
+		The hockey stick, and what is left of it after a fight.
+
+		Both are hitscan with almost no range, which is how you build a melee
+		weapon out of the existing shooting code rather than a parallel one:
+		the swing is a very short, very wide shot. The broken half hits far
+		harder than the whole stick, which is the entire incentive to start
+		a fight on the ice in the first place.
+	]]
+	HockeyStick = {
+		Slot = 7, Category = "Utility", DisplayName = "Hockey Stick", Recoil = 0.5,
+		Kind = "Hitscan", Damage = 34, Cooldown = 0.5, Range = 14,
+		MagSize = 1, ReloadTime = 0, Spread = 6,
+		Color = Color3.fromRGB(190, 170, 140),
+		Automatic = true,
+		Points = 18,
+	},
+	BrokenStick = {
+		Slot = 7, Category = "Utility", DisplayName = "Broken Stick", Recoil = 0.9,
+		Kind = "Hitscan", Damage = 78, Cooldown = 0.45, Range = 13,
+		MagSize = 1, ReloadTime = 0, Spread = 7,
+		Color = Color3.fromRGB(210, 120, 90),
+		Automatic = true,
+		Points = 40,
+	},
 	Poop = {
 		Slot = 7, Category = "Utility", DisplayName = "Elephant Poop", Recoil = 0.2,
 		Kind = "Arcing", Damage = 6, Cooldown = 0.55, Range = 220, Speed = 88,
@@ -564,6 +589,29 @@ Config.GrenadeKeyWeapon = "Grenade"
 	before they add a "you cannot shoot while..." check.
 ]]
 Config.WeaponsAlwaysAvailable = true
+
+--[[
+	The ice rink.
+
+	Hockey is scored like everything else, in team points, so a goal is worth
+	putting the work in for -- and a fight is worth starting. Note that
+	nothing here disables anybody's guns, which is the rule for every sport
+	on this map: you can shoot your way out of a fight, or shoot two other
+	people having one.
+]]
+Config.Hockey = {
+	GoalPoints = 220,
+	-- How long both players mash for. Short enough to be a scrap rather
+	-- than a minigame you get stuck in.
+	FightSeconds = 4,
+	FightWinPoints = 130,
+	KnockdownSeconds = 2.5,
+	-- Blades of Steel. Breaking it is the point of fighting at all, because
+	-- the splintered half is the best melee weapon in the game.
+	StickBreakChance = 0.55,
+	StickWeapon = "HockeyStick",
+	BrokenStickWeapon = "BrokenStick",
+}
 
 Config.Radar = {
 	Range = 170,
@@ -948,6 +996,15 @@ export type ConfigType = {
 	},
 	GrenadeKeyWeapon: string,
 	WeaponsAlwaysAvailable: boolean,
+	Hockey: {
+		GoalPoints: number,
+		FightSeconds: number,
+		FightWinPoints: number,
+		KnockdownSeconds: number,
+		StickBreakChance: number,
+		StickWeapon: string,
+		BrokenStickWeapon: string,
+	},
 	Radar: {
 		Range: number,
 		VerticalRange: number,

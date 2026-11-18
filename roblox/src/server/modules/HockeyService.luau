@@ -1,0 +1,647 @@
+--!strict
+--[[
+	Nuclear Mud Arena — the ice rink.
+
+	A full rink with boards, two goals and a puck, dropped into the map
+	alongside the city and the resort. You can play actual hockey on it:
+	shoot the puck, score goals, and the goals are worth team points like
+	anything else.
+
+	You are also still armed. That is the rule for every sport here and it is
+	not suspended on the ice -- a hockey game where the other team can shoot
+	you is simply a better hockey game. Fights work the way Blades of Steel
+	did: hit an opposing player with your stick and it turns into a scrap,
+	both of you mashing a key, and the winner can break their stick over the
+	loser and keep the splintered half as a weapon.
+
+	The ice itself is a low-friction surface, so skating is a matter of
+	momentum rather than walking, and a car driven onto it is a disaster in
+	the best way.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Signal = require(Shared:WaitForChild("Signal"))
+local Sound = require(Shared:WaitForChild("Sound"))
+local Util = require(Shared:WaitForChild("Util"))
+
+local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+
+local HockeyService = {}
+
+--[[ Fired as (scorer, teamIndex, points) when the puck goes in. ]]
+HockeyService.Goal = Signal.new()
+
+--[[ Fired as (winner, loser, brokeStick) when a fight is settled. ]]
+HockeyService.FightOver = Signal.new()
+
+local RINK_LENGTH = 300
+local RINK_WIDTH = 150
+local BOARD_HEIGHT = 11
+local CORNER_SEGMENTS = 4
+
+local rink: Model? = nil
+local puck: BasePart? = nil
+local puckHome = Vector3.new()
+local goalZones: { { part: Part, defendingTeam: number } } = {}
+local lastGoalAt = 0
+
+type Fight = {
+	a: Player,
+	b: Player,
+	endsAt: number,
+	swings: { [Player]: number },
+}
+local fights: { Fight } = {}
+local fightOf: { [Player]: Fight } = {}
+
+-- ================================================================= GEOMETRY ==
+
+--[[
+	The boards.
+
+	Straight runs down the sides and ends, with the corners cut across in
+	short segments. A rink with square corners reads as a swimming pool.
+]]
+local function boards(centre: Vector3, parent: Instance)
+	local halfLength = RINK_LENGTH * 0.5
+	local halfWidth = RINK_WIDTH * 0.5
+	local cornerCut = 46
+
+	local function board(from: Vector3, to: Vector3)
+		local delta = to - from
+		local length = delta.Magnitude
+		if length < 1 then
+			return
+		end
+		local middle = from + delta * 0.5
+		local facing = CFrame.lookAt(middle, to)
+
+		Util.Part({
+			Name = "Boards",
+			Size = Vector3.new(3, BOARD_HEIGHT, length),
+			CFrame = facing * CFrame.new(0, BOARD_HEIGHT * 0.5, 0),
+			Color = Color3.fromRGB(236, 240, 246),
+			Material = Enum.Material.SmoothPlastic,
+			Parent = parent,
+		})
+
+		-- The kick plate along the bottom, in team-neutral yellow, which is
+		-- what every rink has and what makes it read as a rink.
+		Util.Part({
+			Name = "KickPlate",
+			Size = Vector3.new(3.4, 2, length),
+			CFrame = facing * CFrame.new(0, 1, 0),
+			Color = Color3.fromRGB(240, 196, 40),
+			Material = Enum.Material.SmoothPlastic,
+			Parent = parent,
+		})
+
+		-- Glass above it, low enough to shoot over from outside but high
+		-- enough to keep the puck in.
+		Util.Part({
+			Name = "RinkGlass",
+			Size = Vector3.new(1.2, 9, length),
+			CFrame = facing * CFrame.new(0, BOARD_HEIGHT + 4.5, 0),
+			Color = Color3.fromRGB(200, 226, 240),
+			Material = Enum.Material.Glass,
+			Transparency = 0.72,
+			Reflectance = 0.2,
+			Parent = parent,
+		})
+	end
+
+	-- The eight points of a rounded rectangle, walked in order.
+	local outline = {
+		Vector3.new(-halfWidth, 0, -halfLength + cornerCut),
+		Vector3.new(-halfWidth + cornerCut, 0, -halfLength),
+		Vector3.new(halfWidth - cornerCut, 0, -halfLength),
+		Vector3.new(halfWidth, 0, -halfLength + cornerCut),
+		Vector3.new(halfWidth, 0, halfLength - cornerCut),
+		Vector3.new(halfWidth - cornerCut, 0, halfLength),
+		Vector3.new(-halfWidth + cornerCut, 0, halfLength),
+		Vector3.new(-halfWidth, 0, halfLength - cornerCut),
+	}
+
+	for index = 1, #outline do
+		local from = centre + outline[index]
+		local to = centre + outline[(index % #outline) + 1]
+		-- Corners get broken into segments so the curve is a curve.
+		local isCorner = index % 2 == 0
+		local steps = if isCorner then CORNER_SEGMENTS else 1
+		for step = 0, steps - 1 do
+			local a = from + (to - from) * (step / steps)
+			local b = from + (to - from) * ((step + 1) / steps)
+			board(a, b)
+		end
+	end
+end
+
+--[[ A goal: frame, crossbar, netting, and the zone that counts it. ]]
+local function goal(centre: Vector3, facingZ: number, defendingTeam: number, parent: Instance)
+	local width = 26
+	local height = 15
+	local depth = 14
+	local colour = Config.Teams[defendingTeam]
+		and Config.Teams[defendingTeam].Color
+		or Color3.fromRGB(200, 60, 60)
+
+	-- Posts and crossbar.
+	for _, side in { -1, 1 } do
+		Util.Part({
+			Name = "GoalPost",
+			Size = Vector3.new(1.6, height, 1.6),
+			CFrame = CFrame.new(centre + Vector3.new(side * width * 0.5, height * 0.5, 0)),
+			Color = colour,
+			Material = Enum.Material.Metal,
+			Parent = parent,
+		})
+	end
+	Util.Part({
+		Name = "GoalBar",
+		Size = Vector3.new(width + 1.6, 1.6, 1.6),
+		CFrame = CFrame.new(centre + Vector3.new(0, height, 0)),
+		Color = colour,
+		Material = Enum.Material.Metal,
+		Parent = parent,
+	})
+
+	-- Netting: a back and two sides, thin and see-through.
+	Util.Part({
+		Name = "GoalNet",
+		Size = Vector3.new(width, height, 0.5),
+		CFrame = CFrame.new(centre + Vector3.new(0, height * 0.5, facingZ * depth)),
+		Color = Color3.fromRGB(230, 235, 240),
+		Material = Enum.Material.Fabric,
+		Transparency = 0.45,
+		Parent = parent,
+	})
+	for _, side in { -1, 1 } do
+		Util.Part({
+			Name = "GoalNet",
+			Size = Vector3.new(0.5, height, depth),
+			CFrame = CFrame.new(centre + Vector3.new(side * width * 0.5, height * 0.5, facingZ * depth * 0.5)),
+			Color = Color3.fromRGB(230, 235, 240),
+			Material = Enum.Material.Fabric,
+			Transparency = 0.45,
+			Parent = parent,
+		})
+	end
+
+	-- The goal line, painted.
+	Util.Part({
+		Name = "GoalLine",
+		Size = Vector3.new(width + 10, 0.2, 1.4),
+		CFrame = CFrame.new(centre + Vector3.new(0, 0.7, 0)),
+		Color = Color3.fromRGB(210, 50, 50),
+		Material = Enum.Material.SmoothPlastic,
+		CanCollide = false,
+		Parent = parent,
+	})
+
+	-- And the zone that actually counts it. Not solid, or the puck would
+	-- bounce off the thing meant to detect it.
+	local zone = Util.Part({
+		Name = "GoalZone",
+		Size = Vector3.new(width - 2, height - 2, depth),
+		CFrame = CFrame.new(centre + Vector3.new(0, height * 0.5, facingZ * depth * 0.5)),
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = parent,
+	})
+	zone:SetAttribute("DefendingTeam", defendingTeam)
+	table.insert(goalZones, { part = zone, defendingTeam = defendingTeam })
+end
+
+--[[ The ice, the lines and the face-off circles. ]]
+local function surface(centre: Vector3, parent: Instance)
+	local ice = Util.Part({
+		Name = "Ice",
+		Size = Vector3.new(RINK_WIDTH, 2, RINK_LENGTH),
+		CFrame = CFrame.new(centre + Vector3.new(0, 0, 0)),
+		Color = Color3.fromRGB(240, 248, 255),
+		Material = Enum.Material.Ice,
+		Reflectance = 0.14,
+		-- Properly slippery. Skating here is momentum, not walking, and a
+		-- car driven onto it is a disaster in the best way.
+		CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.02, 0.2, 1, 1),
+		Parent = parent,
+	})
+	ice:SetAttribute("Ice", true)
+
+	-- Centre red line, two blue lines.
+	for _, line in {
+		{ at = 0, colour = Color3.fromRGB(210, 50, 50), width = 2.4 },
+		{ at = -RINK_LENGTH * 0.2, colour = Color3.fromRGB(50, 90, 210), width = 3 },
+		{ at = RINK_LENGTH * 0.2, colour = Color3.fromRGB(50, 90, 210), width = 3 },
+	} do
+		Util.Part({
+			Name = "RinkLine",
+			Size = Vector3.new(RINK_WIDTH, 0.2, line.width),
+			CFrame = CFrame.new(centre + Vector3.new(0, 1.1, line.at)),
+			Color = line.colour,
+			Material = Enum.Material.SmoothPlastic,
+			CanCollide = false,
+			Parent = parent,
+		})
+	end
+
+	-- Face-off circles, drawn as rings of short arcs.
+	for _, spot in {
+		Vector3.new(0, 0, 0),
+		Vector3.new(-RINK_WIDTH * 0.26, 0, -RINK_LENGTH * 0.3),
+		Vector3.new(RINK_WIDTH * 0.26, 0, -RINK_LENGTH * 0.3),
+		Vector3.new(-RINK_WIDTH * 0.26, 0, RINK_LENGTH * 0.3),
+		Vector3.new(RINK_WIDTH * 0.26, 0, RINK_LENGTH * 0.3),
+	} do
+		local radius = 15
+		for step = 0, 23 do
+			local angle = (step / 24) * math.pi * 2
+			Util.Part({
+				Name = "FaceoffCircle",
+				Size = Vector3.new(1.2, 0.2, 4.2),
+				CFrame = CFrame.new(
+					centre + spot + Vector3.new(math.cos(angle) * radius, 1.1, math.sin(angle) * radius)
+				) * CFrame.Angles(0, -angle, 0),
+				Color = Color3.fromRGB(210, 50, 50),
+				Material = Enum.Material.SmoothPlastic,
+				CanCollide = false,
+				Parent = parent,
+			})
+		end
+	end
+end
+
+--[[ A rack of sticks, so the rink comes with something to play it with. ]]
+local function stickRack(at: Vector3, parent: Instance)
+	Util.Part({
+		Name = "StickRack",
+		Size = Vector3.new(16, 8, 4),
+		CFrame = CFrame.new(at + Vector3.new(0, 4, 0)),
+		Color = Color3.fromRGB(96, 70, 46),
+		Material = Enum.Material.Wood,
+		Parent = parent,
+	})
+	for index = 0, 5 do
+		Util.Part({
+			Name = "RackStick",
+			Size = Vector3.new(0.7, 11, 0.7),
+			CFrame = CFrame.new(at + Vector3.new(-6 + index * 2.4, 7, 0))
+				* CFrame.Angles(math.rad(12), 0, 0),
+			Color = Color3.fromRGB(190, 170, 140),
+			Material = Enum.Material.Wood,
+			CanCollide = false,
+			Parent = parent,
+		})
+	end
+end
+
+-- ===================================================================== PUCK ==
+
+--[[
+	Drop a fresh puck at centre ice.
+
+	Deliberately light and very slippery, so a bullet moves it a long way.
+	Shooting the puck IS playing hockey here -- there is no stick-handling
+	simulation and there does not need to be one.
+]]
+local function dropPuck()
+	if puck then
+		puck:Destroy()
+	end
+
+	local fresh = Util.Part({
+		Name = "Puck",
+		Size = Vector3.new(3.4, 1.2, 3.4),
+		CFrame = CFrame.new(puckHome),
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(22, 22, 26),
+		Material = Enum.Material.Rubber,
+		Anchored = false,
+		CustomPhysicalProperties = PhysicalProperties.new(0.4, 0.03, 0.35, 1, 1),
+		Parent = rink,
+	})
+	-- A cylinder lies on its own X, so turn it flat.
+	fresh.CFrame = CFrame.new(puckHome) * CFrame.Angles(0, 0, math.rad(90))
+	fresh:SetAttribute("Puck", true)
+	puck = fresh
+end
+
+--[[
+	A bullet hit the puck.
+
+	This is the shot. The puck takes off along the shot's own direction, hard
+	enough to cross the rink, which makes a rifle a perfectly good stick.
+]]
+function HockeyService.RegisterHit(part: BasePart, attacker: Player?, direction: Vector3?): boolean
+	if part:GetAttribute("Puck") ~= true then
+		return false
+	end
+
+	local push = direction or Vector3.new(0, 0, -1)
+	local flat = Vector3.new(push.X, 0, push.Z)
+	if flat.Magnitude < 0.01 then
+		flat = Vector3.new(0, 0, -1)
+	end
+
+	part.AssemblyLinearVelocity = flat.Unit * 190 + Vector3.new(0, 14, 0)
+	Sound.At("MeleeHit", part.Position, 1.1)
+
+	if attacker then
+		-- Credit for touching it last, so a goal has somebody to name.
+		part:SetAttribute("LastTouchUserId", attacker.UserId)
+	end
+	return true
+end
+
+--[[ Who last touched the puck, if they are still here. ]]
+local function lastToucher(): Player?
+	if not puck then
+		return nil
+	end
+	local userId = puck:GetAttribute("LastTouchUserId")
+	if typeof(userId) ~= "number" then
+		return nil
+	end
+	for _, player in Players:GetPlayers() do
+		if player.UserId == userId then
+			return player
+		end
+	end
+	return nil
+end
+
+--[[ Did the puck cross a goal line? ]]
+local function checkGoals()
+	local live = puck
+	if not live or not live.Parent then
+		return
+	end
+
+	local now = os.clock()
+	if now - lastGoalAt < 3 then
+		return
+	end
+
+	for _, zone in goalZones do
+		local offset = live.Position - zone.part.Position
+		local half = zone.part.Size * 0.5
+		if math.abs(offset.X) <= half.X
+			and math.abs(offset.Y) <= half.Y
+			and math.abs(offset.Z) <= half.Z
+		then
+			lastGoalAt = now
+
+			local scorer = lastToucher()
+			-- The goal belongs to whoever is NOT defending it.
+			local scoringTeam = if zone.defendingTeam == 1 then 2 else 1
+			local points = Config.Hockey.GoalPoints
+
+			if scorer then
+				PlayerState.AwardPoints(scorer, points)
+			end
+			HockeyService.Goal.Fire(scorer, scoringTeam, points)
+
+			Sound.At("RoundEnd", live.Position, 1.2)
+			dropPuck()
+			return
+		end
+	end
+end
+
+-- ==================================================================== FIGHTS ==
+
+--[[
+	A hockey fight, Blades of Steel style.
+
+	Two opposing players, both mashing, for a few seconds. The one who
+	swings most wins: the loser goes down, the winner takes the points, and
+	the winner's stick has a good chance of breaking over them -- at which
+	point the splintered half becomes a genuinely nasty melee weapon.
+
+	Note what does NOT happen: nobody's guns are taken away. You can shoot
+	your way out of a fight, or shoot two other people having one. That is
+	the rule for every sport on this map and a fight is no exception; it just
+	means the scrap is a gamble rather than a cutscene.
+]]
+function HockeyService.StartFight(a: Player, b: Player): boolean
+	if fightOf[a] or fightOf[b] then
+		return false
+	end
+	if a == b or (a.Team and b.Team and a.Team == b.Team) then
+		return false
+	end
+
+	local fight: Fight = {
+		a = a,
+		b = b,
+		endsAt = os.clock() + Config.Hockey.FightSeconds,
+		swings = { [a] = 0, [b] = 0 },
+	}
+	table.insert(fights, fight)
+	fightOf[a] = fight
+	fightOf[b] = fight
+
+	for _, who in { a, b } do
+		local foe = if who == a then b else a
+		Remotes.Event("FightStarted"):FireClient(who, {
+			opponent = foe.DisplayName,
+			duration = Config.Hockey.FightSeconds,
+		})
+	end
+
+	Remotes.Event("KillFeed"):FireAllClients(
+		`{a.DisplayName} and {b.DisplayName} are going at it`,
+		false
+	)
+	return true
+end
+
+--[[ A swing thrown during a fight. The client sends one per mash. ]]
+function HockeyService.Swing(player: Player)
+	local fight = fightOf[player]
+	if not fight then
+		return
+	end
+	fight.swings[player] = (fight.swings[player] or 0) + 1
+end
+
+local function settle(fight: Fight)
+	fightOf[fight.a] = nil
+	fightOf[fight.b] = nil
+
+	local aSwings = fight.swings[fight.a] or 0
+	local bSwings = fight.swings[fight.b] or 0
+
+	local winner, loser
+	if aSwings == bSwings then
+		-- A dead heat is a draw: both of them look silly and neither falls.
+		for _, who in { fight.a, fight.b } do
+			Remotes.Event("FightResult"):FireClient(who, { won = false, draw = true })
+		end
+		return
+	elseif aSwings > bSwings then
+		winner, loser = fight.a, fight.b
+	else
+		winner, loser = fight.b, fight.a
+	end
+
+	PlayerState.AwardPoints(winner, Config.Hockey.FightWinPoints)
+
+	-- The loser goes down. Not killed -- knocked over, which is both funnier
+	-- and leaves them in the game.
+	local loserCharacter = loser.Character
+	local loserHumanoid = loserCharacter and loserCharacter:FindFirstChildOfClass("Humanoid")
+	if loserHumanoid then
+		loserHumanoid.PlatformStand = true
+		task.delay(Config.Hockey.KnockdownSeconds, function()
+			if loserHumanoid and loserHumanoid.Parent then
+				loserHumanoid.PlatformStand = false
+			end
+		end)
+	end
+
+	-- And the stick may well break. The splintered half is the prize.
+	local brokeStick = math.random() < Config.Hockey.StickBreakChance
+	if brokeStick then
+		local state = PlayerState.Get(winner)
+		local spec = Config.Weapons[Config.Hockey.BrokenStickWeapon]
+		if spec then
+			state.weapons[Config.Hockey.BrokenStickWeapon] = {
+				ammo = spec.MagSize,
+				reloadingUntil = 0,
+				nextFireAt = 0,
+			}
+			state.equipped = Config.Hockey.BrokenStickWeapon
+			PlayerState.Changed.Fire(winner)
+		end
+	end
+
+	Remotes.Event("FightResult"):FireClient(winner, { won = true, brokeStick = brokeStick })
+	Remotes.Event("FightResult"):FireClient(loser, { won = false, brokeStick = false })
+	Remotes.Event("KillFeed"):FireAllClients(
+		`{winner.DisplayName} won the fight with {loser.DisplayName}`
+			.. (if brokeStick then " and broke their stick over them" else ""),
+		false
+	)
+
+	HockeyService.FightOver.Fire(winner, loser, brokeStick)
+end
+
+--[[ Is this player on the ice? Fights only start on the rink. ]]
+function HockeyService.OnIce(player: Player): boolean
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") or not rink then
+		return false
+	end
+	local ice = rink:FindFirstChild("Ice")
+	if not ice or not ice:IsA("BasePart") then
+		return false
+	end
+	local offset = root.Position - ice.Position
+	return math.abs(offset.X) <= RINK_WIDTH * 0.5
+		and math.abs(offset.Z) <= RINK_LENGTH * 0.5
+		and offset.Y > -6
+		and offset.Y < 30
+end
+
+-- ===================================================================== BUILD ==
+
+function HockeyService.Clear()
+	if rink then
+		rink:Destroy()
+		rink = nil
+	end
+	puck = nil
+	table.clear(goalZones)
+	table.clear(fights)
+	table.clear(fightOf)
+end
+
+--[[ Put the rink down, off to one side of the city. ]]
+function HockeyService.Build(mapSize: number)
+	HockeyService.Clear()
+
+	local model = Instance.new("Model")
+	model.Name = "HockeyRink"
+	rink = model
+
+	-- Opposite the carnival, so the two distractions are not on top of each
+	-- other and both are a drive from the middle.
+	local centre = Vector3.new(-mapSize * 0.3, 0, mapSize * 0.06)
+
+	surface(centre, model)
+	boards(centre, model)
+
+	goal(centre + Vector3.new(0, 0, -RINK_LENGTH * 0.42), -1, 1, model)
+	goal(centre + Vector3.new(0, 0, RINK_LENGTH * 0.42), 1, 2, model)
+
+	stickRack(centre + Vector3.new(RINK_WIDTH * 0.5 + 14, 0, 0), model)
+	stickRack(centre + Vector3.new(-RINK_WIDTH * 0.5 - 14, 0, 0), model)
+
+	model.Parent = workspace
+
+	puckHome = centre + Vector3.new(0, 4, 0)
+	dropPuck()
+
+	return { centre = centre, puckHome = puckHome }
+end
+
+--[[ Where the rink sits, so the city is not built on top of it. ]]
+function HockeyService.ReservedArea(mapSize: number): { centre: Vector3, radius: number }
+	return {
+		centre = Vector3.new(-mapSize * 0.3, 0, mapSize * 0.06),
+		radius = RINK_LENGTH * 0.5 + 30,
+	}
+end
+
+function HockeyService.Start()
+	Remotes.Event("FightSwing").OnServerEvent:Connect(function(player: Player)
+		HockeyService.Swing(player)
+	end)
+
+	RunService.Heartbeat:Connect(function()
+		checkGoals()
+
+		local now = os.clock()
+		for index = #fights, 1, -1 do
+			local fight = fights[index]
+			-- A fight ends on the clock, or the moment either of them leaves
+			-- or dies, which would otherwise leave it running forever.
+			local aGone = fight.a.Parent == nil
+			local bGone = fight.b.Parent == nil
+			if now >= fight.endsAt or aGone or bGone then
+				table.remove(fights, index)
+				if aGone or bGone then
+					fightOf[fight.a] = nil
+					fightOf[fight.b] = nil
+				else
+					settle(fight)
+				end
+			end
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		fightOf[player] = nil
+	end)
+end
+
+--[[ How many fights are running, for tests. ]]
+function HockeyService.FightCount(): number
+	return #fights
+end
+
+--[[ The puck itself, for tests. ]]
+function HockeyService.Puck(): BasePart?
+	return puck
+end
+
+return HockeyService

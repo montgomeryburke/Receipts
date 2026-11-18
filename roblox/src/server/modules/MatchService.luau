@@ -19,6 +19,7 @@ local PickupService = require(script.Parent:WaitForChild("PickupService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local FlagService = require(script.Parent:WaitForChild("FlagService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
@@ -149,6 +150,8 @@ local function buildArena(entry: { map: Config.MapSpec, mode: typeof(Config.Mode
 
 	WildlifeService.Populate(spec.Size)
 	CarnivalService.Build(spec.Size)
+	-- And the rink, which builds its own model beside the arena.
+	HockeyService.Build(spec.Size)
 
 	-- Flags only exist in Capture the Flag.
 	FlagService.Clear()

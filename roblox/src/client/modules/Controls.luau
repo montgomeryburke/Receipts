@@ -214,6 +214,10 @@ end
 
 local nextShotFeedback = 0
 
+-- Counts up while a hockey fight is running, so F throws punches as well as
+-- detonating. Zero means no fight.
+local fightSwings = 0
+
 local function tryFire()
 	local spec = arsenal[effectiveWeaponName()]
 	if not spec then
@@ -479,8 +483,15 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	if input.KeyCode == Enum.KeyCode.R then
 		Remotes.Event("Reload"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F then
-		-- The big one.
+		-- The big one -- and, mid-fight, a punch. The same key doing both is
+		-- deliberate: there is no spare finger during a scrap, and a diamond
+		-- round going off while you are swinging is in the spirit of it.
 		Remotes.Event("MegaDetonate"):FireServer()
+		if fightSwings > 0 then
+			fightSwings += 1
+			Remotes.Event("FightSwing"):FireServer()
+			Hud.FightSwings(fightSwings)
+		end
 	elseif input.KeyCode == Enum.KeyCode.Q then
 		Remotes.Event("Melee"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.Space then
@@ -840,6 +851,11 @@ function Controls.EquippedName(): string
 end
 
 --[[ Whether the scoreboard is up, for tests. ]]
+--[[ A fight started or finished; F throws punches while one is running. ]]
+function Controls.SetFighting(fighting: boolean)
+	fightSwings = if fighting then 1 else 0
+end
+
 function Controls.ScoreboardOpenForTests(): boolean
 	return scoreboardOpen
 end

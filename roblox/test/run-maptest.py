@@ -60,9 +60,26 @@ local Util = Util
 {strip_requires(read(SRC, "server", "modules", "ResortService.luau"))}
 end)()
 
+local Signal = (function()
+{read(SRC, "shared", "Signal.luau")}
+end)()
+
+local HockeyService = (function()
+local Util = Util
+local Config = Config
+local Signal = Signal
+-- MapService only asks this module where the rink sits. The rest of it needs
+-- remotes, sound and player state, none of which a map test has or wants.
+local Remotes = {{ Event = function() return {{ FireClient = function() end, FireAllClients = function() end, OnServerEvent = {{ Connect = function() end }} }} end }}
+local Sound = {{ At = function() end, Flat = function() end, ForWeapon = function() return "GunGeneric" end }}
+local PlayerState = {{ Get = function() return {{ weapons = {{}} }} end, AwardPoints = function() end, Changed = {{ Fire = function() end }} }}
+{strip_requires(read(SRC, "server", "modules", "HockeyService.luau"))}
+end)()
+
 local MapService = (function()
 local Util = Util
 local ResortService = ResortService
+local HockeyService = HockeyService
 {strip_requires(read(SRC, "server", "modules", "MapService.luau"))}
 end)()
 

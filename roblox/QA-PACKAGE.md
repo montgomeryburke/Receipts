@@ -70,7 +70,7 @@ so do not report things the typechecker would already catch.
   made vehicles immobile for six iterations.
 
 ---
-Reviewing commit `e0f8916`.
+Reviewing commit `a5853bc`.
 
 ---
 
@@ -375,6 +375,31 @@ Config.Weapons = {
 	-- ------------------------------------------------------------- UTILITY
 	-- Both of these are found on the map rather than carried from spawn, and
 	-- neither reloads: what you pick up is what you have.
+	--[[
+		The hockey stick, and what is left of it after a fight.
+
+		Both are hitscan with almost no range, which is how you build a melee
+		weapon out of the existing shooting code rather than a parallel one:
+		the swing is a very short, very wide shot. The broken half hits far
+		harder than the whole stick, which is the entire incentive to start
+		a fight on the ice in the first place.
+	]]
+	HockeyStick = {
+		Slot = 7, Category = "Utility", DisplayName = "Hockey Stick", Recoil = 0.5,
+		Kind = "Hitscan", Damage = 34, Cooldown = 0.5, Range = 14,
+		MagSize = 1, ReloadTime = 0, Spread = 6,
+		Color = Color3.fromRGB(190, 170, 140),
+		Automatic = true,
+		Points = 18,
+	},
+	BrokenStick = {
+		Slot = 7, Category = "Utility", DisplayName = "Broken Stick", Recoil = 0.9,
+		Kind = "Hitscan", Damage = 78, Cooldown = 0.45, Range = 13,
+		MagSize = 1, ReloadTime = 0, Spread = 7,
+		Color = Color3.fromRGB(210, 120, 90),
+		Automatic = true,
+		Points = 40,
+	},
 	Poop = {
 		Slot = 7, Category = "Utility", DisplayName = "Elephant Poop", Recoil = 0.2,
 		Kind = "Arcing", Damage = 6, Cooldown = 0.55, Range = 220, Speed = 88,
@@ -632,6 +657,43 @@ Config.CivilianLines = {
 ]]
 Config.GrenadeKeyWeapon = "Grenade"
 
+--[[
+	You are always armed.
+
+	This is the shape of the whole game: a shooter with sports scattered
+	through it -- the lazy river, the ski run, the hang glider, the hockey
+	rink -- and you can shoot people while playing any of them. No gear, no
+	seat and no minigame may ever take your weapons away.
+
+	It is here as a flag rather than only as a convention so that the sanity
+	test can assert it, and so that anybody adding the next sport reads it
+	before they add a "you cannot shoot while..." check.
+]]
+Config.WeaponsAlwaysAvailable = true
+
+--[[
+	The ice rink.
+
+	Hockey is scored like everything else, in team points, so a goal is worth
+	putting the work in for -- and a fight is worth starting. Note that
+	nothing here disables anybody's guns, which is the rule for every sport
+	on this map: you can shoot your way out of a fight, or shoot two other
+	people having one.
+]]
+Config.Hockey = {
+	GoalPoints = 220,
+	-- How long both players mash for. Short enough to be a scrap rather
+	-- than a minigame you get stuck in.
+	FightSeconds = 4,
+	FightWinPoints = 130,
+	KnockdownSeconds = 2.5,
+	-- Blades of Steel. Breaking it is the point of fighting at all, because
+	-- the splintered half is the best melee weapon in the game.
+	StickBreakChance = 0.55,
+	StickWeapon = "HockeyStick",
+	BrokenStickWeapon = "BrokenStick",
+}
+
 Config.Radar = {
 	Range = 170,
 	-- Contacts further above or below than this are off the dial entirely.
@@ -748,6 +810,15 @@ Config.Turbo = {
 	The truck is slower but heavy and sits high; the Lamborghini is quick and
 	low. Both use the same tier speeds, so the choice is feel, not advantage.
 ]]
+--[[
+	Car bodies.
+
+	`OffRoad` bodies get a climb assist in driveWheeled, which is what lets
+	them take the mountain trail. Without it the drive direction is flattened
+	dead horizontal -- deliberately, because a non-flattened one is what used
+	to launch trucks into the sky -- and a horizontal push cannot get you up
+	anything steep.
+]]
 Config.CarBodies = {
 	{
 		Name = "Truck",
@@ -762,6 +833,35 @@ Config.CarBodies = {
 		RideHeight = 2,
 		SpeedBias = 1.15,
 		Color = Color3.fromRGB(240, 190, 30),
+	},
+	-- The off-roaders. Slower on the flat, and the only things that will get
+	-- you up the mountain trail under fire.
+	{
+		Name = "G-Wagon",
+		Size = Vector3.new(11, 6, 18),
+		RideHeight = 5,
+		SpeedBias = 0.88,
+		OffRoad = true,
+		ClimbAssist = 0.42,
+		Color = Color3.fromRGB(40, 42, 46),
+	},
+	{
+		Name = "Hummer",
+		Size = Vector3.new(13, 6.4, 20),
+		RideHeight = 5.5,
+		SpeedBias = 0.8,
+		OffRoad = true,
+		ClimbAssist = 0.5,
+		Color = Color3.fromRGB(168, 160, 120),
+	},
+	{
+		Name = "Jeep",
+		Size = Vector3.new(10, 5.4, 17),
+		RideHeight = 4.6,
+		SpeedBias = 0.95,
+		OffRoad = true,
+		ClimbAssist = 0.38,
+		Color = Color3.fromRGB(70, 110, 72),
 	},
 }
 
@@ -813,16 +913,16 @@ Config.Effects = {
 	for four wheels, not for feet.
 ]]
 Config.Maps = {
-	{ Id = "BogBasin", Name = "Bog Basin", Size = 1150, MudFraction = 0.55, Buildings = 22, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
-	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 1300, MudFraction = 0.25, Buildings = 28, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
-	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 1250, MudFraction = 0.6, Buildings = 18, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
-	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 1200, MudFraction = 0.2, Buildings = 30, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
-	{ Id = "GatorCreek", Name = "Gator Creek", Size = 1200, MudFraction = 0.7, Buildings = 20, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
-	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 1450, MudFraction = 0.15, Buildings = 26, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
-	{ Id = "HollerHills", Name = "Holler Hills", Size = 1250, MudFraction = 0.45, Buildings = 22, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
-	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 1200, MudFraction = 0.3, Buildings = 32, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
-	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 1500, MudFraction = 0.35, Buildings = 24, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
-	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 1300, MudFraction = 0.4, Buildings = 29, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
+	{ Id = "BogBasin", Name = "Bog Basin", Size = 1900, MudFraction = 0.55, Buildings = 22, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
+	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 2050, MudFraction = 0.25, Buildings = 28, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
+	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 1950, MudFraction = 0.6, Buildings = 18, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
+	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 1900, MudFraction = 0.2, Buildings = 30, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
+	{ Id = "GatorCreek", Name = "Gator Creek", Size = 1950, MudFraction = 0.7, Buildings = 20, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
+	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 2150, MudFraction = 0.15, Buildings = 26, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
+	{ Id = "HollerHills", Name = "Holler Hills", Size = 2000, MudFraction = 0.45, Buildings = 22, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
+	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 1900, MudFraction = 0.3, Buildings = 32, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
+	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 2200, MudFraction = 0.35, Buildings = 24, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
+	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 2050, MudFraction = 0.4, Buildings = 29, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
 }
 
 Config.Teams = {
@@ -976,6 +1076,16 @@ export type ConfigType = {
 		MaxPoopPiles: number, SplatDuration: number,
 	},
 	GrenadeKeyWeapon: string,
+	WeaponsAlwaysAvailable: boolean,
+	Hockey: {
+		GoalPoints: number,
+		FightSeconds: number,
+		FightWinPoints: number,
+		KnockdownSeconds: number,
+		StickBreakChance: number,
+		StickWeapon: string,
+		BrokenStickWeapon: string,
+	},
 	Radar: {
 		Range: number,
 		VerticalRange: number,
@@ -1000,7 +1110,15 @@ export type ConfigType = {
 	CarTiers: { CarTier },
 	Turbo: { Multiplier: number, WalkSpeed: number, SprintWalkSpeed: number },
 	CarBodies: {
-		{ Name: string, Size: Vector3, RideHeight: number, SpeedBias: number, Color: Color3 }
+		{
+			Name: string,
+			Size: Vector3,
+			RideHeight: number,
+			SpeedBias: number,
+			Color: Color3,
+			OffRoad: boolean?,
+			ClimbAssist: number?,
+		}
 	},
 	Vehicles: { [string]: VehicleSpec },
 	MudSpeedFactor: number,
@@ -1078,6 +1196,15 @@ local EVENT_NAMES = {
 	-- The scoreboard is pulled, not pushed: streaming everyone's score to
 	-- everyone continuously costs bandwidth all match for a panel that is on
 	-- screen a few seconds at a time.
+	-- Cosmetic only: the shooter already drew their own shot locally, this
+	-- tells everybody nearby what it looked like. Cheaper than replicating
+	-- the parts, and far less laggy than drawing them server-side.
+	-- The hockey fight scene: the server starts one, the client mashes, the
+	-- server says who won.
+	"FightStarted",
+	"FightSwing",
+	"FightResult",
+	"ShotFired",
 	"ThrowGrenade",
 	"RequestScoreboard",
 	"Scoreboard",
@@ -1219,6 +1346,54 @@ function Util.ApplySpread(direction: Vector3, degrees: number, rng: Random): Vec
 end
 
 --[[ The angle between two directions, in degrees. Used by auto-aim. ]]
+--[[
+	Is this a Vector3 a server can safely do arithmetic with?
+
+	Every remote handler that takes a direction used to guard with
+	`typeof(v) ~= "Vector3"` and `v.Magnitude < 0.001`. Neither one rejects
+	NaN, because **every comparison involving NaN is false** -- so
+	`Vector3.new(0/0, 0/0, 0/0)` passed both tests, and `.Unit` stayed NaN,
+	and the NaN went on into CFrame.lookAt, workspace:Raycast and projectile
+	positions. A hostile client could send one from a console.
+
+	A finite check has to be written as its own test, not as a comparison:
+	`value ~= value` is the only thing that catches NaN, and infinity has to
+	be excluded separately.
+]]
+local function finite(value: number): boolean
+	return value == value and value > -math.huge and value < math.huge
+end
+
+function Util.IsSaneVector(value: any): boolean
+	if typeof(value) ~= "Vector3" then
+		return false
+	end
+	local vector = value :: Vector3
+	if not (finite(vector.X) and finite(vector.Y) and finite(vector.Z)) then
+		return false
+	end
+	-- Nothing legitimate is this far out, and a huge-but-finite vector is
+	-- just as good a way to break downstream maths as an infinite one.
+	return vector.Magnitude < 1e6
+end
+
+--[[
+	A direction a server can trust: sane, and long enough to normalise.
+
+	Returns the unit vector, or nil. Returning the normalised value rather
+	than a boolean means a caller cannot forget to normalise it afterwards.
+]]
+function Util.SaneDirection(value: any): Vector3?
+	if not Util.IsSaneVector(value) then
+		return nil
+	end
+	local vector = value :: Vector3
+	if vector.Magnitude < 0.001 then
+		return nil
+	end
+	return vector.Unit
+end
+
 function Util.AngleBetween(a: Vector3, b: Vector3): number
 	local aMag, bMag = a.Magnitude, b.Magnitude
 	if aMag == 0 or bMag == 0 then
@@ -1593,12 +1768,14 @@ local MonetizationService = tryRequire(modules, "MonetizationService")
 local MatchService = tryRequire(modules, "MatchService")
 local GraphicsService = tryRequire(modules, "GraphicsService")
 local ScoreboardService = tryRequire(modules, "ScoreboardService")
+local HockeyService = tryRequire(modules, "HockeyService")
 
 tryStart("GraphicsService", GraphicsService)
 tryStart("TeamService", TeamService)
 tryStart("WeaponService", WeaponService)
 tryStart("MonetizationService", MonetizationService)
 tryStart("ScoreboardService", ScoreboardService)
+tryStart("HockeyService", HockeyService)
 tryStart("MatchService", MatchService)
 
 -- ========================================================= 3. THE HUD FEED ==
@@ -1993,6 +2170,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
+local ResortService = require(script.Parent:WaitForChild("ResortService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local MapService = {}
 
@@ -2001,6 +2180,7 @@ export type MapBuild = {
 	teamSpawns: { [number]: { Vector3 } },
 	vehiclePads: { { position: Vector3, kind: string } },
 	pickupPads: { { position: Vector3, kind: string, weapon: string? } },
+	resort: ResortService.ResortBuild,
 }
 
 local SLAB = 3 -- thickness of floors and ramps
@@ -2608,7 +2788,11 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	-- Roads first, then everything else fitted into the blocks they leave.
 	-- Doing it the other way round is what produced the old maps, where
 	-- buildings sat in the middle of the road and the streets led nowhere.
-	local gridHalf = half - 46 -- an open ring outside the city, for flanking
+	-- The ring outside the city is where the resort lives now -- the lazy
+	-- river runs right round it and the mountain sits in one corner -- so it
+	-- has to be wide enough for a river channel and a mountain base, not
+	-- just a flanking lane.
+	local gridHalf = half - 250
 	local blocksPerSide = math.max(3, math.floor((gridHalf * 2) / 172 + 0.5))
 	local pitch = (gridHalf * 2) / blocksPerSide
 
@@ -2618,6 +2802,15 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	end
 
 	streets(size, pitch, offsets, model)
+
+	-- The resort: the lazy river right round the city, the mountain in one
+	-- corner, the ski run between them, the chairlift up the side. Built
+	-- before the blocks are handed out so its footprint is known when the
+	-- city is laid down.
+	local resort = ResortService.Build(size, model)
+	local resortReserved = ResortService.ReservedAreas(size)
+	-- The rink builds its own model, but the city has to know where it is.
+	table.insert(resortReserved, HockeyService.ReservedArea(size))
 
 	-- Walls, so nobody drives off the edge of the world.
 	local wallHeight = 160
@@ -2664,11 +2857,21 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	--   the spawn rows    both teams need to get out of their base without
 	--                     being funnelled through a doorway
 	local carnival = Vector3.new(size * 0.3, 0, 0)
+
+	--[[ Is this block inside something the resort already owns? ]]
+	local function insideResort(flat: Vector3): boolean
+		for _, area in resortReserved do
+			if (flat - Vector3.new(area.centre.X, 0, area.centre.Z)).Magnitude < area.radius then
+				return true
+			end
+		end
+		return false
+	end
 	local spawnReach = gridHalf - pitch * 0.9
 	local available: { Block } = {}
 	for _, block in blocks do
 		local flat = Vector3.new(block.center.X, 0, block.center.Z)
-		if (flat - carnival).Magnitude < 145 then
+		if (flat - carnival).Magnitude < 145 or insideResort(flat) then
 			block.role = "reserved"
 		elseif math.abs(block.center.Z) > spawnReach and math.abs(block.center.X) < half * 0.45 then
 			block.role = "plaza" -- kept open: this is a team's way out of its base
@@ -3003,12 +3206,54 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		})
 	end
 
+	-- Resort gear, on the pads the resort picked out: tubes at the summit, at
+	-- the foot of the ski run and round the river, and gliders at the top.
+	for _, at in resort.tubePads do
+		table.insert(vehiclePads, { position = at, kind = "Tube" })
+	end
+	for index, at in resort.skiPads do
+		-- Skis at the summit, and a glider beside them. The lower lift
+		-- station gets a glider too, so being shot down is not the end of
+		-- flying for the whole round.
+		table.insert(vehiclePads, {
+			position = at + Vector3.new(0, 2, 0),
+			kind = if index == 2 then "Glider" else "Skis",
+		})
+	end
+
+	-- Off-roaders at the lift stations, which is where you go to get up the
+	-- mountain. A Lamborghini at the bottom of a mountain trail is a joke.
+	local offRoaders = { "G-Wagon", "Hummer", "Jeep" }
+	for index, station in resort.liftStations do
+		table.insert(vehiclePads, {
+			position = station + Vector3.new(22, 2, 0),
+			kind = offRoaders[((index - 1) % #offRoaders) + 1],
+		})
+	end
+	table.insert(vehiclePads, {
+		position = resort.liftStations[1] + Vector3.new(-22, 2, 0),
+		kind = "Hummer",
+	})
+
+	-- Gear on the sniper towers, because climbing one should be worth it.
+	for index, top in resort.towerTops do
+		table.insert(pickupPads, {
+			position = top + Vector3.new(0, 2, 0),
+			kind = "Weapon",
+			weapon = if index % 2 == 0 then "AntiMaterial" else "Sniper",
+		})
+	end
+
+	-- And something at the summit, which is the longest climb on the map.
+	table.insert(pickupPads, { position = resort.summit + Vector3.new(0, 3, -14), kind = "Multiplier" })
+
 	model.Parent = workspace
 	return {
 		model = model,
 		teamSpawns = teamSpawns,
 		vehiclePads = vehiclePads,
 		pickupPads = pickupPads,
+		resort = resort,
 	}
 end
 
@@ -3078,7 +3323,25 @@ local Util = require(Shared:WaitForChild("Util"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
+local Signal = require(Shared:WaitForChild("Signal"))
+
 local VehicleService = {}
+
+--[[
+	A vehicle just went up: (position, radius, damage, lastDriver).
+
+	DamageService listens and applies the blast. It cannot be called from
+	here, because it requires this module.
+]]
+VehicleService.Wrecked = Signal.new()
+
+--[[
+	A trick was landed: (player, name, points, airtime).
+
+	Announced so the HUD and the match feed can shout about it without this
+	module needing to know either of them exists.
+]]
+VehicleService.TrickLanded = Signal.new()
 
 local WHEEL_DIAMETER = 7
 local WHEEL_WIDTH = 4
@@ -3463,6 +3726,14 @@ local function bindSeat(seat: Seat | VehicleSeat, model: Model, role: string)
 				state.vehicle = model
 				state.seatRole = role
 				PlayerState.Changed.Fire(player)
+
+				-- Remembered past the moment they get out, so an explosion
+				-- has somebody to credit. A blast with no attacker scores
+				-- nothing and appears in the kill feed as a nameless death.
+				local vehicleState = active[model]
+				if vehicleState and role == "Driver" then
+					vehicleState.lastDriver = player
+				end
 			end
 			return
 		end
@@ -3485,9 +3756,31 @@ end
 	A car. Tier decides how fast it is; the body style is a coin flip between
 	a truck and a Lamborghini, so what pulls up beside you varies.
 ]]
-function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Player?): Model
+function VehicleService.SpawnCar(
+	tierIndex: number,
+	position: Vector3,
+	owner: Player?,
+	bodyName: string?
+): Model
 	local tier = Config.CarTiers[math.clamp(tierIndex, 1, #Config.CarTiers)]
+
+	--[[
+		Which body turns up.
+
+		Normally a coin flip, so what pulls up beside you varies. Named
+		explicitly for the mountain, where the whole point is that the thing
+		waiting at the trailhead can actually climb it -- a Lamborghini at
+		the bottom of a mountain trail is a joke, not a vehicle.
+	]]
 	local body = Config.CarBodies[bodyPicker:NextInteger(1, #Config.CarBodies)]
+	if bodyName then
+		for _, candidate in Config.CarBodies do
+			if candidate.Name == bodyName then
+				body = candidate
+				break
+			end
+		end
+	end
 
 	local model, chassis, wheels = buildChassis(
 		`{body.Name}_{tier.Name}`,
@@ -3519,6 +3812,8 @@ function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Pl
 		maxSpeed = tier.MaxSpeed * body.SpeedBias,
 		torque = tier.Torque,
 		turnSpeed = tier.TurnSpeed,
+		offRoad = body.OffRoad == true,
+		climbAssist = body.ClimbAssist or 0,
 	}
 	return model
 end
@@ -3821,12 +4116,392 @@ function VehicleService.SpawnTorpedo(position: Vector3): Model
 		velocity = velocity,
 		orientation = orientation,
 		heading = body.CFrame.Rotation,
+		-- A second on the pad before it will go off, so it does not detonate
+		-- against the ground the instant it is built.
 		armedAt = os.clock() + 1.0,
+		expiresAt = os.clock() + (spec.Lifetime or 20),
 	}
 	return model
 end
 
 --[[ Spawn whichever big toy a map pad asks for. ]]
+--[[
+	An inner tube.
+
+	The one piece of kit that works on both halves of the resort: ride it
+	down the ski run and it carries straight on into the lazy river at the
+	bottom, because it is pushed by whatever it is sitting in or on -- the
+	river's current, or gravity down a snow slope -- rather than by an engine
+	of its own.
+
+	It is a seat, so your guns keep working. That is the rule for every sport
+	here: you are always armed.
+]]
+function VehicleService.SpawnTube(position: Vector3): Model
+	local model = Instance.new("Model")
+	model.Name = "Tube"
+
+	local hub = Util.Part({
+		Name = "Chassis",
+		Size = Vector3.new(11, 3, 11),
+		CFrame = CFrame.new(position),
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(250, 150, 40),
+		Material = Enum.Material.Plastic,
+		Anchored = false,
+		-- Light and very slippery, so it skids down snow and bobs along the
+		-- river instead of gripping like a tyre.
+		CustomPhysicalProperties = PhysicalProperties.new(0.25, 0.08, 0.5, 1, 1),
+		Parent = model,
+	})
+	-- A cylinder's flat faces point along its own X, so stand it up.
+	hub.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
+	model.PrimaryPart = hub
+
+	-- The hole in the middle, which is what makes it read as a tube.
+	Util.Part({
+		Name = "TubeHole",
+		Size = Vector3.new(5.4, 3.4, 5.4),
+		CFrame = hub.CFrame,
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(40, 40, 46),
+		Transparency = 0.75,
+		CanCollide = false,
+		Anchored = false,
+		Massless = true,
+		Parent = model,
+	})
+	Util.Weld(hub, model:FindFirstChild("TubeHole") :: BasePart)
+
+	local seat = Instance.new("VehicleSeat")
+	seat.Name = "DriverSeat"
+	seat.Size = Vector3.new(4, 1, 4)
+	seat.CFrame = CFrame.new(position + Vector3.new(0, 1.4, 0))
+	seat.Color = Color3.fromRGB(240, 130, 30)
+	seat.Transparency = 1
+	seat.Anchored = false
+	seat.Massless = true
+	-- No engine of its own: the current and the slope do the work.
+	seat.MaxSpeed = 0
+	seat.Torque = 0
+	seat.TurnSpeed = 0
+	seat.Parent = model
+	Util.Weld(hub, seat)
+
+	-- Steering only. A LinearVelocity in plane mode would fight gravity, so
+	-- the tube is pushed by an impulse each frame instead and this just
+	-- points it.
+	local turn = Instance.new("AngularVelocity")
+	turn.Name = "TurnVelocity"
+	turn.Attachment0 = Util.Attachment(hub, Vector3.new())
+	turn.RelativeTo = Enum.ActuatorRelativeTo.World
+	turn.MaxTorque = 90000
+	turn.AngularVelocity = Vector3.new()
+	turn.Enabled = true
+	turn.Parent = hub
+
+	addSitPrompt(seat, "Ride the tube", "Tube")
+	bindSeat(seat, model, "Rider")
+	addVehicleLabel(hub, "Tube", Color3.fromRGB(255, 190, 120))
+
+	model:SetAttribute("Health", 40)
+	model:SetAttribute("MaxHealth", 40)
+	model:SetAttribute("VehicleKind", "Tube")
+	model.Parent = workspace
+
+	active[model] = {
+		kind = "Tube",
+		chassis = hub,
+		seat = seat,
+		turn = turn,
+	}
+	return model
+end
+
+--[[
+	A hang glider.
+
+	Launched off the summit, it gives you the one thing no other vehicle on
+	the map does: a slow, quiet look down at everybody. It trades height for
+	speed like a real wing -- pull the nose up and you climb briefly and then
+	stall, push it down and you go fast and lose altitude.
+
+	Spacebar bails out, and the existing parachute catches you, which is what
+	makes being shot down survivable rather than just fatal.
+]]
+function VehicleService.SpawnGlider(position: Vector3): Model
+	local model = Instance.new("Model")
+	model.Name = "Glider"
+
+	local frame = Util.Part({
+		Name = "Chassis",
+		Size = Vector3.new(4, 2, 12),
+		CFrame = CFrame.new(position),
+		Color = Color3.fromRGB(70, 74, 82),
+		Material = Enum.Material.Metal,
+		Anchored = false,
+		CustomPhysicalProperties = PhysicalProperties.new(0.2, 0.3, 0.4, 1, 1),
+		Parent = model,
+	})
+	model.PrimaryPart = frame
+
+	-- The wing: a wide shallow delta, in two halves so it reads as swept.
+	for _, side in { -1, 1 } do
+		local panel = Util.Part({
+			Name = "Wing",
+			Size = Vector3.new(26, 0.6, 13),
+			CFrame = CFrame.new(position + Vector3.new(side * 13, 3.4, 0))
+				* CFrame.Angles(0, 0, math.rad(side * -9)),
+			Color = if side < 0 then Color3.fromRGB(235, 80, 70) else Color3.fromRGB(70, 130, 235),
+			Material = Enum.Material.Fabric,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(frame, panel)
+	end
+
+	local seat = Instance.new("VehicleSeat")
+	seat.Name = "DriverSeat"
+	seat.Size = Vector3.new(3, 1, 4)
+	seat.CFrame = CFrame.new(position + Vector3.new(0, 1, 0))
+	seat.Color = Color3.fromRGB(60, 62, 70)
+	seat.Anchored = false
+	seat.Massless = true
+	seat.MaxSpeed = 0
+	seat.Torque = 0
+	seat.TurnSpeed = 0
+	seat.Parent = model
+	Util.Weld(frame, seat)
+
+	local lift = Instance.new("LinearVelocity")
+	lift.Name = "DriveVelocity"
+	lift.Attachment0 = Util.Attachment(frame, Vector3.new())
+	lift.RelativeTo = Enum.ActuatorRelativeTo.World
+	lift.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	lift.ForceLimitsEnabled = false
+	lift.VectorVelocity = Vector3.new()
+	lift.Enabled = false
+	lift.Parent = frame
+
+	local attitude = Instance.new("AlignOrientation")
+	attitude.Name = "Attitude"
+	attitude.Attachment0 = Util.Attachment(frame, Vector3.new(), "AttitudeAnchor")
+	attitude.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	attitude.RigidityEnabled = true
+	attitude.CFrame = frame.CFrame.Rotation
+	attitude.Enabled = false
+	attitude.Parent = frame
+
+	addSitPrompt(seat, "Take the glider", "Hang Glider")
+	bindSeat(seat, model, "Rider")
+	addVehicleLabel(frame, "Hang Glider", Color3.fromRGB(190, 220, 255))
+
+	model:SetAttribute("Health", 55)
+	model:SetAttribute("MaxHealth", 55)
+	model:SetAttribute("VehicleKind", "Glider")
+	model.Parent = workspace
+
+	active[model] = {
+		kind = "Glider",
+		chassis = frame,
+		seat = seat,
+		velocity = lift,
+		orientation = attitude,
+		heading = frame.CFrame.Rotation,
+		airspeed = 0,
+	}
+	return model
+end
+
+--[[
+	Skis.
+
+	These cannot be a seat. A Roblox seat puts the character into a sitting
+	pose and there is no way round that, and the whole point of the ski run
+	is that you come down it standing up, shooting at people. So the rider is
+	welded to the board instead with PlatformStand set, which holds them
+	upright and stops the walk controller fighting the slope.
+
+	The upshot is that skiing is a shooting posture. Guns, grenades, the
+	mega-detonate key -- all of it works on the way down, which is the rule
+	for every sport on this map.
+]]
+local SKI_SLOPE_SPEED = 185
+local SKI_CARVE_RATE = 2.3
+
+function VehicleService.SpawnSkis(position: Vector3): Model
+	local model = Instance.new("Model")
+	model.Name = "Skis"
+
+	-- The board: invisible, and the thing everything else is welded to. Two
+	-- visible skis sit on top of it.
+	local board = Util.Part({
+		Name = "Chassis",
+		Size = Vector3.new(4.5, 0.6, 13),
+		CFrame = CFrame.new(position),
+		Transparency = 1,
+		Anchored = false,
+		-- Slippery and light, so it carries speed down snow.
+		CustomPhysicalProperties = PhysicalProperties.new(0.2, 0.04, 0.3, 1, 1),
+		Parent = model,
+	})
+	model.PrimaryPart = board
+
+	for _, side in { -1, 1 } do
+		local ski = Util.Part({
+			Name = "Ski",
+			Size = Vector3.new(1.3, 0.4, 13),
+			CFrame = CFrame.new(position + Vector3.new(side * 1.5, 0, 0)),
+			Color = if side < 0 then Color3.fromRGB(240, 70, 60) else Color3.fromRGB(255, 200, 50),
+			Material = Enum.Material.SmoothPlastic,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		-- The turned-up tip, which is most of what makes it read as a ski.
+		local tip = Util.Part({
+			Name = "SkiTip",
+			Size = Vector3.new(1.3, 0.4, 2.2),
+			CFrame = CFrame.new(position + Vector3.new(side * 1.5, 0.45, -7))
+				* CFrame.Angles(math.rad(-24), 0, 0),
+			Color = ski.Color,
+			Material = Enum.Material.SmoothPlastic,
+			Anchored = false,
+			Massless = true,
+			Parent = model,
+		})
+		Util.Weld(board, ski)
+		Util.Weld(board, tip)
+	end
+
+	-- Steering, and something to hold the board the right way up so it does
+	-- not simply topple over the first time it is nudged.
+	local turn = Instance.new("AngularVelocity")
+	turn.Name = "TurnVelocity"
+	turn.Attachment0 = Util.Attachment(board, Vector3.new())
+	turn.RelativeTo = Enum.ActuatorRelativeTo.World
+	turn.MaxTorque = 160000
+	turn.AngularVelocity = Vector3.new()
+	turn.Enabled = true
+	turn.Parent = board
+
+	local upright = Instance.new("AlignOrientation")
+	upright.Name = "Upright"
+	upright.Attachment0 = Util.Attachment(board, Vector3.new(), "UprightAnchor")
+	upright.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	-- NOT rigid: a rigid board cannot be tipped, and tipping it is how you
+	-- do a trick.
+	upright.MaxTorque = 42000
+	upright.Responsiveness = 22
+	upright.CFrame = board.CFrame.Rotation
+	upright.Enabled = true
+	upright.Parent = board
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "SkiPrompt"
+	prompt.ActionText = "Grab the skis"
+	prompt.ObjectText = "Skis"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 16
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = board
+
+	prompt.Triggered:Connect(function(player)
+		VehicleService.MountSkis(player, model)
+	end)
+
+	addVehicleLabel(board, "Skis", Color3.fromRGB(255, 230, 140))
+
+	model:SetAttribute("Health", 30)
+	model:SetAttribute("MaxHealth", 30)
+	model:SetAttribute("VehicleKind", "Skis")
+	model.Parent = workspace
+
+	active[model] = {
+		kind = "Skis",
+		chassis = board,
+		turn = turn,
+		upright = upright,
+		rider = nil,
+		-- Trick bookkeeping, filled in by the drive loop.
+		airborneSince = nil,
+		spin = 0,
+		lastFacing = nil,
+	}
+	return model
+end
+
+--[[ Strap a player onto a pair of skis. ]]
+function VehicleService.MountSkis(player: Player, model: Model)
+	local state = active[model]
+	if not state or state.rider then
+		return
+	end
+
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
+		return
+	end
+	-- Not while sitting in something else.
+	if humanoid.SeatPart then
+		return
+	end
+
+	local board = state.chassis :: BasePart
+	root.CFrame = board.CFrame * CFrame.new(0, 3.2, 0)
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "SkiWeld"
+	weld.Part0 = board
+	weld.Part1 = root
+	weld.Parent = board
+
+	-- Upright, and the walk controller out of the way.
+	humanoid.PlatformStand = true
+
+	state.rider = player
+	local playerState = PlayerState.Get(player)
+	-- Reusing the vehicle slot on purpose: everything that already knows
+	-- about "the thing you are riding" -- the eject key, the aim reference,
+	-- the mounted-weapon rules -- then works for skis with no special cases.
+	playerState.vehicle = model
+	playerState.seatRole = "Skier"
+	PlayerState.Changed.Fire(player)
+end
+
+--[[ Let go of the skis. Harmless if the player is not on any. ]]
+function VehicleService.DismountSkis(player: Player)
+	for model, state in active do
+		if state.kind == "Skis" and state.rider == player then
+			local board = state.chassis :: BasePart
+			local weld = board:FindFirstChild("SkiWeld")
+			if weld then
+				weld:Destroy()
+			end
+
+			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				humanoid.PlatformStand = false
+			end
+
+			state.rider = nil
+			local playerState = PlayerState.Get(player)
+			if playerState.vehicle == model then
+				playerState.vehicle = nil
+				playerState.seatRole = nil
+				PlayerState.Changed.Fire(player)
+			end
+			return true
+		end
+	end
+	return false
+end
+
 function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 	if kind == "TurretTruck" then
 		return VehicleService.SpawnTurretTruck(position)
@@ -3836,6 +4511,15 @@ function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 		return VehicleService.SpawnPlane(position)
 	elseif kind == "Torpedo" then
 		return VehicleService.SpawnTorpedo(position)
+	elseif kind == "Tube" then
+		return VehicleService.SpawnTube(position)
+	elseif kind == "Glider" then
+		return VehicleService.SpawnGlider(position)
+	elseif kind == "Skis" then
+		return VehicleService.SpawnSkis(position)
+	elseif kind == "G-Wagon" or kind == "Hummer" or kind == "Jeep" then
+		-- The off-roaders, by name, for the mountain pads.
+		return VehicleService.SpawnCar(3, position, nil, kind)
 	end
 	return nil
 end
@@ -3906,12 +4590,16 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 			state.groundIsMud = hit ~= nil
 				and (hit.Instance.Name == "Mud" or hit.Material == Enum.Material.Mud)
 			state.groundIsBoost = hit ~= nil and hit.Instance:GetAttribute("Boost") == true
+			-- Kept for the climb assist below, which needs to know how
+			-- steeply the ground under the car is tilted.
+			state.groundNormal = if hit then hit.Normal else nil
 		end
 	else
 		-- Parked: forget what it was standing on, so pulling away from a mud
 		-- pool does not carry the drag with it.
 		state.groundIsMud = false
 		state.groundIsBoost = false
+		state.groundNormal = nil
 		state.nextGroundSampleAt = 0
 		state.lastGroundSampleAt = nil
 	end
@@ -3985,9 +4673,37 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local flat = Vector3.new(look.X, 0, look.Z)
 	flat = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
 
+	--[[
+		Climb assist, for off-roaders only.
+
+		A dead-horizontal push cannot get a car up anything steep: it drives
+		into the hill rather than over it. So the G-Wagon, the Hummer and the
+		Jeep are allowed to tilt their drive axis a little way up the slope
+		they are standing on -- enough to take the mountain trail, and only
+		ever as much as the ground under them is actually tilted.
+
+		An ordinary car gets none of this on purpose. A non-flattened drive
+		axis is exactly what used to fire trucks into the sky, and the drive
+		test still asserts they stay down.
+	]]
+	local driveAxis = flat
+	local assist = state.climbAssist or 0
+	if assist > 0 and state.groundNormal then
+		local normal = state.groundNormal :: Vector3
+		-- A flat surface has a vertical normal, so this is zero there and
+		-- the assist simply does not engage.
+		local tilt = Vector3.new(normal.X, 0, normal.Z).Magnitude
+		if tilt > 0.12 then
+			local lifted = Vector3.new(flat.X, tilt * assist, flat.Z)
+			if lifted.Magnitude > 0.01 then
+				driveAxis = lifted.Unit
+			end
+		end
+	end
+
 	drive.Enabled = true
 	turn.Enabled = true
-	drive.LineDirection = flat
+	drive.LineDirection = driveAxis
 	drive.LineVelocity = current
 
 	-- The engine rises and falls with road speed.
@@ -4030,6 +4746,332 @@ end
 	Fly a plane. Throttle changes speed, steering rolls and turns, and the
 	nose pitches with the seat's own up/down input.
 ]]
+--[[
+	Drive a tube.
+
+	A tube has no engine. It goes where it is pushed:
+
+	  - In the river, a FlowZone part carries a direction attribute and the
+	    tube is pushed along it. That is what makes the lazy river lazy and
+	    still a way to travel.
+	  - On snow, gravity does it: the steeper the slope under you, the faster
+	    you go, which is what lets you ride the ski run on a tube and shoot
+	    off the end of it into the water without ever touching a throttle.
+
+	Steering only points you. Nothing here fights gravity, so the tube still
+	falls off a cliff like an object rather than hovering like a vehicle.
+]]
+-- Declared ahead of driveTube, which uses it: the trick scorer itself needs
+-- Util.AngleBetween and PlayerState, so it is defined further down.
+local stepTricks: (Model, any, Player?, boolean, number) -> ()
+
+local TUBE_FLOW_SPEED = 46
+local TUBE_SLOPE_SPEED = 118
+
+local function driveTube(model: Model, state: any, deltaTime: number)
+	local hub = state.chassis :: BasePart
+	local seat = state.seat :: VehicleSeat
+	local turn = state.turn :: AngularVelocity
+
+	-- Steering works whether or not anybody is aboard; an empty tube simply
+	-- is not told to turn.
+	turn.AngularVelocity = if seat.Occupant
+		then Vector3.new(0, -seat.Steer * 1.9, 0)
+		else Vector3.new()
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local occupantCharacter = if seat.Occupant then seat.Occupant.Parent else nil
+	params.FilterDescendantsInstances = if occupantCharacter
+		then { model, occupantCharacter }
+		else { model }
+
+	local push = Vector3.new()
+
+	-- The river first: a current beats a slope.
+	local flowHit = workspace:Raycast(hub.Position + Vector3.new(0, 2, 0), Vector3.new(0, -8, 0), params)
+	local flowPart = if flowHit then flowHit.Instance else nil
+	local onFlow = false
+	if flowPart then
+		local fx = flowPart:GetAttribute("FlowX")
+		local fz = flowPart:GetAttribute("FlowZ")
+		if typeof(fx) == "number" and typeof(fz) == "number" then
+			onFlow = true
+			push = Vector3.new(fx, 0, fz) * TUBE_FLOW_SPEED
+		end
+	end
+
+	if not onFlow then
+		-- Snow: slide downhill, hard. The surface normal gives both the
+		-- direction and the steepness in one go.
+		local ground = workspace:Raycast(hub.Position, Vector3.new(0, -7, 0), params)
+		if ground and ground.Material == Enum.Material.Snow then
+			local normal = ground.Normal
+			local downhill = Vector3.new(normal.X, 0, normal.Z)
+			if downhill.Magnitude > 0.02 then
+				-- A flat surface has a vertical normal and so no downhill
+				-- component at all, which is exactly right: you stop.
+				push = downhill.Unit * (downhill.Magnitude * TUBE_SLOPE_SPEED)
+			end
+		end
+	end
+
+	if push.Magnitude > 0.1 then
+		-- An impulse rather than a velocity constraint, so the tube keeps
+		-- its own vertical motion and still falls, jumps and lands.
+		local current = hub.AssemblyLinearVelocity
+		local flat = Vector3.new(current.X, 0, current.Z)
+		local wanted = push - flat
+		-- Eased, so it accelerates into the current instead of snapping.
+		hub.AssemblyLinearVelocity = current + Vector3.new(wanted.X, 0, wanted.Z) * math.min(1, deltaTime * 3.2)
+	end
+
+	-- Tricks off the table tops count on a tube too.
+	local rider = if seat.Occupant and seat.Occupant.Parent
+		then Players:GetPlayerFromCharacter(seat.Occupant.Parent)
+		else nil
+	local grounded = workspace:Raycast(hub.Position, Vector3.new(0, -6, 0), params) ~= nil
+	stepTricks(model, state, rider, grounded, deltaTime)
+end
+
+--[[
+	Fly a hang glider.
+
+	It trades height for speed the way a wing does: nose down and you gain
+	speed and lose altitude, nose up and you convert speed back into a brief
+	climb and then run out of it. There is no throttle, which is the whole
+	character of the thing.
+]]
+local GLIDE_MIN_SPEED = 42
+local GLIDE_MAX_SPEED = 140
+local GLIDE_SINK = 13
+
+local function driveGlider(model: Model, state: any, deltaTime: number)
+	local frame = state.chassis :: BasePart
+	local seat = state.seat :: VehicleSeat
+	local lift = state.velocity :: LinearVelocity
+	local attitude = state.orientation :: AlignOrientation
+
+	if not seat.Occupant then
+		lift.Enabled = false
+		attitude.Enabled = false
+		state.airspeed = 0
+		return
+	end
+
+	lift.Enabled = true
+	attitude.Enabled = true
+
+	--[[
+		W pushes the nose DOWN, S pulls it up.
+
+		Note the minus sign. A positive rotation about X takes the look
+		vector upward in Roblox, so without it W climbed and the glider lost
+		speed when you asked it to dive -- which the test caught as "diving
+		trades height for speed" failing with the dive SLOWER than level.
+	]]
+	local pitchInput = seat.Throttle
+	local rollInput = seat.Steer
+
+	state.heading = state.heading
+		* CFrame.Angles(-pitchInput * 0.9 * deltaTime, -rollInput * 1.25 * deltaTime, 0)
+
+	-- Keep the nose from going fully vertical either way, which would leave
+	-- the wing with no sensible forward direction at all.
+	local look = state.heading.LookVector
+	if look.Y > 0.72 or look.Y < -0.86 then
+		state.heading = state.heading * CFrame.Angles(pitchInput * 0.9 * deltaTime, 0, 0)
+		look = state.heading.LookVector
+	end
+
+	attitude.CFrame = state.heading
+
+	-- Diving builds speed, climbing spends it.
+	local gain = -look.Y * 95
+	state.airspeed = math.clamp(
+		(state.airspeed or GLIDE_MIN_SPEED) + (gain - 16) * deltaTime,
+		GLIDE_MIN_SPEED,
+		GLIDE_MAX_SPEED
+	)
+
+	-- Always sinking a little, so a glide is a glide and not a hover.
+	local sink = -GLIDE_SINK * (1 - math.clamp(state.airspeed / GLIDE_MAX_SPEED, 0, 1) * 0.55)
+	lift.VectorVelocity = look * state.airspeed + Vector3.new(0, sink, 0)
+end
+
+--[[
+	Tricks, SSX-style.
+
+	What counts as a trick is measured rather than declared: the server
+	watches how long you were off the ground and how far the board turned
+	while you were up there, and pays out on the landing. Nothing is reported
+	by the client, so there is nothing to lie about -- a trick you did not do
+	cannot be claimed, and a trick you did cannot be denied.
+
+	Rotation is accumulated per frame from the board's own facing, so a slow
+	720 and a fast 720 score the same, which is as it should be.
+]]
+local TRICK_MIN_AIRTIME = 0.45
+local TRICK_SPIN_POINTS = 0.55 -- per degree turned
+local TRICK_AIR_POINTS = 26 -- per second airborne
+
+local TRICK_NAMES = {
+	{ spin = 1080, name = "TRIPLE CORK" },
+	{ spin = 720, name = "DOUBLE SPIN" },
+	{ spin = 480, name = "BIG SPIN" },
+	{ spin = 270, name = "SEVEN-TWENTY" },
+	{ spin = 160, name = "SPINNER" },
+	{ spin = 0, name = "BIG AIR" },
+}
+
+local function trickName(spin: number): string
+	for _, entry in TRICK_NAMES do
+		if spin >= entry.spin then
+			return entry.name
+		end
+	end
+	return "BIG AIR"
+end
+
+--[[
+	Watch a ride for airtime and spin, and pay out when it lands.
+
+	Shared by skis and tubes, because the brief was tricks off the table tops
+	and you can take either down the run.
+]]
+function stepTricks(model, state, rider, grounded, deltaTime)
+	local board = state.chassis :: BasePart
+	local facing = board.CFrame.LookVector
+	local flat = Vector3.new(facing.X, 0, facing.Z)
+
+	if state.lastFacing and flat.Magnitude > 0.01 then
+		state.spin = (state.spin or 0) + Util.AngleBetween(state.lastFacing, flat.Unit)
+	end
+	state.lastFacing = if flat.Magnitude > 0.01 then flat.Unit else state.lastFacing
+
+	if not grounded then
+		if not state.airborneSince then
+			state.airborneSince = os.clock()
+			state.spin = 0
+		end
+		return
+	end
+
+	local launched = state.airborneSince
+	state.airborneSince = nil
+	if not launched or not rider then
+		state.spin = 0
+		return
+	end
+
+	local airtime = os.clock() - launched
+	state.spin = state.spin or 0
+	if airtime < TRICK_MIN_AIRTIME then
+		-- A bump in the piste is not a trick.
+		state.spin = 0
+		return
+	end
+
+	-- Taken into a local BEFORE the reset. Reading state.spin after zeroing
+	-- it meant every trick, however far it turned, came out named "BIG AIR"
+	-- while being paid for the spin -- the score was right and the shout was
+	-- wrong, which is the kind of thing nobody notices for months.
+	local spun = state.spin
+	state.spin = 0
+
+	local points = math.floor(airtime * TRICK_AIR_POINTS + spun * TRICK_SPIN_POINTS)
+	if points <= 0 then
+		return
+	end
+
+	local awarded = PlayerState.AwardPoints(rider, points)
+	VehicleService.TrickLanded.Fire(rider, trickName(spun), awarded, airtime)
+
+	local _ = deltaTime
+end
+
+--[[
+	Ski down a mountain.
+
+	Same idea as the tube -- gravity does the work, the slope decides how
+	much -- but faster, and it carves: steering turns the board, and the
+	board's own facing is what you accelerate along, so you can traverse
+	across a slope instead of only straight down it.
+]]
+local function driveSkis(model: Model, state: any, deltaTime: number)
+	local board = state.chassis :: BasePart
+	local turn = state.turn :: AngularVelocity
+	local upright = state.upright :: AlignOrientation
+	local rider = state.rider :: Player?
+
+	-- Nobody aboard: let it lie still rather than skidding off on its own.
+	if not rider or not rider.Parent then
+		if rider then
+			VehicleService.DismountSkis(rider)
+		end
+		turn.AngularVelocity = Vector3.new()
+		return
+	end
+
+	local character = rider.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		VehicleService.DismountSkis(rider)
+		return
+	end
+
+	-- Steering comes off the move keys. There is no seat, so the inputs
+	-- arrive as the humanoid's own walk direction.
+	local steer = 0
+	local wish = humanoid.MoveDirection
+	if wish.Magnitude > 0.1 then
+		local across = Vector3.new(-board.CFrame.LookVector.Z, 0, board.CFrame.LookVector.X)
+		steer = math.clamp(wish:Dot(across) * 1.6, -1, 1)
+	end
+	turn.AngularVelocity = Vector3.new(0, -steer * SKI_CARVE_RATE, 0)
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = if character then { model, character } else { model }
+
+	local ground = workspace:Raycast(board.Position, Vector3.new(0, -6, 0), params)
+	local grounded = ground ~= nil
+
+	if ground and ground.Material == Enum.Material.Snow then
+		local normal = ground.Normal
+		local downhill = Vector3.new(normal.X, 0, normal.Z)
+		if downhill.Magnitude > 0.02 then
+			-- Accelerate along the board's own facing, biased downhill, so
+			-- carving across the fall line actually works.
+			local steepness = downhill.Magnitude
+			local heading = board.CFrame.LookVector
+			local flatHeading = Vector3.new(heading.X, 0, heading.Z)
+			local blend = if flatHeading.Magnitude > 0.01
+				then (flatHeading.Unit * 0.55 + downhill.Unit * 0.45).Unit
+				else downhill.Unit
+
+			local target = blend * (steepness * SKI_SLOPE_SPEED)
+			local current = board.AssemblyLinearVelocity
+			local wanted = target - Vector3.new(current.X, 0, current.Z)
+			board.AssemblyLinearVelocity = current
+				+ Vector3.new(wanted.X, 0, wanted.Z) * math.min(1, deltaTime * 2.6)
+		end
+	end
+
+	-- Hold the board level when it is on the ground, and let it tumble
+	-- freely in the air so a trick looks like a trick.
+	upright.Enabled = grounded
+	if grounded then
+		local heading = board.CFrame.LookVector
+		local flatHeading = Vector3.new(heading.X, 0, heading.Z)
+		if flatHeading.Magnitude > 0.01 then
+			upright.CFrame = CFrame.lookAt(Vector3.new(), flatHeading.Unit)
+		end
+	end
+
+	stepTricks(model, state, rider, grounded, deltaTime)
+end
+
 local function drivePlane(model: Model, state: any, deltaTime: number)
 	local spec = Config.Vehicles.Plane
 	local seat = state.seat :: VehicleSeat
@@ -4097,6 +5139,49 @@ local function driveTorpedo(model: Model, state: any, deltaTime: number)
 		* CFrame.Angles(pitch * turnRate * deltaTime, -steer * turnRate * deltaTime, 0)
 	state.orientation.CFrame = state.heading
 	state.velocity.VectorVelocity = state.heading.LookVector * runSpeed
+
+	--[[
+		Hitting things, and running out.
+
+		Neither of these existed. `armedAt` was written at spawn and never
+		read once, and `Lifetime` was in the config with a comment promising
+		"it dies on its own after this long, with you on it". So the torpedo
+		-- the thing you steer into somebody -- passed straight through them
+		and then flew forever, or until it hit a wall and sat there.
+
+		A raycast ahead rather than a Touched connection: the body is driven
+		by a velocity constraint at 150 studs a second, which is two and a
+		half studs per frame, and contact events on something moving that
+		fast are not something to rely on.
+	]]
+	local now = os.clock()
+	if now < (state.armedAt or 0) then
+		return
+	end
+
+	if now >= (state.expiresAt or math.huge) then
+		VehicleService.Explode(model)
+		return
+	end
+
+	local chassis = state.chassis :: BasePart
+	local nose = state.heading.LookVector
+	-- Far enough ahead to cover a frame of travel plus the shell itself.
+	local reach = runSpeed * math.max(deltaTime, 1 / 60) + 11
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	-- Not itself, and not the person riding it.
+	local rider = seat.Occupant
+	local riderCharacter = if rider then rider.Parent else nil
+	params.FilterDescendantsInstances = if riderCharacter
+		then { model, riderCharacter }
+		else { model }
+
+	local hit = workspace:Raycast(chassis.Position, nose * reach, params)
+	if hit then
+		VehicleService.Explode(model)
+	end
 end
 
 --[[
@@ -4137,6 +5222,18 @@ end
 	without touching your horizontal movement, so you can still steer where
 	you land.
 ]]
+--[[
+	Who is already mid-ejection.
+
+	The Parachute guard below is checked BEFORE a task.wait, and the
+	parachute is only created after it. Ten Eject calls in a single frame
+	therefore all passed the guard, each stacking another 70 studs/sec of
+	upward velocity and another LinearVelocity constraint -- a free launch to
+	the top of the skybox. The claim has to be staked synchronously, before
+	anything yields.
+]]
+local ejecting: { [Player]: true } = {}
+
 function VehicleService.Eject(player: Player)
 	local character = player.Character
 	if not character then
@@ -4147,19 +5244,28 @@ function VehicleService.Eject(player: Player)
 	if not humanoid or not root or not root:IsA("BasePart") then
 		return
 	end
+	--[[
+		Skis are not a seat, so the bail key has to know about them
+		separately -- and PlatformStand means you cannot simply jump off.
+	]]
 	if not humanoid.SeatPart then
+		if VehicleService.DismountSkis(player) then
+			return
+		end
 		return
 	end
-	-- Already under a canopy.
-	if character:FindFirstChild("Parachute") then
+	-- Already under a canopy, or already on the way to one.
+	if character:FindFirstChild("Parachute") or ejecting[player] then
 		return
 	end
+	ejecting[player] = true
 
 	humanoid.Sit = false
 
 	-- Thrown clear of whatever you were riding.
 	task.wait(0.1)
-	if not root.Parent then
+	if not root.Parent or player.Parent == nil then
+		ejecting[player] = nil
 		return
 	end
 	root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + Vector3.new(0, 70, 0)
@@ -4241,6 +5347,7 @@ function VehicleService.Eject(player: Player)
 				break
 			end
 		end
+		ejecting[player] = nil
 		if canopy.Parent then
 			canopy:Destroy()
 		end
@@ -4291,16 +5398,38 @@ function VehicleService.Explode(model: Model)
 	local kind = model:GetAttribute("VehicleKind")
 
 	local blastRadius = 30
+	local blastDamage = 110
 	if kind == "Torpedo" then
-		blastRadius = Config.Vehicles.Torpedo.BlastRadius or 45
+		local torpedo = Config.Vehicles.Torpedo
+		blastRadius = torpedo.BlastRadius or 45
+		blastDamage = torpedo.BlastDamage or 200
 	end
 
+	--[[
+		This used to be a bare Explosion instance and nothing else, which
+		meant **every exploding vehicle dealt exactly zero damage**.
+
+		Roblox's Explosion only hurts a Humanoid by breaking its joints, and
+		DestroyJointRadiusPercent was set to 0 here to stop characters coming
+		apart -- which also switched off the only damage it does. So a torpedo
+		ridden straight into somebody, the one thing the torpedo is for, did
+		nothing at all to them. Same for a tank going up next to a crowd.
+
+		The visible blast stays; the damage goes through DamageService, which
+		is the only thing that knows about teams, shields, point awards and
+		the kill feed.
+	]]
 	local explosion = Instance.new("Explosion")
 	explosion.Position = position
 	explosion.BlastRadius = blastRadius
 	explosion.BlastPressure = 250000
 	explosion.DestroyJointRadiusPercent = 0
 	explosion.Parent = workspace
+
+	-- Announced rather than applied directly. DamageService already requires
+	-- this module, so calling into it from here would be a dependency cycle;
+	-- it listens for this instead, and the dependency stays one-way.
+	VehicleService.Wrecked.Fire(position, blastRadius, blastDamage, state.lastDriver)
 
 	active[model] = nil
 	model:Destroy()
@@ -4318,6 +5447,12 @@ local function step(deltaTime: number)
 			drivePlane(model, state, deltaTime)
 		elseif state.kind == "Torpedo" then
 			driveTorpedo(model, state, deltaTime)
+		elseif state.kind == "Tube" then
+			driveTube(model, state, deltaTime)
+		elseif state.kind == "Glider" then
+			driveGlider(model, state, deltaTime)
+		elseif state.kind == "Skis" then
+			driveSkis(model, state, deltaTime)
 		else
 			driveWheeled(model, state, deltaTime)
 		end
@@ -4370,6 +5505,12 @@ function VehicleService.ClearAll()
 	table.clear(active)
 end
 
+Players.PlayerRemoving:Connect(function(player)
+	-- Otherwise a player who leaves mid-ejection holds their claim forever,
+	-- and this table holds on to them.
+	ejecting[player] = nil
+end)
+
 RunService.Heartbeat:Connect(step)
 
 return VehicleService
@@ -4405,6 +5546,7 @@ local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local WeaponService = {}
 
@@ -4424,85 +5566,50 @@ local rng = Random.new()
 	guns, which fire visible projectiles, looked fine. This is deliberately
 	loud: a thick bright beam, a muzzle flash and a spark where it lands.
 ]]
-local function drawTracer(from: Vector3, to: Vector3, color: Color3)
-	local delta = to - from
-	local length = delta.Magnitude
-	if length < 0.5 then
-		return
-	end
-
-	local tracer = Util.Part({
-		Name = "Tracer",
-		Size = Vector3.new(0.55, 0.55, length),
-		CFrame = CFrame.lookAt(from + delta * 0.5, to),
-		Color = color,
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		Transparency = 0.1,
-		Parent = workspace,
-	})
-	Debris:AddItem(tracer, 0.35)
-end
-
---[[ The flash at the muzzle, so you can see your own gun going off. ]]
-local function muzzleFlash(position: Vector3, colour: Color3)
-	local flash = Util.Part({
-		Name = "MuzzleFlash",
-		Size = Vector3.new(2.4, 2.4, 2.4),
-		CFrame = CFrame.new(position),
-		Shape = Enum.PartType.Ball,
-		Color = Color3.fromRGB(255, 230, 150),
-		Material = Enum.Material.Neon,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		Parent = workspace,
-	})
-
-	local light = Instance.new("PointLight")
-	light.Color = colour
-	light.Brightness = 6
-	light.Range = 22
-	light.Parent = flash
-
-	Debris:AddItem(flash, 0.09)
-end
-
---[[ Sparks where the shot lands, so you can tell what you hit. ]]
-local function impactSpark(position: Vector3, normal: Vector3, colour: Color3)
-	local anchor = Util.Part({
-		Name = "Impact",
-		Size = Vector3.new(0.6, 0.6, 0.6),
-		CFrame = CFrame.new(position + normal * 0.4),
-		Transparency = 1,
-		CanCollide = false,
-		CanQuery = false,
-		CanTouch = false,
-		Parent = workspace,
-	})
-
-	local spark = Instance.new("ParticleEmitter")
-	spark.Color = ColorSequence.new(colour)
-	spark.Size = NumberSequence.new(1.1, 0)
-	spark.Lifetime = NumberRange.new(0.12, 0.3)
-	spark.Speed = NumberRange.new(14, 30)
-	spark.SpreadAngle = Vector2.new(60, 60)
-	spark.Rate = 0
-	spark.Parent = anchor
-	spark:Emit(14)
-
-	Debris:AddItem(anchor, 0.7)
-end
-
 --[[
-	The gun in your hands.
+	Tell everybody except the shooter what a shot looked like.
 
-	Built as a couple of parts welded to the right hand, so there is always
-	something visible to shoot with and you can tell at a glance which weapon
-	you are holding.
+	The shooter's own client already drew it, the instant they pulled the
+	trigger -- which is the whole point. Doing the visuals server-side meant
+	the flash, the bang and the tracer all arrived one network round trip
+	after the trigger, a constant 50-150ms delay on every shot that no amount
+	of damage tuning can make feel good.
+
+	Only players near enough to see it are told. Nobody watches a tracer from
+	the other end of a 1500-stud map, and a minigun firing 22 times a second
+	does not need to tell all twenty of them.
 ]]
+local SHOT_AUDIBLE_RANGE = 420
+
+local function broadcastShot(
+	shooter: Player,
+	origin: Vector3,
+	endPoint: Vector3,
+	spec: Config.WeaponSpec,
+	normal: Vector3?
+)
+	local payload = {
+		origin = origin,
+		endPoint = endPoint,
+		color = spec.Color,
+		normal = normal,
+		sound = Sound.ForWeapon(spec),
+	}
+
+	for _, other in Players:GetPlayers() do
+		if other == shooter then
+			continue
+		end
+		local character = other.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			if (root.Position - origin).Magnitude <= SHOT_AUDIBLE_RANGE then
+				Remotes.Event("ShotFired"):FireClient(other, payload)
+			end
+		end
+	end
+end
+
 local function updateHeldWeapon(player: Player)
 	local character = player.Character
 	if not character then
@@ -4512,11 +5619,6 @@ local function updateHeldWeapon(player: Player)
 	local existing = character:FindFirstChild("HeldWeapon")
 	if existing then
 		existing:Destroy()
-	end
-
-	-- Riding an animal means empty hands.
-	if WildlifeService.IsRiding(player) then
-		return
 	end
 
 	local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
@@ -4605,19 +5707,28 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	local result = workspace:Raycast(origin, direction * spec.Range, params)
 
 	local endPoint = if result then result.Position else origin + direction * spec.Range
-	drawTracer(origin, endPoint, spec.Color)
-	muzzleFlash(origin + direction * 2, spec.Color)
-	Sound.At(Sound.ForWeapon(spec), origin)
+	broadcastShot(
+		player,
+		origin + direction * 2,
+		endPoint,
+		spec,
+		if result then result.Normal else nil
+	)
 
 	if not result then
 		return
 	end
 
-	impactSpark(result.Position, result.Normal, spec.Color)
-
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
 	-- Fairground props first: they are neither people nor vehicles.
 	if CarnivalService.RegisterHit(result.Instance, player) then
+		return
+	end
+
+	-- The puck. Shooting it is how you play hockey here -- a rifle makes a
+	-- perfectly good stick and there is no stick-handling simulation to get
+	-- in the way of it.
+	if HockeyService.RegisterHit(result.Instance, player, direction) then
 		return
 	end
 
@@ -4635,6 +5746,25 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 			if headshot then
 				damage *= 1.8
 			end
+			--[[
+				A stick to the body on the ice starts a scrap.
+
+				Blades of Steel: you catch somebody with the stick, it turns
+				into a fight, and the winner may break the stick over them.
+				It only triggers on the rink -- a stick swung in the street
+				is just a stick -- and the damage still lands either way.
+			]]
+			-- Compared by identity against the config entries, because this
+			-- function is handed the spec rather than the weapon's name.
+			local isStick = spec == Config.Weapons[Config.Hockey.StickWeapon]
+				or spec == Config.Weapons[Config.Hockey.BrokenStickWeapon]
+			if isStick
+				and HockeyService.OnIce(player)
+				and HockeyService.OnIce(victim)
+			then
+				HockeyService.StartFight(player, victim)
+			end
+
 			if DamageService.ApplyDamage(victim, damage, player, spec.DisplayName) then
 				-- Tell the shooter they connected. Without this, hitscan guns
 				-- give you nothing at all to tell you whether you are aiming
@@ -4702,15 +5832,19 @@ end
 local function equippedWeaponName(player: Player): string
 	local state = PlayerState.Get(player)
 
-	-- Sitting on a mounted gun overrides whatever you were carrying.
-	if state.vehicle and state.seatRole == "Gunner" then
+	-- The `.Parent` checks matter: a vehicle destroyed under a seated player
+	-- leaves state.vehicle pointing at it. Without them the player keeps the
+	-- tank cannon after the tank is gone, and muzzleFor -- which does check
+	-- Parent -- falls back to their head, so they walk around firing a tank
+	-- cannon out of their face.
+	if state.vehicle and state.vehicle.Parent and state.seatRole == "Gunner" then
 		local mounted = state.vehicle:GetAttribute("MountedWeapon")
 		if typeof(mounted) == "string" and Config.Weapons[mounted] then
 			return mounted
 		end
 	end
 	-- A plane's pilot has the wing guns.
-	if state.vehicle and state.seatRole == "Driver" then
+	if state.vehicle and state.vehicle.Parent and state.seatRole == "Driver" then
 		local kind = state.vehicle:GetAttribute("VehicleKind")
 		if kind == "Plane" then
 			local mounted = state.vehicle:GetAttribute("MountedWeapon")
@@ -4769,10 +5903,12 @@ end
 	mid-fight without giving up your rifle.
 ]]
 local function fireWeapon(player: Player, weaponName: string, requestedDirection: any)
-	if typeof(requestedDirection) ~= "Vector3" then
-		return
-	end
-	if requestedDirection.Magnitude < 0.001 then
+	-- NaN slips past a magnitude check, because every comparison involving
+	-- NaN is false. Util.SaneDirection is the only guard here that actually
+	-- rejects it, and it hands back the normalised vector so nothing
+	-- downstream has to remember to do that.
+	local direction = Util.SaneDirection(requestedDirection)
+	if not direction then
 		return
 	end
 
@@ -4787,10 +5923,19 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 		return
 	end
 
-	-- Riding an animal means no guns. The animal is the weapon.
-	if WildlifeService.IsRiding(player) then
-		return
-	end
+	--[[
+		There is no state in this game that takes your guns away.
+
+		This used to check WildlifeService.IsRiding, left over from when you
+		could ride a giant animal and the animal was the weapon. The animals
+		became zombies and the function has returned false ever since, so it
+		was a gate that did nothing -- but it was also a gate pointing the
+		wrong way. The game is a shooter with sports scattered through it:
+		tubing the lazy river, skiing the mountain, flying a glider, playing
+		hockey. You are armed in all of them, always, and nothing new should
+		ever be allowed to quietly change that. Config.WeaponsAlwaysAvailable
+		says so and a test enforces it.
+	]]
 
 	local state = PlayerState.Get(player)
 	local slot = state.weapons[weaponName]
@@ -4815,17 +5960,56 @@ local function fireWeapon(player: Player, weaponName: string, requestedDirection
 		return
 	end
 
-	-- A mounted gun cannot be carried around on foot.
-	if spec.MountedOnly and not state.vehicle then
+	-- A mounted gun cannot be carried around on foot, and a wrecked vehicle
+	-- is not a vehicle.
+	if spec.MountedOnly and not (state.vehicle and state.vehicle.Parent) then
 		return
+	end
+
+	--[[
+		Is the client shooting roughly where it is looking?
+
+		Config.Combat.AutoAimServerToleranceDegrees has claimed since it was
+		written that "the server re-checks aim against this wider cone before
+		trusting a shot". It did not. Nothing checked the direction against
+		the character at all, so a hostile client could send a vector
+		pointing straight at somebody behind them and the server would
+		happily trace it -- a silent 360-degree aimbot, needing no more than
+		one line in a console.
+
+		The cone is deliberately generous. It has to cover the client's own
+		auto-aim snap, the gunner seats, and a few frames of latency between
+		the client aiming and the server looking. It is not there to make
+		aiming hard; it is there to make "behind me" impossible.
+	]]
+	local aimReference: Vector3? = nil
+	if state.vehicle and state.vehicle.Parent then
+		-- On a mounted gun the barrel does the aiming, not the head.
+		local barrel = state.vehicle:FindFirstChild("Barrel", true)
+		if barrel and barrel:IsA("BasePart") then
+			aimReference = barrel.CFrame.LookVector
+		end
+	elseif humanoid.RootPart then
+		local head = character and character:FindFirstChild("Head")
+		aimReference = if head and head:IsA("BasePart")
+			then head.CFrame.LookVector
+			else humanoid.RootPart.CFrame.LookVector
+	end
+
+	if aimReference and aimReference.Magnitude > 0.001 then
+		local tolerance = Config.Combat.AutoAimServerToleranceDegrees
+		-- Doubled, and then some. The head's own facing lags the camera on
+		-- the client, so a tight cone would reject honest shots taken while
+		-- turning -- which is most of them.
+		if Util.AngleBetween(aimReference, direction) > tolerance * 3.4 then
+			return
+		end
 	end
 
 	slot.nextFireAt = now + spec.Cooldown
 	if not Config.InfiniteAmmo then
 		slot.ammo -= 1
 	end
-
-	local direction = requestedDirection.Unit
 
 	-- Fries give you three barrels for a while; normally this is just one.
 	local barrels = PlayerState.BarrelCount(player)
@@ -4939,12 +6123,20 @@ end
 ]]
 local function handleMelee(player: Player)
 	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid or humanoid.Health <= 0 then
 		return
 	end
-	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local root = character:FindFirstChild("HumanoidRootPart")
 	if not root or not root:IsA("BasePart") then
+		return
+	end
+
+	-- You cannot punch from the driver's seat of a tank.
+	if humanoid.SeatPart then
 		return
 	end
 
@@ -4974,12 +6166,29 @@ local function handleMelee(player: Player)
 			continue
 		end
 
+		-- Dead men cannot be knifed again.
+		local otherHumanoid = otherCharacter and otherCharacter:FindFirstChildOfClass("Humanoid")
+		if not otherHumanoid or otherHumanoid.Health <= 0 then
+			continue
+		end
+
 		local toTarget = otherRoot.Position - root.Position
 		local distance = toTarget.Magnitude
 		-- Has to be in front of you, not merely nearby.
 		if distance <= bestDistance and Util.AngleBetween(facing, toTarget) < 70 then
-			best = other
-			bestDistance = distance
+			-- And you have to be able to reach them. Distance and a cone
+			-- alone let you knife somebody through a solid wall, which at
+			-- nine studs of range happens constantly in a city map full of
+			-- two-stud partitions.
+			local blocked = workspace:Raycast(
+				root.Position,
+				toTarget,
+				Util.RayParams({ character, otherCharacter })
+			)
+			if not blocked then
+				best = other
+				bestDistance = distance
+			end
 		end
 	end
 
@@ -5011,7 +6220,9 @@ end
 
 --[[ Gunners tell the server where they are looking; the turret follows. ]]
 local function handleAim(player: Player, worldTarget: any)
-	if typeof(worldTarget) ~= "Vector3" then
+	-- A NaN here reached HingeConstraint.TargetAngle, which is a poisoned
+	-- turret that no longer responds to anything.
+	if not Util.IsSaneVector(worldTarget) then
 		return
 	end
 	local state = PlayerState.Get(player)
@@ -5749,6 +6960,28 @@ end
 	Carve a crater into the mud. Purely cosmetic, but it is the thing that
 	makes a mega-detonation feel like it mattered.
 ]]
+--[[
+	A wrecked vehicle's blast.
+
+	VehicleService announces these rather than applying them, because it
+	already requires this module and the reverse would be a cycle.
+
+	Before this listener existed, every exploding vehicle dealt exactly zero
+	damage. Roblox's Explosion only hurts a Humanoid by breaking its joints,
+	and the vehicle blast set DestroyJointRadiusPercent to 0 to stop
+	characters coming apart -- which switched off the only damage it did. So
+	riding a torpedo straight into somebody, the entire purpose of the
+	torpedo, did nothing to them whatsoever.
+]]
+VehicleService.Wrecked.Connect(function(
+	position: Vector3,
+	radius: number,
+	damage: number,
+	lastDriver: Player?
+)
+	DamageService.Explode(position, radius, damage, lastDriver, 1.4, false)
+end)
+
 function DamageService.Crater(position: Vector3, radius: number)
 	local crater = Util.Part({
 		Name = "Crater",
@@ -6827,11 +8060,6 @@ function WildlifeService.Clear()
 	end
 end
 
---[[ Nothing is rideable any more, but the weapon code still asks. ]]
-function WildlifeService.IsRiding(_player: Player): boolean
-	return false
-end
-
 function WildlifeService.Count(): number
 	return #dwellers
 end
@@ -7843,6 +9071,7 @@ local PickupService = require(script.Parent:WaitForChild("PickupService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local FlagService = require(script.Parent:WaitForChild("FlagService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
@@ -7973,6 +9202,8 @@ local function buildArena(entry: { map: Config.MapSpec, mode: typeof(Config.Mode
 
 	WildlifeService.Populate(spec.Size)
 	CarnivalService.Build(spec.Size)
+	-- And the rink, which builds its own model beside the arena.
+	HockeyService.Build(spec.Size)
 
 	-- Flags only exist in Capture the Flag.
 	FlagService.Clear()
@@ -8360,6 +9591,26 @@ end
 	Only the tests use this: kills are deliberately ignored outside a round,
 	so without it a test would have to wait out the real loop to score one.
 ]]
+--[[
+	Shout about a landed trick.
+
+	Tricks come out of VehicleService, which has no idea the HUD exists, so
+	the announcement is wired up here where the kill feed and the medals
+	already live.
+]]
+VehicleService.TrickLanded.Connect(function(player: Player, name: string, points: number, airtime: number)
+	Remotes.Event("Medal"):FireClient(player, `{name}  +{points}`)
+	Remotes.Event("PlaySound"):FireClient(player, "Medal")
+
+	local team = player.Team
+	if team then
+		Remotes.Event("KillFeed"):FireAllClients(
+			`{player.DisplayName} landed a {name} ({string.format("%.1f", airtime)}s air)`,
+			false
+		)
+	end
+end)
+
 function MatchService.ForceRoundForTests()
 	phase = "Playing"
 	phaseEndsAt = os.clock() + Config.Match.RoundDuration
@@ -8479,16 +9730,39 @@ function ScoreboardService.Send(player: Player)
 	})
 end
 
+--[[
+	When each player may next ask for a scoreboard.
+
+	The first version of this had a comment claiming a player spamming the
+	request "only slows themselves". That was wrong: the work happens on the
+	SERVER, and it is a full walk of the player list, a sort and a table
+	serialised per event. A loop firing the remote every frame is twenty
+	players' worth of lag caused by one of them.
+
+	Twice a second is far more often than a human opens a panel, and the
+	client only asks when the key goes down anyway.
+]]
+local nextAllowedAt: { [Player]: number } = {}
+local MIN_INTERVAL = 0.5
+
 function ScoreboardService.Start()
 	Remotes.Event("RequestScoreboard").OnServerEvent:Connect(function(player: Player)
-		-- No rate limit beyond the cost of building it: the panel is held
-		-- down by hand, and a player spamming Tab only slows themselves.
+		local now = os.clock()
+		if now < (nextAllowedAt[player] or 0) then
+			return
+		end
+		nextAllowedAt[player] = now + MIN_INTERVAL
+
 		local ok, err = pcall(function()
 			ScoreboardService.Send(player)
 		end)
 		if not ok then
 			warn(`[Nuclear Mud Arena] Scoreboard failed for {player.Name}: {err}`)
 		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		nextAllowedAt[player] = nil
 	end)
 end
 
@@ -8837,16 +10111,25 @@ function GraphicsService.Start()
 		Lighting.Technology = Enum.Technology.ShadowMap
 	end
 
-	Lighting.Brightness = 2.6
+	Lighting.Brightness = 3.1
 	Lighting.ClockTime = 15.2
 	Lighting.GeographicLatitude = 24
 	Lighting.ExposureCompensation = 0.18
 	Lighting.EnvironmentDiffuseScale = 0.55
 	Lighting.EnvironmentSpecularScale = 0.7
 	Lighting.GlobalShadows = true
-	Lighting.Ambient = Color3.fromRGB(78, 82, 92)
-	Lighting.OutdoorAmbient = Color3.fromRGB(104, 112, 128)
-	Lighting.ColorShift_Top = Color3.fromRGB(255, 238, 210)
+	--[[
+		Contrast is what makes it stop looking like a bin of bricks.
+
+		These were set high enough that a sunlit wall and a shadowed alley
+		came out nearly the same grey, and once every surface is the same
+		brightness the shapes stop reading at all -- every building is a flat
+		rectangle again no matter how it is built. Lower ambient and a warmer
+		top shift give sunlit faces somewhere to be bright AGAINST.
+	]]
+	Lighting.Ambient = Color3.fromRGB(48, 52, 64)
+	Lighting.OutdoorAmbient = Color3.fromRGB(88, 96, 116)
+	Lighting.ColorShift_Top = Color3.fromRGB(255, 232, 186)
 	Lighting.ColorShift_Bottom = Color3.fromRGB(70, 78, 96)
 	Lighting.FogEnd = 2200
 	Lighting.FogStart = 400
@@ -8855,12 +10138,15 @@ function GraphicsService.Start()
 	-- Haze and depth. Distant buildings fade instead of standing there in
 	-- full colour, which is most of what sells a big map as big.
 	local atmosphere = Instance.new("Atmosphere")
-	atmosphere.Density = 0.36
+	-- Haze at 0.36 with Haze 1.6 was a grey sheet over everything past a
+	-- hundred studs: distant buildings did not fade into depth, they faded
+	-- into porridge. Enough to give depth, not enough to eat the skyline.
+	atmosphere.Density = 0.22
 	atmosphere.Offset = 0.15
 	atmosphere.Color = Color3.fromRGB(196, 200, 208)
 	atmosphere.Decay = Color3.fromRGB(104, 112, 128)
 	atmosphere.Glare = 0.28
-	atmosphere.Haze = 1.6
+	atmosphere.Haze = 0.8
 	tag(atmosphere)
 
 	-- A proper sky rather than the flat blue void.
@@ -9100,6 +10386,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
+local Shot = require(Shared:WaitForChild("Shot"))
 
 local modules = script:WaitForChild("modules")
 local Hud = require(modules:WaitForChild("Hud"))
@@ -9296,6 +10583,46 @@ workspace.DescendantAdded:Connect(function(descendant)
 	Feel.ShakeFrom(blast.Position, math.clamp(radius * 0.06, 0.8, 3.6), radius * 2.6)
 end)
 
+--[[ Somebody else's shot. Ours was drawn locally the moment we fired. ]]
+Remotes.Event("ShotFired").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	if typeof(payload.origin) ~= "Vector3" or typeof(payload.endPoint) ~= "Vector3" then
+		return
+	end
+	local colour = if typeof(payload.color) == "Color3"
+		then payload.color
+		else Color3.fromRGB(255, 240, 180)
+	Shot.Full(
+		payload.origin,
+		payload.endPoint,
+		colour,
+		if typeof(payload.normal) == "Vector3" then payload.normal else nil
+	)
+	if typeof(payload.sound) == "string" then
+		Sound.At(payload.sound, payload.origin)
+	end
+end)
+
+--[[ A hockey fight. Mash F -- and your guns still work, so consider those. ]]
+Remotes.Event("FightStarted").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Controls.SetFighting(true)
+	Hud.ShowFight(tostring(payload.opponent or "SOMEBODY"), payload.duration or 4)
+	Sound.Flat("MeleeSwing")
+end)
+
+Remotes.Event("FightResult").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Controls.SetFighting(false)
+	Hud.FightResult(payload.won == true, payload.draw == true, payload.brokeStick == true)
+end)
+
 --[[ The scoreboard we asked for, or the one pushed at the end of a round. ]]
 Remotes.Event("Scoreboard").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" or typeof(payload.rows) ~= "table" then
@@ -9377,6 +10704,7 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
 local Util = require(Shared:WaitForChild("Util"))
 local Radar = require(script.Parent:WaitForChild("Radar"))
 
@@ -9408,6 +10736,23 @@ local killFeed: Frame
 local medalLabel: TextLabel
 local weaponBar: Frame
 local slotChips: { [number]: TextLabel } = {}
+
+--[[
+	How many weapon slots the bar needs.
+
+	Read off Config rather than written down, because it was written down as
+	6 while the weapon table had grown a 7th -- so poop and the hunter drone
+	had no chip on the bar and picking one up showed nothing at all.
+]]
+local SLOT_COUNT = (function(): number
+	local highest = 1
+	for _, spec in Config.Weapons do
+		if spec.Slot > highest then
+			highest = spec.Slot
+		end
+	end
+	return highest
+end)()
 local weaponLabel: TextLabel
 local ammoLabel: TextLabel
 local statsLabel: TextLabel
@@ -9419,6 +10764,9 @@ local deathOverlay: Frame
 local deathTitle: TextLabel? = nil
 local respawnLabel: TextLabel? = nil
 local respawnToken = 0
+local fightLabel: TextLabel? = nil
+local fightCount: TextLabel? = nil
+local fightToken = 0
 local wienerOverlay: TextLabel
 local toastHolder: Frame
 
@@ -9789,7 +11137,7 @@ function Hud.Build()
 	barLayout.Padding = UDim.new(0, 6)
 	barLayout.Parent = weaponBar
 
-	for slot = 1, 6 do
+	for slot = 1, SLOT_COUNT do
 		local chip = makeFrame(weaponBar, {
 			Size = UDim2.fromOffset(104, 36),
 			BackgroundColor3 = Color3.fromRGB(28, 32, 38),
@@ -9935,6 +11283,32 @@ function Hud.Build()
 
 	scoreboard = board
 	scoreboardRows = rows
+
+	-- The fight prompt. High on the screen on purpose: your guns still work
+	-- during a fight and the middle of the screen is where you aim them.
+	fightLabel = makeLabel(screen, {
+		Name = "FightLabel",
+		Size = UDim2.new(1, 0, 0, 56),
+		Position = UDim2.new(0, 0, 0.16, 0),
+		Text = "",
+		TextSize = 48,
+		Font = Enum.Font.LuckiestGuy,
+		TextColor3 = Color3.fromRGB(255, 210, 90),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = false,
+		ZIndex = 12,
+	})
+	fightCount = makeLabel(screen, {
+		Name = "FightCount",
+		Size = UDim2.new(1, 0, 0, 34),
+		Position = UDim2.new(0, 0, 0.16, 58),
+		Text = "",
+		TextSize = 26,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(255, 240, 200),
+		Visible = false,
+		ZIndex = 12,
+	})
 
 	-- The motion tracker, bottom left above the health bar.
 	Radar.Build(screen)
@@ -10205,7 +11579,7 @@ function Hud.SetLoadout(names: { [number]: string }, activeSlot: number)
 		return
 	end
 
-	for slot = 1, 6 do
+	for slot = 1, SLOT_COUNT do
 		local label = slotChips[slot]
 		if label then
 			label.Text = names[slot] or "—"
@@ -10496,6 +11870,53 @@ function Hud.SetScoreboard(
 	end
 end
 
+--[[
+	The fight prompt.
+
+	Blades of Steel: a big instruction and a count, up for a few seconds
+	while you mash. It deliberately does NOT cover the middle of the screen,
+	because your guns still work during a fight and you may well decide to
+	shoot your way out of it instead.
+]]
+function Hud.ShowFight(opponent: string, duration: number)
+	if not fightLabel or not fightCount then
+		return
+	end
+	fightLabel.Text = `FIGHT!  {string.upper(opponent)}`
+	fightLabel.Visible = true
+	fightCount.Text = "MASH  F"
+	fightCount.Visible = true
+
+	fightToken += 1
+	local token = fightToken
+	task.delay(duration + 1.6, function()
+		-- Only clear it if no later fight has started since.
+		if fightToken == token and fightLabel and fightCount then
+			fightLabel.Visible = false
+			fightCount.Visible = false
+		end
+	end)
+end
+
+--[[ How the scrap went. ]]
+function Hud.FightResult(won: boolean, draw: boolean, brokeStick: boolean)
+	if not fightLabel or not fightCount then
+		return
+	end
+	fightLabel.Text = if draw
+		then "A DRAW"
+		elseif won then "YOU WON THE FIGHT"
+		else "YOU LOST THE FIGHT"
+	fightCount.Text = if brokeStick then "YOUR STICK BROKE — USE IT" else ""
+end
+
+--[[ Count the mashes back, so mashing feels like it is doing something. ]]
+function Hud.FightSwings(count: number)
+	if fightCount and fightCount.Visible then
+		fightCount.Text = `MASH  F   ×{count}`
+	end
+end
+
 function Hud.SetStatus(text: string, good: boolean)
 	if not statusText then
 		return
@@ -10553,6 +11974,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
+local Shot = require(Shared:WaitForChild("Shot"))
 
 local Hud = require(script.Parent:WaitForChild("Hud"))
 local Feel = require(script.Parent:WaitForChild("Feel"))
@@ -10569,6 +11991,9 @@ type ArsenalEntry = {
 	MagSize: number,
 	Cooldown: number,
 	Recoil: number,
+	Range: number,
+	Color: Color3,
+	SoundName: string,
 	Automatic: boolean,
 	ZoomFov: number?,
 	ZoomLevels: { number }?,
@@ -10737,7 +12162,11 @@ end
 
 -- ==================================================================== FIRING ==
 
-local nextKick = 0
+local nextShotFeedback = 0
+
+-- Counts up while a hockey fight is running, so F throws punches as well as
+-- detonating. Zero means no fight.
+local fightSwings = 0
 
 local function tryFire()
 	local spec = arsenal[effectiveWeaponName()]
@@ -10753,21 +12182,46 @@ local function tryFire()
 	-- its own, and the server's is the one that counts.
 	nextLocalFire = now + 0.03
 
-	local _origin, direction = currentAimDirection()
-	if not direction then
+	local origin, direction = currentAimDirection()
+	if not origin or not direction then
 		return
 	end
 
 	Remotes.Event("FireWeapon"):FireServer(direction)
 
-	-- Kick the camera, gated on the weapon's REAL cooldown rather than the
-	-- loose network one above. Both sides read the same Config, so this is
-	-- the same rate the server will actually accept shots at, and the view
-	-- does not buzz at 33 Hz while a sniper fires once a second and a half.
-	if now >= nextKick then
-		nextKick = now + spec.Cooldown * 0.9
-		Feel.Kick(spec.Recoil)
+	--[[
+		Everything you see and hear, now, on this machine.
+
+		Gated on the weapon's REAL cooldown rather than the loose network one
+		above. Both sides read the same Config, so this is the same rate the
+		server will actually accept shots at -- which means what you see is
+		what happened, without waiting to be told.
+
+		Before this, the flash, the bang and the tracer were all built on the
+		server and replicated back, so every shot carried a full round trip
+		of delay. That is the single biggest reason the guns felt sluggish,
+		and it is not something you can tune your way out of.
+	]]
+	if now < nextShotFeedback then
+		return
 	end
+	nextShotFeedback = now + spec.Cooldown * 0.9
+
+	Feel.Kick(spec.Recoil)
+	Sound.Flat(spec.SoundName, 0.65)
+
+	local muzzle = origin + direction * 2
+	-- Trace it locally too, so the tracer stops at the wall rather than
+	-- carrying on through it. This raycast decides nothing: the server does
+	-- its own, and the server's is the one that deals damage.
+	local ignore: { Instance } = {}
+	local character = player.Character
+	if character then
+		table.insert(ignore, character)
+	end
+	local look = workspace:Raycast(origin, direction * spec.Range, Util.RayParams(ignore))
+	local endPoint = if look then look.Position else origin + direction * spec.Range
+	Shot.Full(muzzle, endPoint, spec.Color, if look then look.Normal else nil)
 end
 
 -- ==================================================================== ZOOMING ==
@@ -10932,9 +12386,15 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch
-	then
+	--[[
+		Left click fires. A raw touch does NOT.
+
+		Touch used to be in here with the mouse, which meant any drag on a
+		phone screen -- the only way to look around on a phone -- fired the
+		gun continuously for as long as your thumb was moving. Touch players
+		fire with the FIRE button, which drives the same code directly.
+	]]
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		firing = true
 		tryFire()
 		return
@@ -10973,8 +12433,15 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	if input.KeyCode == Enum.KeyCode.R then
 		Remotes.Event("Reload"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F then
-		-- The big one.
+		-- The big one -- and, mid-fight, a punch. The same key doing both is
+		-- deliberate: there is no spare finger during a scrap, and a diamond
+		-- round going off while you are swinging is in the spirit of it.
 		Remotes.Event("MegaDetonate"):FireServer()
+		if fightSwings > 0 then
+			fightSwings += 1
+			Remotes.Event("FightSwing"):FireServer()
+			Hud.FightSwings(fightSwings)
+		end
 	elseif input.KeyCode == Enum.KeyCode.Q then
 		Remotes.Event("Melee"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.Space then
@@ -11007,9 +12474,7 @@ local function onInputEnded(input: InputObject)
 		return
 	end
 
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch
-	then
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		firing = false
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
 		Remotes.Event("SetTurbo"):FireServer(false)
@@ -11299,6 +12764,9 @@ function Controls.Start()
 			MagSize = spec.MagSize,
 			Cooldown = spec.Cooldown,
 			Recoil = spec.Recoil or 0.8,
+			Range = spec.Range,
+			Color = spec.Color,
+			SoundName = Sound.ForWeapon(spec),
 			Automatic = spec.Automatic == true,
 			ZoomFov = spec.ZoomFov,
 			ZoomLevels = spec.ZoomLevels,
@@ -11333,6 +12801,11 @@ function Controls.EquippedName(): string
 end
 
 --[[ Whether the scoreboard is up, for tests. ]]
+--[[ A fight started or finished; F throws punches while one is running. ]]
+function Controls.SetFighting(fighting: boolean)
+	fightSwings = if fighting then 1 else 0
+end
+
 function Controls.ScoreboardOpenForTests(): boolean
 	return scoreboardOpen
 end
@@ -11834,4 +13307,4 @@ return Radar
 
 ---
 
-End of source: 11590 lines.
+End of source: 13063 lines.

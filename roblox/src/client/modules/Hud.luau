@@ -73,6 +73,9 @@ local deathOverlay: Frame
 local deathTitle: TextLabel? = nil
 local respawnLabel: TextLabel? = nil
 local respawnToken = 0
+local fightLabel: TextLabel? = nil
+local fightCount: TextLabel? = nil
+local fightToken = 0
 local wienerOverlay: TextLabel
 local toastHolder: Frame
 
@@ -589,6 +592,32 @@ function Hud.Build()
 
 	scoreboard = board
 	scoreboardRows = rows
+
+	-- The fight prompt. High on the screen on purpose: your guns still work
+	-- during a fight and the middle of the screen is where you aim them.
+	fightLabel = makeLabel(screen, {
+		Name = "FightLabel",
+		Size = UDim2.new(1, 0, 0, 56),
+		Position = UDim2.new(0, 0, 0.16, 0),
+		Text = "",
+		TextSize = 48,
+		Font = Enum.Font.LuckiestGuy,
+		TextColor3 = Color3.fromRGB(255, 210, 90),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = false,
+		ZIndex = 12,
+	})
+	fightCount = makeLabel(screen, {
+		Name = "FightCount",
+		Size = UDim2.new(1, 0, 0, 34),
+		Position = UDim2.new(0, 0, 0.16, 58),
+		Text = "",
+		TextSize = 26,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(255, 240, 200),
+		Visible = false,
+		ZIndex = 12,
+	})
 
 	-- The motion tracker, bottom left above the health bar.
 	Radar.Build(screen)
@@ -1147,6 +1176,53 @@ function Hud.SetScoreboard(
 			TextXAlignment = Enum.TextXAlignment.Left,
 		})
 		line.LayoutOrder = order
+	end
+end
+
+--[[
+	The fight prompt.
+
+	Blades of Steel: a big instruction and a count, up for a few seconds
+	while you mash. It deliberately does NOT cover the middle of the screen,
+	because your guns still work during a fight and you may well decide to
+	shoot your way out of it instead.
+]]
+function Hud.ShowFight(opponent: string, duration: number)
+	if not fightLabel or not fightCount then
+		return
+	end
+	fightLabel.Text = `FIGHT!  {string.upper(opponent)}`
+	fightLabel.Visible = true
+	fightCount.Text = "MASH  F"
+	fightCount.Visible = true
+
+	fightToken += 1
+	local token = fightToken
+	task.delay(duration + 1.6, function()
+		-- Only clear it if no later fight has started since.
+		if fightToken == token and fightLabel and fightCount then
+			fightLabel.Visible = false
+			fightCount.Visible = false
+		end
+	end)
+end
+
+--[[ How the scrap went. ]]
+function Hud.FightResult(won: boolean, draw: boolean, brokeStick: boolean)
+	if not fightLabel or not fightCount then
+		return
+	end
+	fightLabel.Text = if draw
+		then "A DRAW"
+		elseif won then "YOU WON THE FIGHT"
+		else "YOU LOST THE FIGHT"
+	fightCount.Text = if brokeStick then "YOUR STICK BROKE — USE IT" else ""
+end
+
+--[[ Count the mashes back, so mashing feels like it is doing something. ]]
+function Hud.FightSwings(count: number)
+	if fightCount and fightCount.Visible then
+		fightCount.Text = `MASH  F   ×{count}`
 	end
 end
 

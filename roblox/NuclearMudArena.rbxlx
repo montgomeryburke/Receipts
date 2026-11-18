@@ -334,6 +334,31 @@ Config.Weapons = {
 	-- ------------------------------------------------------------- UTILITY
 	-- Both of these are found on the map rather than carried from spawn, and
 	-- neither reloads: what you pick up is what you have.
+	--[[
+		The hockey stick, and what is left of it after a fight.
+
+		Both are hitscan with almost no range, which is how you build a melee
+		weapon out of the existing shooting code rather than a parallel one:
+		the swing is a very short, very wide shot. The broken half hits far
+		harder than the whole stick, which is the entire incentive to start
+		a fight on the ice in the first place.
+	]]
+	HockeyStick = {
+		Slot = 7, Category = "Utility", DisplayName = "Hockey Stick", Recoil = 0.5,
+		Kind = "Hitscan", Damage = 34, Cooldown = 0.5, Range = 14,
+		MagSize = 1, ReloadTime = 0, Spread = 6,
+		Color = Color3.fromRGB(190, 170, 140),
+		Automatic = true,
+		Points = 18,
+	},
+	BrokenStick = {
+		Slot = 7, Category = "Utility", DisplayName = "Broken Stick", Recoil = 0.9,
+		Kind = "Hitscan", Damage = 78, Cooldown = 0.45, Range = 13,
+		MagSize = 1, ReloadTime = 0, Spread = 7,
+		Color = Color3.fromRGB(210, 120, 90),
+		Automatic = true,
+		Points = 40,
+	},
 	Poop = {
 		Slot = 7, Category = "Utility", DisplayName = "Elephant Poop", Recoil = 0.2,
 		Kind = "Arcing", Damage = 6, Cooldown = 0.55, Range = 220, Speed = 88,
@@ -604,6 +629,29 @@ Config.GrenadeKeyWeapon = "Grenade"
 	before they add a "you cannot shoot while..." check.
 ]]
 Config.WeaponsAlwaysAvailable = true
+
+--[[
+	The ice rink.
+
+	Hockey is scored like everything else, in team points, so a goal is worth
+	putting the work in for -- and a fight is worth starting. Note that
+	nothing here disables anybody's guns, which is the rule for every sport
+	on this map: you can shoot your way out of a fight, or shoot two other
+	people having one.
+]]
+Config.Hockey = {
+	GoalPoints = 220,
+	-- How long both players mash for. Short enough to be a scrap rather
+	-- than a minigame you get stuck in.
+	FightSeconds = 4,
+	FightWinPoints = 130,
+	KnockdownSeconds = 2.5,
+	-- Blades of Steel. Breaking it is the point of fighting at all, because
+	-- the splintered half is the best melee weapon in the game.
+	StickBreakChance = 0.55,
+	StickWeapon = "HockeyStick",
+	BrokenStickWeapon = "BrokenStick",
+}
 
 Config.Radar = {
 	Range = 170,
@@ -988,6 +1036,15 @@ export type ConfigType = {
 	},
 	GrenadeKeyWeapon: string,
 	WeaponsAlwaysAvailable: boolean,
+	Hockey: {
+		GoalPoints: number,
+		FightSeconds: number,
+		FightWinPoints: number,
+		KnockdownSeconds: number,
+		StickBreakChance: number,
+		StickWeapon: string,
+		BrokenStickWeapon: string,
+	},
 	Radar: {
 		Range: number,
 		VerticalRange: number,
@@ -1101,6 +1158,11 @@ local EVENT_NAMES = {
 	-- Cosmetic only: the shooter already drew their own shot locally, this
 	-- tells everybody nearby what it looked like. Cheaper than replicating
 	-- the parts, and far less laggy than drawing them server-side.
+	-- The hockey fight scene: the server starts one, the client mashes, the
+	-- server says who won.
+	"FightStarted",
+	"FightSwing",
+	"FightResult",
 	"ShotFired",
 	"ThrowGrenade",
 	"RequestScoreboard",
@@ -1796,12 +1858,14 @@ local MonetizationService = tryRequire(modules, "MonetizationService")
 local MatchService = tryRequire(modules, "MatchService")
 local GraphicsService = tryRequire(modules, "GraphicsService")
 local ScoreboardService = tryRequire(modules, "ScoreboardService")
+local HockeyService = tryRequire(modules, "HockeyService")
 
 tryStart("GraphicsService", GraphicsService)
 tryStart("TeamService", TeamService)
 tryStart("WeaponService", WeaponService)
 tryStart("MonetizationService", MonetizationService)
 tryStart("ScoreboardService", ScoreboardService)
+tryStart("HockeyService", HockeyService)
 tryStart("MatchService", MatchService)
 
 -- ========================================================= 3. THE HUD FEED ==
@@ -3503,6 +3567,659 @@ return GraphicsService
         </Item>
         <Item class="ModuleScript" referent="18">
           <Properties>
+            <string name="Name">HockeyService</string>
+            <string name="Source"><![CDATA[--!strict
+--[[
+	Nuclear Mud Arena — the ice rink.
+
+	A full rink with boards, two goals and a puck, dropped into the map
+	alongside the city and the resort. You can play actual hockey on it:
+	shoot the puck, score goals, and the goals are worth team points like
+	anything else.
+
+	You are also still armed. That is the rule for every sport here and it is
+	not suspended on the ice -- a hockey game where the other team can shoot
+	you is simply a better hockey game. Fights work the way Blades of Steel
+	did: hit an opposing player with your stick and it turns into a scrap,
+	both of you mashing a key, and the winner can break their stick over the
+	loser and keep the splintered half as a weapon.
+
+	The ice itself is a low-friction surface, so skating is a matter of
+	momentum rather than walking, and a car driven onto it is a disaster in
+	the best way.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Signal = require(Shared:WaitForChild("Signal"))
+local Sound = require(Shared:WaitForChild("Sound"))
+local Util = require(Shared:WaitForChild("Util"))
+
+local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
+
+local HockeyService = {}
+
+--[[ Fired as (scorer, teamIndex, points) when the puck goes in. ]]
+HockeyService.Goal = Signal.new()
+
+--[[ Fired as (winner, loser, brokeStick) when a fight is settled. ]]
+HockeyService.FightOver = Signal.new()
+
+local RINK_LENGTH = 300
+local RINK_WIDTH = 150
+local BOARD_HEIGHT = 11
+local CORNER_SEGMENTS = 4
+
+local rink: Model? = nil
+local puck: BasePart? = nil
+local puckHome = Vector3.new()
+local goalZones: { { part: Part, defendingTeam: number } } = {}
+local lastGoalAt = 0
+
+type Fight = {
+	a: Player,
+	b: Player,
+	endsAt: number,
+	swings: { [Player]: number },
+}
+local fights: { Fight } = {}
+local fightOf: { [Player]: Fight } = {}
+
+-- ================================================================= GEOMETRY ==
+
+--[[
+	The boards.
+
+	Straight runs down the sides and ends, with the corners cut across in
+	short segments. A rink with square corners reads as a swimming pool.
+]]
+local function boards(centre: Vector3, parent: Instance)
+	local halfLength = RINK_LENGTH * 0.5
+	local halfWidth = RINK_WIDTH * 0.5
+	local cornerCut = 46
+
+	local function board(from: Vector3, to: Vector3)
+		local delta = to - from
+		local length = delta.Magnitude
+		if length < 1 then
+			return
+		end
+		local middle = from + delta * 0.5
+		local facing = CFrame.lookAt(middle, to)
+
+		Util.Part({
+			Name = "Boards",
+			Size = Vector3.new(3, BOARD_HEIGHT, length),
+			CFrame = facing * CFrame.new(0, BOARD_HEIGHT * 0.5, 0),
+			Color = Color3.fromRGB(236, 240, 246),
+			Material = Enum.Material.SmoothPlastic,
+			Parent = parent,
+		})
+
+		-- The kick plate along the bottom, in team-neutral yellow, which is
+		-- what every rink has and what makes it read as a rink.
+		Util.Part({
+			Name = "KickPlate",
+			Size = Vector3.new(3.4, 2, length),
+			CFrame = facing * CFrame.new(0, 1, 0),
+			Color = Color3.fromRGB(240, 196, 40),
+			Material = Enum.Material.SmoothPlastic,
+			Parent = parent,
+		})
+
+		-- Glass above it, low enough to shoot over from outside but high
+		-- enough to keep the puck in.
+		Util.Part({
+			Name = "RinkGlass",
+			Size = Vector3.new(1.2, 9, length),
+			CFrame = facing * CFrame.new(0, BOARD_HEIGHT + 4.5, 0),
+			Color = Color3.fromRGB(200, 226, 240),
+			Material = Enum.Material.Glass,
+			Transparency = 0.72,
+			Reflectance = 0.2,
+			Parent = parent,
+		})
+	end
+
+	-- The eight points of a rounded rectangle, walked in order.
+	local outline = {
+		Vector3.new(-halfWidth, 0, -halfLength + cornerCut),
+		Vector3.new(-halfWidth + cornerCut, 0, -halfLength),
+		Vector3.new(halfWidth - cornerCut, 0, -halfLength),
+		Vector3.new(halfWidth, 0, -halfLength + cornerCut),
+		Vector3.new(halfWidth, 0, halfLength - cornerCut),
+		Vector3.new(halfWidth - cornerCut, 0, halfLength),
+		Vector3.new(-halfWidth + cornerCut, 0, halfLength),
+		Vector3.new(-halfWidth, 0, halfLength - cornerCut),
+	}
+
+	for index = 1, #outline do
+		local from = centre + outline[index]
+		local to = centre + outline[(index % #outline) + 1]
+		-- Corners get broken into segments so the curve is a curve.
+		local isCorner = index % 2 == 0
+		local steps = if isCorner then CORNER_SEGMENTS else 1
+		for step = 0, steps - 1 do
+			local a = from + (to - from) * (step / steps)
+			local b = from + (to - from) * ((step + 1) / steps)
+			board(a, b)
+		end
+	end
+end
+
+--[[ A goal: frame, crossbar, netting, and the zone that counts it. ]]
+local function goal(centre: Vector3, facingZ: number, defendingTeam: number, parent: Instance)
+	local width = 26
+	local height = 15
+	local depth = 14
+	local colour = Config.Teams[defendingTeam]
+		and Config.Teams[defendingTeam].Color
+		or Color3.fromRGB(200, 60, 60)
+
+	-- Posts and crossbar.
+	for _, side in { -1, 1 } do
+		Util.Part({
+			Name = "GoalPost",
+			Size = Vector3.new(1.6, height, 1.6),
+			CFrame = CFrame.new(centre + Vector3.new(side * width * 0.5, height * 0.5, 0)),
+			Color = colour,
+			Material = Enum.Material.Metal,
+			Parent = parent,
+		})
+	end
+	Util.Part({
+		Name = "GoalBar",
+		Size = Vector3.new(width + 1.6, 1.6, 1.6),
+		CFrame = CFrame.new(centre + Vector3.new(0, height, 0)),
+		Color = colour,
+		Material = Enum.Material.Metal,
+		Parent = parent,
+	})
+
+	-- Netting: a back and two sides, thin and see-through.
+	Util.Part({
+		Name = "GoalNet",
+		Size = Vector3.new(width, height, 0.5),
+		CFrame = CFrame.new(centre + Vector3.new(0, height * 0.5, facingZ * depth)),
+		Color = Color3.fromRGB(230, 235, 240),
+		Material = Enum.Material.Fabric,
+		Transparency = 0.45,
+		Parent = parent,
+	})
+	for _, side in { -1, 1 } do
+		Util.Part({
+			Name = "GoalNet",
+			Size = Vector3.new(0.5, height, depth),
+			CFrame = CFrame.new(centre + Vector3.new(side * width * 0.5, height * 0.5, facingZ * depth * 0.5)),
+			Color = Color3.fromRGB(230, 235, 240),
+			Material = Enum.Material.Fabric,
+			Transparency = 0.45,
+			Parent = parent,
+		})
+	end
+
+	-- The goal line, painted.
+	Util.Part({
+		Name = "GoalLine",
+		Size = Vector3.new(width + 10, 0.2, 1.4),
+		CFrame = CFrame.new(centre + Vector3.new(0, 0.7, 0)),
+		Color = Color3.fromRGB(210, 50, 50),
+		Material = Enum.Material.SmoothPlastic,
+		CanCollide = false,
+		Parent = parent,
+	})
+
+	-- And the zone that actually counts it. Not solid, or the puck would
+	-- bounce off the thing meant to detect it.
+	local zone = Util.Part({
+		Name = "GoalZone",
+		Size = Vector3.new(width - 2, height - 2, depth),
+		CFrame = CFrame.new(centre + Vector3.new(0, height * 0.5, facingZ * depth * 0.5)),
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = parent,
+	})
+	zone:SetAttribute("DefendingTeam", defendingTeam)
+	table.insert(goalZones, { part = zone, defendingTeam = defendingTeam })
+end
+
+--[[ The ice, the lines and the face-off circles. ]]
+local function surface(centre: Vector3, parent: Instance)
+	local ice = Util.Part({
+		Name = "Ice",
+		Size = Vector3.new(RINK_WIDTH, 2, RINK_LENGTH),
+		CFrame = CFrame.new(centre + Vector3.new(0, 0, 0)),
+		Color = Color3.fromRGB(240, 248, 255),
+		Material = Enum.Material.Ice,
+		Reflectance = 0.14,
+		-- Properly slippery. Skating here is momentum, not walking, and a
+		-- car driven onto it is a disaster in the best way.
+		CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.02, 0.2, 1, 1),
+		Parent = parent,
+	})
+	ice:SetAttribute("Ice", true)
+
+	-- Centre red line, two blue lines.
+	for _, line in {
+		{ at = 0, colour = Color3.fromRGB(210, 50, 50), width = 2.4 },
+		{ at = -RINK_LENGTH * 0.2, colour = Color3.fromRGB(50, 90, 210), width = 3 },
+		{ at = RINK_LENGTH * 0.2, colour = Color3.fromRGB(50, 90, 210), width = 3 },
+	} do
+		Util.Part({
+			Name = "RinkLine",
+			Size = Vector3.new(RINK_WIDTH, 0.2, line.width),
+			CFrame = CFrame.new(centre + Vector3.new(0, 1.1, line.at)),
+			Color = line.colour,
+			Material = Enum.Material.SmoothPlastic,
+			CanCollide = false,
+			Parent = parent,
+		})
+	end
+
+	-- Face-off circles, drawn as rings of short arcs.
+	for _, spot in {
+		Vector3.new(0, 0, 0),
+		Vector3.new(-RINK_WIDTH * 0.26, 0, -RINK_LENGTH * 0.3),
+		Vector3.new(RINK_WIDTH * 0.26, 0, -RINK_LENGTH * 0.3),
+		Vector3.new(-RINK_WIDTH * 0.26, 0, RINK_LENGTH * 0.3),
+		Vector3.new(RINK_WIDTH * 0.26, 0, RINK_LENGTH * 0.3),
+	} do
+		local radius = 15
+		for step = 0, 23 do
+			local angle = (step / 24) * math.pi * 2
+			Util.Part({
+				Name = "FaceoffCircle",
+				Size = Vector3.new(1.2, 0.2, 4.2),
+				CFrame = CFrame.new(
+					centre + spot + Vector3.new(math.cos(angle) * radius, 1.1, math.sin(angle) * radius)
+				) * CFrame.Angles(0, -angle, 0),
+				Color = Color3.fromRGB(210, 50, 50),
+				Material = Enum.Material.SmoothPlastic,
+				CanCollide = false,
+				Parent = parent,
+			})
+		end
+	end
+end
+
+--[[ A rack of sticks, so the rink comes with something to play it with. ]]
+local function stickRack(at: Vector3, parent: Instance)
+	Util.Part({
+		Name = "StickRack",
+		Size = Vector3.new(16, 8, 4),
+		CFrame = CFrame.new(at + Vector3.new(0, 4, 0)),
+		Color = Color3.fromRGB(96, 70, 46),
+		Material = Enum.Material.Wood,
+		Parent = parent,
+	})
+	for index = 0, 5 do
+		Util.Part({
+			Name = "RackStick",
+			Size = Vector3.new(0.7, 11, 0.7),
+			CFrame = CFrame.new(at + Vector3.new(-6 + index * 2.4, 7, 0))
+				* CFrame.Angles(math.rad(12), 0, 0),
+			Color = Color3.fromRGB(190, 170, 140),
+			Material = Enum.Material.Wood,
+			CanCollide = false,
+			Parent = parent,
+		})
+	end
+end
+
+-- ===================================================================== PUCK ==
+
+--[[
+	Drop a fresh puck at centre ice.
+
+	Deliberately light and very slippery, so a bullet moves it a long way.
+	Shooting the puck IS playing hockey here -- there is no stick-handling
+	simulation and there does not need to be one.
+]]
+local function dropPuck()
+	if puck then
+		puck:Destroy()
+	end
+
+	local fresh = Util.Part({
+		Name = "Puck",
+		Size = Vector3.new(3.4, 1.2, 3.4),
+		CFrame = CFrame.new(puckHome),
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(22, 22, 26),
+		Material = Enum.Material.Rubber,
+		Anchored = false,
+		CustomPhysicalProperties = PhysicalProperties.new(0.4, 0.03, 0.35, 1, 1),
+		Parent = rink,
+	})
+	-- A cylinder lies on its own X, so turn it flat.
+	fresh.CFrame = CFrame.new(puckHome) * CFrame.Angles(0, 0, math.rad(90))
+	fresh:SetAttribute("Puck", true)
+	puck = fresh
+end
+
+--[[
+	A bullet hit the puck.
+
+	This is the shot. The puck takes off along the shot's own direction, hard
+	enough to cross the rink, which makes a rifle a perfectly good stick.
+]]
+function HockeyService.RegisterHit(part: BasePart, attacker: Player?, direction: Vector3?): boolean
+	if part:GetAttribute("Puck") ~= true then
+		return false
+	end
+
+	local push = direction or Vector3.new(0, 0, -1)
+	local flat = Vector3.new(push.X, 0, push.Z)
+	if flat.Magnitude < 0.01 then
+		flat = Vector3.new(0, 0, -1)
+	end
+
+	part.AssemblyLinearVelocity = flat.Unit * 190 + Vector3.new(0, 14, 0)
+	Sound.At("MeleeHit", part.Position, 1.1)
+
+	if attacker then
+		-- Credit for touching it last, so a goal has somebody to name.
+		part:SetAttribute("LastTouchUserId", attacker.UserId)
+	end
+	return true
+end
+
+--[[ Who last touched the puck, if they are still here. ]]
+local function lastToucher(): Player?
+	if not puck then
+		return nil
+	end
+	local userId = puck:GetAttribute("LastTouchUserId")
+	if typeof(userId) ~= "number" then
+		return nil
+	end
+	for _, player in Players:GetPlayers() do
+		if player.UserId == userId then
+			return player
+		end
+	end
+	return nil
+end
+
+--[[ Did the puck cross a goal line? ]]
+local function checkGoals()
+	local live = puck
+	if not live or not live.Parent then
+		return
+	end
+
+	local now = os.clock()
+	if now - lastGoalAt < 3 then
+		return
+	end
+
+	for _, zone in goalZones do
+		local offset = live.Position - zone.part.Position
+		local half = zone.part.Size * 0.5
+		if math.abs(offset.X) <= half.X
+			and math.abs(offset.Y) <= half.Y
+			and math.abs(offset.Z) <= half.Z
+		then
+			lastGoalAt = now
+
+			local scorer = lastToucher()
+			-- The goal belongs to whoever is NOT defending it.
+			local scoringTeam = if zone.defendingTeam == 1 then 2 else 1
+			local points = Config.Hockey.GoalPoints
+
+			if scorer then
+				PlayerState.AwardPoints(scorer, points)
+			end
+			HockeyService.Goal.Fire(scorer, scoringTeam, points)
+
+			Sound.At("RoundEnd", live.Position, 1.2)
+			dropPuck()
+			return
+		end
+	end
+end
+
+-- ==================================================================== FIGHTS ==
+
+--[[
+	A hockey fight, Blades of Steel style.
+
+	Two opposing players, both mashing, for a few seconds. The one who
+	swings most wins: the loser goes down, the winner takes the points, and
+	the winner's stick has a good chance of breaking over them -- at which
+	point the splintered half becomes a genuinely nasty melee weapon.
+
+	Note what does NOT happen: nobody's guns are taken away. You can shoot
+	your way out of a fight, or shoot two other people having one. That is
+	the rule for every sport on this map and a fight is no exception; it just
+	means the scrap is a gamble rather than a cutscene.
+]]
+function HockeyService.StartFight(a: Player, b: Player): boolean
+	if fightOf[a] or fightOf[b] then
+		return false
+	end
+	if a == b or (a.Team and b.Team and a.Team == b.Team) then
+		return false
+	end
+
+	local fight: Fight = {
+		a = a,
+		b = b,
+		endsAt = os.clock() + Config.Hockey.FightSeconds,
+		swings = { [a] = 0, [b] = 0 },
+	}
+	table.insert(fights, fight)
+	fightOf[a] = fight
+	fightOf[b] = fight
+
+	for _, who in { a, b } do
+		local foe = if who == a then b else a
+		Remotes.Event("FightStarted"):FireClient(who, {
+			opponent = foe.DisplayName,
+			duration = Config.Hockey.FightSeconds,
+		})
+	end
+
+	Remotes.Event("KillFeed"):FireAllClients(
+		`{a.DisplayName} and {b.DisplayName} are going at it`,
+		false
+	)
+	return true
+end
+
+--[[ A swing thrown during a fight. The client sends one per mash. ]]
+function HockeyService.Swing(player: Player)
+	local fight = fightOf[player]
+	if not fight then
+		return
+	end
+	fight.swings[player] = (fight.swings[player] or 0) + 1
+end
+
+local function settle(fight: Fight)
+	fightOf[fight.a] = nil
+	fightOf[fight.b] = nil
+
+	local aSwings = fight.swings[fight.a] or 0
+	local bSwings = fight.swings[fight.b] or 0
+
+	local winner, loser
+	if aSwings == bSwings then
+		-- A dead heat is a draw: both of them look silly and neither falls.
+		for _, who in { fight.a, fight.b } do
+			Remotes.Event("FightResult"):FireClient(who, { won = false, draw = true })
+		end
+		return
+	elseif aSwings > bSwings then
+		winner, loser = fight.a, fight.b
+	else
+		winner, loser = fight.b, fight.a
+	end
+
+	PlayerState.AwardPoints(winner, Config.Hockey.FightWinPoints)
+
+	-- The loser goes down. Not killed -- knocked over, which is both funnier
+	-- and leaves them in the game.
+	local loserCharacter = loser.Character
+	local loserHumanoid = loserCharacter and loserCharacter:FindFirstChildOfClass("Humanoid")
+	if loserHumanoid then
+		loserHumanoid.PlatformStand = true
+		task.delay(Config.Hockey.KnockdownSeconds, function()
+			if loserHumanoid and loserHumanoid.Parent then
+				loserHumanoid.PlatformStand = false
+			end
+		end)
+	end
+
+	-- And the stick may well break. The splintered half is the prize.
+	local brokeStick = math.random() < Config.Hockey.StickBreakChance
+	if brokeStick then
+		local state = PlayerState.Get(winner)
+		local spec = Config.Weapons[Config.Hockey.BrokenStickWeapon]
+		if spec then
+			state.weapons[Config.Hockey.BrokenStickWeapon] = {
+				ammo = spec.MagSize,
+				reloadingUntil = 0,
+				nextFireAt = 0,
+			}
+			state.equipped = Config.Hockey.BrokenStickWeapon
+			PlayerState.Changed.Fire(winner)
+		end
+	end
+
+	Remotes.Event("FightResult"):FireClient(winner, { won = true, brokeStick = brokeStick })
+	Remotes.Event("FightResult"):FireClient(loser, { won = false, brokeStick = false })
+	Remotes.Event("KillFeed"):FireAllClients(
+		`{winner.DisplayName} won the fight with {loser.DisplayName}`
+			.. (if brokeStick then " and broke their stick over them" else ""),
+		false
+	)
+
+	HockeyService.FightOver.Fire(winner, loser, brokeStick)
+end
+
+--[[ Is this player on the ice? Fights only start on the rink. ]]
+function HockeyService.OnIce(player: Player): boolean
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") or not rink then
+		return false
+	end
+	local ice = rink:FindFirstChild("Ice")
+	if not ice or not ice:IsA("BasePart") then
+		return false
+	end
+	local offset = root.Position - ice.Position
+	return math.abs(offset.X) <= RINK_WIDTH * 0.5
+		and math.abs(offset.Z) <= RINK_LENGTH * 0.5
+		and offset.Y > -6
+		and offset.Y < 30
+end
+
+-- ===================================================================== BUILD ==
+
+function HockeyService.Clear()
+	if rink then
+		rink:Destroy()
+		rink = nil
+	end
+	puck = nil
+	table.clear(goalZones)
+	table.clear(fights)
+	table.clear(fightOf)
+end
+
+--[[ Put the rink down, off to one side of the city. ]]
+function HockeyService.Build(mapSize: number)
+	HockeyService.Clear()
+
+	local model = Instance.new("Model")
+	model.Name = "HockeyRink"
+	rink = model
+
+	-- Opposite the carnival, so the two distractions are not on top of each
+	-- other and both are a drive from the middle.
+	local centre = Vector3.new(-mapSize * 0.3, 0, mapSize * 0.06)
+
+	surface(centre, model)
+	boards(centre, model)
+
+	goal(centre + Vector3.new(0, 0, -RINK_LENGTH * 0.42), -1, 1, model)
+	goal(centre + Vector3.new(0, 0, RINK_LENGTH * 0.42), 1, 2, model)
+
+	stickRack(centre + Vector3.new(RINK_WIDTH * 0.5 + 14, 0, 0), model)
+	stickRack(centre + Vector3.new(-RINK_WIDTH * 0.5 - 14, 0, 0), model)
+
+	model.Parent = workspace
+
+	puckHome = centre + Vector3.new(0, 4, 0)
+	dropPuck()
+
+	return { centre = centre, puckHome = puckHome }
+end
+
+--[[ Where the rink sits, so the city is not built on top of it. ]]
+function HockeyService.ReservedArea(mapSize: number): { centre: Vector3, radius: number }
+	return {
+		centre = Vector3.new(-mapSize * 0.3, 0, mapSize * 0.06),
+		radius = RINK_LENGTH * 0.5 + 30,
+	}
+end
+
+function HockeyService.Start()
+	Remotes.Event("FightSwing").OnServerEvent:Connect(function(player: Player)
+		HockeyService.Swing(player)
+	end)
+
+	RunService.Heartbeat:Connect(function()
+		checkGoals()
+
+		local now = os.clock()
+		for index = #fights, 1, -1 do
+			local fight = fights[index]
+			-- A fight ends on the clock, or the moment either of them leaves
+			-- or dies, which would otherwise leave it running forever.
+			local aGone = fight.a.Parent == nil
+			local bGone = fight.b.Parent == nil
+			if now >= fight.endsAt or aGone or bGone then
+				table.remove(fights, index)
+				if aGone or bGone then
+					fightOf[fight.a] = nil
+					fightOf[fight.b] = nil
+				else
+					settle(fight)
+				end
+			end
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		fightOf[player] = nil
+	end)
+end
+
+--[[ How many fights are running, for tests. ]]
+function HockeyService.FightCount(): number
+	return #fights
+end
+
+--[[ The puck itself, for tests. ]]
+function HockeyService.Puck(): BasePart?
+	return puck
+end
+
+return HockeyService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="19">
+          <Properties>
             <string name="Name">MapService</string>
             <string name="Source"><![CDATA[--!strict
 --[[
@@ -3525,6 +4242,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
 local ResortService = require(script.Parent:WaitForChild("ResortService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local MapService = {}
 
@@ -4162,6 +4880,8 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	-- city is laid down.
 	local resort = ResortService.Build(size, model)
 	local resortReserved = ResortService.ReservedAreas(size)
+	-- The rink builds its own model, but the city has to know where it is.
+	table.insert(resortReserved, HockeyService.ReservedArea(size))
 
 	-- Walls, so nobody drives off the edge of the world.
 	local wallHeight = 160
@@ -4572,6 +5292,20 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		})
 	end
 
+	-- Off-roaders at the lift stations, which is where you go to get up the
+	-- mountain. A Lamborghini at the bottom of a mountain trail is a joke.
+	local offRoaders = { "G-Wagon", "Hummer", "Jeep" }
+	for index, station in resort.liftStations do
+		table.insert(vehiclePads, {
+			position = station + Vector3.new(22, 2, 0),
+			kind = offRoaders[((index - 1) % #offRoaders) + 1],
+		})
+	end
+	table.insert(vehiclePads, {
+		position = resort.liftStations[1] + Vector3.new(-22, 2, 0),
+		kind = "Hummer",
+	})
+
 	-- Gear on the sniper towers, because climbing one should be worth it.
 	for index, top in resort.towerTops do
 		table.insert(pickupPads, {
@@ -4605,7 +5339,7 @@ return MapService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="19">
+        <Item class="ModuleScript" referent="20">
           <Properties>
             <string name="Name">MatchService</string>
             <string name="Source"><![CDATA[--!strict
@@ -4629,6 +5363,7 @@ local PickupService = require(script.Parent:WaitForChild("PickupService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local FlagService = require(script.Parent:WaitForChild("FlagService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
@@ -4759,6 +5494,8 @@ local function buildArena(entry: { map: Config.MapSpec, mode: typeof(Config.Mode
 
 	WildlifeService.Populate(spec.Size)
 	CarnivalService.Build(spec.Size)
+	-- And the rink, which builds its own model beside the arena.
+	HockeyService.Build(spec.Size)
 
 	-- Flags only exist in Capture the Flag.
 	FlagService.Clear()
@@ -5183,7 +5920,7 @@ return MatchService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">MonetizationService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5359,7 +6096,7 @@ return MonetizationService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">PickupService</string>
             <string name="Source"><![CDATA[--!strict
@@ -5638,7 +6375,7 @@ return PickupService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="22">
+        <Item class="ModuleScript" referent="23">
           <Properties>
             <string name="Name">PlayerState</string>
             <string name="Source"><![CDATA[--!strict
@@ -5831,7 +6568,7 @@ return PlayerState
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">ProjectileService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6262,7 +6999,7 @@ return ProjectileService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="25">
           <Properties>
             <string name="Name">ResortService</string>
             <string name="Source"><![CDATA[--!strict
@@ -6920,7 +7657,7 @@ return ResortService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="26">
           <Properties>
             <string name="Name">ScoreboardService</string>
             <string name="Source"><![CDATA[--!strict
@@ -7071,7 +7808,7 @@ return ScoreboardService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">TeamService</string>
             <string name="Source"><![CDATA[--!strict
@@ -7154,7 +7891,7 @@ return TeamService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">VehicleService</string>
             <string name="Source"><![CDATA[--!strict
@@ -7642,9 +8379,31 @@ end
 	A car. Tier decides how fast it is; the body style is a coin flip between
 	a truck and a Lamborghini, so what pulls up beside you varies.
 ]]
-function VehicleService.SpawnCar(tierIndex: number, position: Vector3, owner: Player?): Model
+function VehicleService.SpawnCar(
+	tierIndex: number,
+	position: Vector3,
+	owner: Player?,
+	bodyName: string?
+): Model
 	local tier = Config.CarTiers[math.clamp(tierIndex, 1, #Config.CarTiers)]
+
+	--[[
+		Which body turns up.
+
+		Normally a coin flip, so what pulls up beside you varies. Named
+		explicitly for the mountain, where the whole point is that the thing
+		waiting at the trailhead can actually climb it -- a Lamborghini at
+		the bottom of a mountain trail is a joke, not a vehicle.
+	]]
 	local body = Config.CarBodies[bodyPicker:NextInteger(1, #Config.CarBodies)]
+	if bodyName then
+		for _, candidate in Config.CarBodies do
+			if candidate.Name == bodyName then
+				body = candidate
+				break
+			end
+		end
+	end
 
 	local model, chassis, wheels = buildChassis(
 		`{body.Name}_{tier.Name}`,
@@ -8381,6 +9140,9 @@ function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
 		return VehicleService.SpawnGlider(position)
 	elseif kind == "Skis" then
 		return VehicleService.SpawnSkis(position)
+	elseif kind == "G-Wagon" or kind == "Hummer" or kind == "Jeep" then
+		-- The off-roaders, by name, for the mountain pads.
+		return VehicleService.SpawnCar(3, position, nil, kind)
 	end
 	return nil
 end
@@ -9378,7 +10140,7 @@ return VehicleService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">WeaponService</string>
             <string name="Source"><![CDATA[--!strict
@@ -9407,6 +10169,7 @@ local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local WeaponService = {}
 
@@ -9585,6 +10348,13 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 		return
 	end
 
+	-- The puck. Shooting it is how you play hockey here -- a rifle makes a
+	-- perfectly good stick and there is no stick-handling simulation to get
+	-- in the way of it.
+	if HockeyService.RegisterHit(result.Instance, player, direction) then
+		return
+	end
+
 	if WildlifeService.RegisterHit(result.Instance, spec.Damage, player) then
 		return
 	end
@@ -9599,6 +10369,25 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 			if headshot then
 				damage *= 1.8
 			end
+			--[[
+				A stick to the body on the ice starts a scrap.
+
+				Blades of Steel: you catch somebody with the stick, it turns
+				into a fight, and the winner may break the stick over them.
+				It only triggers on the rink -- a stick swung in the street
+				is just a stick -- and the damage still lands either way.
+			]]
+			-- Compared by identity against the config entries, because this
+			-- function is handed the spec rather than the weapon's name.
+			local isStick = spec == Config.Weapons[Config.Hockey.StickWeapon]
+				or spec == Config.Weapons[Config.Hockey.BrokenStickWeapon]
+			if isStick
+				and HockeyService.OnIce(player)
+				and HockeyService.OnIce(victim)
+			then
+				HockeyService.StartFight(player, victim)
+			end
+
 			if DamageService.ApplyDamage(victim, damage, player, spec.DisplayName) then
 				-- Tell the shooter they connected. Without this, hitscan guns
 				-- give you nothing at all to tell you whether you are aiming
@@ -10165,7 +10954,7 @@ return WeaponService
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">WildlifeService</string>
             <string name="Source"><![CDATA[--!strict
@@ -10985,27 +11774,27 @@ return WildlifeService
       </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="30">
+  <Item class="SoundService" referent="31">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterGui" referent="31">
+  <Item class="StarterGui" referent="32">
     <Properties>
       <string name="Name">StarterGui</string>
       <bool name="ResetPlayerGuiOnSpawn">false</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="32">
+  <Item class="StarterPlayer" referent="33">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="33">
+    <Item class="StarterPlayerScripts" referent="34">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="34">
+      <Item class="LocalScript" referent="35">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
@@ -11241,6 +12030,24 @@ Remotes.Event("ShotFired").OnClientEvent:Connect(function(payload)
 	end
 end)
 
+--[[ A hockey fight. Mash F -- and your guns still work, so consider those. ]]
+Remotes.Event("FightStarted").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Controls.SetFighting(true)
+	Hud.ShowFight(tostring(payload.opponent or "SOMEBODY"), payload.duration or 4)
+	Sound.Flat("MeleeSwing")
+end)
+
+Remotes.Event("FightResult").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	Controls.SetFighting(false)
+	Hud.FightResult(payload.won == true, payload.draw == true, payload.brokeStick == true)
+end)
+
 --[[ The scoreboard we asked for, or the one pushed at the end of a round. ]]
 Remotes.Event("Scoreboard").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" or typeof(payload.rows) ~= "table" then
@@ -11303,11 +12110,11 @@ end)
 print("[Nuclear Mud Arena] Client ready. WASD drives, F mega-detonates.")
 ]]></string>
         </Properties>
-        <Item class="Folder" referent="35">
+        <Item class="Folder" referent="36">
           <Properties>
             <string name="Name">modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="36">
+          <Item class="ModuleScript" referent="37">
             <Properties>
               <string name="Name">Controls</string>
               <string name="Source"><![CDATA[--!strict
@@ -11525,6 +12332,10 @@ end
 -- ==================================================================== FIRING ==
 
 local nextShotFeedback = 0
+
+-- Counts up while a hockey fight is running, so F throws punches as well as
+-- detonating. Zero means no fight.
+local fightSwings = 0
 
 local function tryFire()
 	local spec = arsenal[effectiveWeaponName()]
@@ -11791,8 +12602,15 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	if input.KeyCode == Enum.KeyCode.R then
 		Remotes.Event("Reload"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F then
-		-- The big one.
+		-- The big one -- and, mid-fight, a punch. The same key doing both is
+		-- deliberate: there is no spare finger during a scrap, and a diamond
+		-- round going off while you are swinging is in the spirit of it.
 		Remotes.Event("MegaDetonate"):FireServer()
+		if fightSwings > 0 then
+			fightSwings += 1
+			Remotes.Event("FightSwing"):FireServer()
+			Hud.FightSwings(fightSwings)
+		end
 	elseif input.KeyCode == Enum.KeyCode.Q then
 		Remotes.Event("Melee"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.Space then
@@ -12152,6 +12970,11 @@ function Controls.EquippedName(): string
 end
 
 --[[ Whether the scoreboard is up, for tests. ]]
+--[[ A fight started or finished; F throws punches while one is running. ]]
+function Controls.SetFighting(fighting: boolean)
+	fightSwings = if fighting then 1 else 0
+end
+
 function Controls.ScoreboardOpenForTests(): boolean
 	return scoreboardOpen
 end
@@ -12164,7 +12987,7 @@ return Controls
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="37">
+          <Item class="ModuleScript" referent="38">
             <Properties>
               <string name="Name">Feel</string>
               <string name="Source"><![CDATA[--!strict
@@ -12314,7 +13137,7 @@ return Feel
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="38">
+          <Item class="ModuleScript" referent="39">
             <Properties>
               <string name="Name">Hud</string>
               <string name="Source"><![CDATA[--!strict
@@ -12392,6 +13215,9 @@ local deathOverlay: Frame
 local deathTitle: TextLabel? = nil
 local respawnLabel: TextLabel? = nil
 local respawnToken = 0
+local fightLabel: TextLabel? = nil
+local fightCount: TextLabel? = nil
+local fightToken = 0
 local wienerOverlay: TextLabel
 local toastHolder: Frame
 
@@ -12908,6 +13734,32 @@ function Hud.Build()
 
 	scoreboard = board
 	scoreboardRows = rows
+
+	-- The fight prompt. High on the screen on purpose: your guns still work
+	-- during a fight and the middle of the screen is where you aim them.
+	fightLabel = makeLabel(screen, {
+		Name = "FightLabel",
+		Size = UDim2.new(1, 0, 0, 56),
+		Position = UDim2.new(0, 0, 0.16, 0),
+		Text = "",
+		TextSize = 48,
+		Font = Enum.Font.LuckiestGuy,
+		TextColor3 = Color3.fromRGB(255, 210, 90),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = false,
+		ZIndex = 12,
+	})
+	fightCount = makeLabel(screen, {
+		Name = "FightCount",
+		Size = UDim2.new(1, 0, 0, 34),
+		Position = UDim2.new(0, 0, 0.16, 58),
+		Text = "",
+		TextSize = 26,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextColor3 = Color3.fromRGB(255, 240, 200),
+		Visible = false,
+		ZIndex = 12,
+	})
 
 	-- The motion tracker, bottom left above the health bar.
 	Radar.Build(screen)
@@ -13469,6 +14321,53 @@ function Hud.SetScoreboard(
 	end
 end
 
+--[[
+	The fight prompt.
+
+	Blades of Steel: a big instruction and a count, up for a few seconds
+	while you mash. It deliberately does NOT cover the middle of the screen,
+	because your guns still work during a fight and you may well decide to
+	shoot your way out of it instead.
+]]
+function Hud.ShowFight(opponent: string, duration: number)
+	if not fightLabel or not fightCount then
+		return
+	end
+	fightLabel.Text = `FIGHT!  {string.upper(opponent)}`
+	fightLabel.Visible = true
+	fightCount.Text = "MASH  F"
+	fightCount.Visible = true
+
+	fightToken += 1
+	local token = fightToken
+	task.delay(duration + 1.6, function()
+		-- Only clear it if no later fight has started since.
+		if fightToken == token and fightLabel and fightCount then
+			fightLabel.Visible = false
+			fightCount.Visible = false
+		end
+	end)
+end
+
+--[[ How the scrap went. ]]
+function Hud.FightResult(won: boolean, draw: boolean, brokeStick: boolean)
+	if not fightLabel or not fightCount then
+		return
+	end
+	fightLabel.Text = if draw
+		then "A DRAW"
+		elseif won then "YOU WON THE FIGHT"
+		else "YOU LOST THE FIGHT"
+	fightCount.Text = if brokeStick then "YOUR STICK BROKE — USE IT" else ""
+end
+
+--[[ Count the mashes back, so mashing feels like it is doing something. ]]
+function Hud.FightSwings(count: number)
+	if fightCount and fightCount.Visible then
+		fightCount.Text = `MASH  F   ×{count}`
+	end
+end
+
 function Hud.SetStatus(text: string, good: boolean)
 	if not statusText then
 		return
@@ -13497,7 +14396,7 @@ return Hud
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="39">
+          <Item class="ModuleScript" referent="40">
             <Properties>
               <string name="Name">Radar</string>
               <string name="Source"><![CDATA[--!strict
@@ -13838,7 +14737,7 @@ return Radar
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="40">
+  <Item class="Workspace" referent="41">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="FilteringEnabled">true</bool>

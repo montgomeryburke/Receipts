@@ -24,6 +24,7 @@ local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"
 local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
+local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local WeaponService = {}
 
@@ -202,6 +203,13 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 		return
 	end
 
+	-- The puck. Shooting it is how you play hockey here -- a rifle makes a
+	-- perfectly good stick and there is no stick-handling simulation to get
+	-- in the way of it.
+	if HockeyService.RegisterHit(result.Instance, player, direction) then
+		return
+	end
+
 	if WildlifeService.RegisterHit(result.Instance, spec.Damage, player) then
 		return
 	end
@@ -216,6 +224,25 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 			if headshot then
 				damage *= 1.8
 			end
+			--[[
+				A stick to the body on the ice starts a scrap.
+
+				Blades of Steel: you catch somebody with the stick, it turns
+				into a fight, and the winner may break the stick over them.
+				It only triggers on the rink -- a stick swung in the street
+				is just a stick -- and the damage still lands either way.
+			]]
+			-- Compared by identity against the config entries, because this
+			-- function is handed the spec rather than the weapon's name.
+			local isStick = spec == Config.Weapons[Config.Hockey.StickWeapon]
+				or spec == Config.Weapons[Config.Hockey.BrokenStickWeapon]
+			if isStick
+				and HockeyService.OnIce(player)
+				and HockeyService.OnIce(victim)
+			then
+				HockeyService.StartFight(player, victim)
+			end
+
 			if DamageService.ApplyDamage(victim, damage, player, spec.DisplayName) then
 				-- Tell the shooter they connected. Without this, hitscan guns
 				-- give you nothing at all to tell you whether you are aiming
