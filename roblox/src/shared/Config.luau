@@ -619,6 +619,29 @@ Config.WeaponsAlwaysAvailable = true
 	out what is in the corner of it, and nobody who is already standing on a
 	basketball court should have to open a menu to use it.
 ]]
+--[[
+	The fairground.
+
+	Seven stalls now. The payouts are deliberately uneven: a single balloon
+	is worth almost nothing and clearing a whole board is worth a kill, which
+	is what makes a stall worth standing at rather than walking past.
+]]
+Config.Carnival = {
+	BalloonPoints = 12,
+	BalloonClearBonus = 240,
+	BottlePoints = 20,
+	BottleStackBonus = 180,
+	MolePoints = 35,
+	-- How long a whacked mole stays down before it dares come back.
+	MoleDownSeconds = 2.4,
+	MoleUpSeconds = 1.9,
+	CratePoints = 15,
+	CrateStackBonus = 300,
+	CannonCooldown = 2.2,
+	-- How long before a cleared stall sets itself up again.
+	ResetSeconds = 5,
+}
+
 Config.Arcade = {
 	-- How close you have to be for a venue to offer you a game.
 	OfferRadius = 150,
@@ -1055,6 +1078,13 @@ export type ConfigType = {
 	GrenadeKeyWeapon: string,
 	WeaponsAlwaysAvailable: boolean,
 	Movement: { JumpPower: number, HeadshotMultiplier: number, ScopedSpeedFactor: number },
+	Carnival: {
+		BalloonPoints: number, BalloonClearBonus: number,
+		BottlePoints: number, BottleStackBonus: number,
+		MolePoints: number, MoleDownSeconds: number, MoleUpSeconds: number,
+		CratePoints: number, CrateStackBonus: number, CannonCooldown: number,
+		ResetSeconds: number,
+	},
 	Arcade: { OfferRadius: number, ReofferSeconds: number },
 	Bots: {
 		Health: number,

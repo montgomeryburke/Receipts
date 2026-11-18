@@ -199,7 +199,7 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
 	-- Fairground props first: they are neither people nor vehicles.
-	if CarnivalService.RegisterHit(result.Instance, player) then
+	if CarnivalService.RegisterHit(result.Instance, player, direction) then
 		return
 	end
 

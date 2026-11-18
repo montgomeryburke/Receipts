@@ -15,6 +15,7 @@ local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
@@ -50,6 +51,11 @@ local DUCK_POINTS = 20
 local STRIKER_POINTS = 35
 
 -- ================================================================= HELPERS ==
+
+-- Who last fired the cannon, so a flattened stack has somebody to pay, and
+-- when it may be fired again.
+local lastCannonFirer: Player? = nil
+local nextCannonAt = 0
 
 local function award(player: Player?, points: number, message: string)
 	if not player then
@@ -445,7 +451,446 @@ end
 -- ================================================================== PUBLIC ==
 
 --[[ Something was shot. Returns true if it was a carnival prop. ]]
-function CarnivalService.RegisterHit(part: BasePart, attacker: Player?): boolean
+--[[
+	Balloon pop.
+
+	A wall of balloons on a board. Pop one and it is gone, with the whole
+	board refilling once it is cleared -- so there is always something to
+	shoot and never a wall of nothing.
+]]
+local balloonBoard: { BasePart } = {}
+local balloonHome: Vector3 = Vector3.new()
+
+local BALLOON_COLOURS = {
+	Color3.fromRGB(230, 60, 60),
+	Color3.fromRGB(60, 140, 230),
+	Color3.fromRGB(240, 200, 60),
+	Color3.fromRGB(110, 210, 110),
+	Color3.fromRGB(200, 110, 220),
+}
+
+local function fillBalloons(parent: Instance)
+	for column = 0, 7 do
+		for row = 0, 3 do
+			local balloon = Util.Part({
+				Name = "Balloon",
+				Size = Vector3.new(4, 5, 4),
+				CFrame = CFrame.new(balloonHome + Vector3.new(
+					-21 + column * 6,
+					6 + row * 6,
+					0
+				)),
+				Shape = Enum.PartType.Ball,
+				Color = BALLOON_COLOURS[((column + row) % #BALLOON_COLOURS) + 1],
+				Material = Enum.Material.SmoothPlastic,
+				Parent = parent,
+			})
+			balloon:SetAttribute("Carnival", "Balloon")
+			table.insert(balloonBoard, balloon)
+		end
+	end
+end
+
+local function buildBalloonPop(at: Vector3, parent: Instance)
+	balloonHome = at
+	table.clear(balloonBoard)
+
+	Util.Part({
+		Name = "BalloonBoard",
+		Size = Vector3.new(50, 32, 2),
+		CFrame = CFrame.new(at + Vector3.new(0, 16, 2)),
+		Color = Color3.fromRGB(96, 70, 46),
+		Material = Enum.Material.Wood,
+		Parent = parent,
+	})
+	fillBalloons(parent)
+	sign(parent, at + Vector3.new(0, 1, 10), "BALLOON POP", Color3.fromRGB(230, 90, 90))
+end
+
+local function popBalloon(part: BasePart, shooter: Player?): boolean
+	if not part.Parent then
+		return false
+	end
+	Sound.At("Hitmarker", part.Position, 0.9)
+	part:Destroy()
+
+	local index = table.find(balloonBoard, part)
+	if index then
+		table.remove(balloonBoard, index)
+	end
+	award(shooter, Config.Carnival.BalloonPoints, "POP!")
+
+	-- Board cleared: a bonus, and a fresh wall.
+	if #balloonBoard == 0 and container then
+		award(shooter, Config.Carnival.BalloonClearBonus, "FULL BOARD CLEARED!")
+		local parent = container
+		task.delay(1.6, function()
+			if parent.Parent then
+				fillBalloons(parent)
+			end
+		end)
+	end
+	return true
+end
+
+--[[
+	Milk bottles.
+
+	Three stacks of bottles. Knock every bottle in a stack off its shelf and
+	the stack pays out -- which means a shot that scatters two at once is
+	worth more than two careful shots, and that is the whole game.
+]]
+local bottleStacks: { { bottles: { BasePart }, shelf: Vector3, cleared: boolean } } = {}
+
+local function stackBottles(stack: { bottles: { BasePart }, shelf: Vector3, cleared: boolean }, parent: Instance)
+	table.clear(stack.bottles)
+	stack.cleared = false
+	-- Three on the bottom, two, then one: a pyramid, like a real stall.
+	local rows = { 3, 2, 1 }
+	for row, count in rows do
+		for index = 1, count do
+			local bottle = Util.Part({
+				Name = "MilkBottle",
+				Size = Vector3.new(2.4, 5, 2.4),
+				CFrame = CFrame.new(stack.shelf + Vector3.new(
+					-(count - 1) * 1.8 + (index - 1) * 3.6,
+					2.5 + (row - 1) * 5,
+					0
+				)),
+				Shape = Enum.PartType.Cylinder,
+				Color = Color3.fromRGB(240, 245, 250),
+				Material = Enum.Material.Glass,
+				Anchored = false,
+				Parent = parent,
+			})
+			-- A cylinder lies on its own X, so stand it upright.
+			bottle.CFrame = CFrame.new(bottle.Position) * CFrame.Angles(0, 0, math.rad(90))
+			bottle:SetAttribute("Carnival", "Bottle")
+			table.insert(stack.bottles, bottle)
+		end
+	end
+end
+
+local function buildMilkBottles(at: Vector3, parent: Instance)
+	table.clear(bottleStacks)
+	for index = -1, 1 do
+		local shelfAt = at + Vector3.new(index * 22, 8, 0)
+		Util.Part({
+			Name = "BottleShelf",
+			Size = Vector3.new(18, 1.6, 8),
+			CFrame = CFrame.new(shelfAt - Vector3.new(0, 0.8, 0)),
+			Color = Color3.fromRGB(104, 76, 50),
+			Material = Enum.Material.Wood,
+			Parent = parent,
+		})
+		-- The legs, so the shelf is not floating.
+		for _, side in { -1, 1 } do
+			Util.Part({
+				Name = "ShelfLeg",
+				Size = Vector3.new(1.4, 7.4, 1.4),
+				CFrame = CFrame.new(shelfAt + Vector3.new(side * 7.5, -5.2, 0)),
+				Color = Color3.fromRGB(88, 64, 42),
+				Material = Enum.Material.Wood,
+				Parent = parent,
+			})
+		end
+
+		local stack = { bottles = {}, shelf = shelfAt, cleared = false }
+		stackBottles(stack, parent)
+		table.insert(bottleStacks, stack)
+	end
+	sign(parent, at + Vector3.new(0, 1, 12), "MILK BOTTLES", Color3.fromRGB(240, 240, 250))
+end
+
+--[[ A bottle took a hit: shove it, and pay out if its stack is swept. ]]
+local function knockBottle(part: BasePart, shooter: Player?, direction: Vector3?): boolean
+	local push = direction or Vector3.new(0, 0, -1)
+	local flat = Vector3.new(push.X, 0, push.Z)
+	if flat.Magnitude < 0.01 then
+		flat = Vector3.new(0, 0, -1)
+	end
+	part.AssemblyLinearVelocity = flat.Unit * 70 + Vector3.new(0, 26, 0)
+	Sound.At("Hitmarker", part.Position, 0.8)
+	award(shooter, Config.Carnival.BottlePoints, "BOTTLE")
+
+	for _, stack in bottleStacks do
+		if stack.cleared then
+			continue
+		end
+		local standing = 0
+		for _, bottle in stack.bottles do
+			-- Still on the shelf if it has not dropped below it.
+			if bottle.Parent and bottle.Position.Y > stack.shelf.Y - 1 then
+				standing += 1
+			end
+		end
+		if standing == 0 then
+			stack.cleared = true
+			award(shooter, Config.Carnival.BottleStackBonus, "STACK CLEARED!")
+			Sound.At("RoundEnd", stack.shelf, 0.9)
+
+			local parent = container
+			task.delay(Config.Carnival.ResetSeconds, function()
+				if parent and parent.Parent then
+					for _, old in stack.bottles do
+						if old.Parent then
+							old:Destroy()
+						end
+					end
+					stackBottles(stack, parent)
+				end
+			end)
+		end
+	end
+	return true
+end
+
+--[[
+	Whack-a-mole, played with a gun.
+
+	Heads pop up out of holes for a moment and drop back. Shoot one while it
+	is up and it counts; the holes are on their own timers so the pattern is
+	never the same twice.
+]]
+type Mole = { head: Part, home: Vector3, upUntil: number, nextUpAt: number, up: boolean }
+local moles: { Mole } = {}
+
+local function buildMoles(at: Vector3, parent: Instance)
+	table.clear(moles)
+
+	Util.Part({
+		Name = "MoleTable",
+		Size = Vector3.new(36, 3, 24),
+		CFrame = CFrame.new(at + Vector3.new(0, 8, 0)),
+		Color = Color3.fromRGB(70, 110, 72),
+		Material = Enum.Material.Grass,
+		Parent = parent,
+	})
+
+	for column = -1, 1 do
+		for row = -1, 1 do
+			local holeAt = at + Vector3.new(column * 11, 9.5, row * 7)
+			Util.Part({
+				Name = "MoleHole",
+				Size = Vector3.new(5.6, 0.6, 5.6),
+				CFrame = CFrame.new(holeAt),
+				Shape = Enum.PartType.Cylinder,
+				Color = Color3.fromRGB(44, 34, 26),
+				Material = Enum.Material.Ground,
+				CanCollide = false,
+				Parent = parent,
+			})
+
+			local head = Util.Part({
+				Name = "Mole",
+				Size = Vector3.new(4.4, 4.4, 4.4),
+				-- Starts sunk into the table, so it has somewhere to rise from.
+				CFrame = CFrame.new(holeAt - Vector3.new(0, 4.5, 0)),
+				Shape = Enum.PartType.Ball,
+				Color = Color3.fromRGB(128, 94, 62),
+				Material = Enum.Material.Fabric,
+				Parent = parent,
+			})
+			head:SetAttribute("Carnival", "Mole")
+
+			table.insert(moles, {
+				head = head,
+				home = holeAt,
+				upUntil = 0,
+				nextUpAt = os.clock() + math.random() * 3,
+				up = false,
+			})
+		end
+	end
+	sign(parent, at + Vector3.new(0, 1, 16), "WHACK-A-MOLE", Color3.fromRGB(150, 220, 150))
+end
+
+local function whackMole(part: BasePart, shooter: Player?): boolean
+	for _, mole in moles do
+		if mole.head == part then
+			if not mole.up then
+				-- Shooting a sunk mole is shooting the table.
+				return true
+			end
+			mole.up = false
+			mole.upUntil = 0
+			mole.nextUpAt = os.clock() + Config.Carnival.MoleDownSeconds
+			mole.head.CFrame = CFrame.new(mole.home - Vector3.new(0, 4.5, 0))
+			Sound.At("Hitmarker", part.Position, 1)
+			award(shooter, Config.Carnival.MolePoints, "WHACK!")
+			return true
+		end
+	end
+	return false
+end
+
+--[[
+	The cannon range.
+
+	A cannon you aim and fire at stacks of crates, and the whole stack is
+	real physics -- so a shot into the base brings the lot down and a shot
+	at the top knocks one crate off. Clearing a stack pays out.
+
+	This is the knock-them-over game, and the reason it works is that none
+	of it is scripted: the cannonball is a heavy ball, the crates are
+	unanchored boxes, and Roblox does the rest.
+]]
+type CrateStack = { crates: { BasePart }, base: Vector3, cleared: boolean }
+local crateStacks: { CrateStack } = {}
+local cannonBarrel: BasePart? = nil
+
+local function stackCrates(stack: CrateStack, parent: Instance)
+	table.clear(stack.crates)
+	stack.cleared = false
+	-- A tower four high, two wide at the bottom, one at the top.
+	local layout = { 3, 3, 2, 1 }
+	for level, count in layout do
+		for index = 1, count do
+			local crate = Util.Part({
+				Name = "Crate",
+				Size = Vector3.new(6, 6, 6),
+				CFrame = CFrame.new(stack.base + Vector3.new(
+					-(count - 1) * 3.2 + (index - 1) * 6.4,
+					3 + (level - 1) * 6.2,
+					0
+				)),
+				Color = Color3.fromRGB(150, 110, 66),
+				Material = Enum.Material.WoodPlanks,
+				Anchored = false,
+				Parent = parent,
+			})
+			crate:SetAttribute("Carnival", "Crate")
+			crate:SetAttribute("Destructible", true)
+			table.insert(stack.crates, crate)
+		end
+	end
+end
+
+local function buildCannonRange(at: Vector3, parent: Instance)
+	table.clear(crateStacks)
+
+	-- The cannon itself: a carriage, a barrel, and a prompt to fire it.
+	Util.Part({
+		Name = "CannonCarriage",
+		Size = Vector3.new(10, 5, 14),
+		CFrame = CFrame.new(at + Vector3.new(0, 3, 0)),
+		Color = Color3.fromRGB(70, 54, 40),
+		Material = Enum.Material.Wood,
+		Parent = parent,
+	})
+
+	local barrel = Util.Part({
+		Name = "CannonBarrel",
+		Size = Vector3.new(5, 5, 18),
+		CFrame = CFrame.new(at + Vector3.new(0, 8, -6)) * CFrame.Angles(math.rad(-16), 0, 0),
+		Shape = Enum.PartType.Cylinder,
+		Color = Color3.fromRGB(44, 46, 52),
+		Material = Enum.Material.Metal,
+		Parent = parent,
+	})
+	-- A cylinder points along its own X, so turn it to face down the range.
+	barrel.CFrame = CFrame.new(at + Vector3.new(0, 8, -6))
+		* CFrame.Angles(0, math.rad(90), 0)
+		* CFrame.Angles(0, 0, math.rad(16))
+	barrel:SetAttribute("Carnival", "Cannon")
+	cannonBarrel = barrel
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "CannonPrompt"
+	prompt.ActionText = "Fire the cannon"
+	prompt.ObjectText = "Cannon"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 18
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = barrel
+	prompt.Triggered:Connect(function(player)
+		CarnivalService.FireCannon(player)
+	end)
+
+	-- Three stacks down the range, further away for more points.
+	for index = 1, 3 do
+		local stack: CrateStack = {
+			crates = {},
+			base = at + Vector3.new((index - 2) * 30, 1, -70 - index * 24),
+			cleared = false,
+		}
+		stackCrates(stack, parent)
+		table.insert(crateStacks, stack)
+	end
+
+	sign(parent, at + Vector3.new(0, 1, 12), "CANNON RANGE", Color3.fromRGB(255, 180, 90))
+end
+
+--[[ Fire a cannonball down the range. Heavy, slow, and entirely physics. ]]
+function CarnivalService.FireCannon(player: Player?)
+	local barrel = cannonBarrel
+	if not barrel or not barrel.Parent or not container then
+		return
+	end
+
+	local now = os.clock()
+	if now < nextCannonAt then
+		return
+	end
+	nextCannonAt = now + Config.Carnival.CannonCooldown
+
+	-- Down the range, which is the barrel's own forward.
+	local muzzle = barrel.Position + Vector3.new(0, 2, -12)
+	local ball = Util.Part({
+		Name = "Cannonball",
+		Size = Vector3.new(5, 5, 5),
+		CFrame = CFrame.new(muzzle),
+		Shape = Enum.PartType.Ball,
+		Color = Color3.fromRGB(30, 30, 34),
+		Material = Enum.Material.Metal,
+		Anchored = false,
+		-- Heavy, so it goes through a stack rather than bouncing off it.
+		CustomPhysicalProperties = PhysicalProperties.new(6, 0.4, 0.2, 1, 1),
+		Parent = container,
+	})
+	ball.AssemblyLinearVelocity = Vector3.new(0, 42, -1) * 2 + Vector3.new(0, 0, -150)
+	Sound.At("ExplosionBig", muzzle, 0.7)
+	Util.DestroyAfter(ball, 12)
+
+	if player then
+		lastCannonFirer = player
+	end
+end
+
+--[[ Did a stack get swept? Checked after anything disturbs the crates. ]]
+local function checkCrateStacks()
+	for _, stack in crateStacks do
+		if stack.cleared then
+			continue
+		end
+		local standing = 0
+		for _, crate in stack.crates do
+			if crate.Parent and crate.Position.Y > stack.base.Y + 1 then
+				standing += 1
+			end
+		end
+		if standing == 0 then
+			stack.cleared = true
+			award(lastCannonFirer, Config.Carnival.CrateStackBonus, "STACK FLATTENED!")
+			Sound.At("RoundEnd", stack.base, 1)
+
+			local parent = container
+			task.delay(Config.Carnival.ResetSeconds, function()
+				if parent and parent.Parent then
+					for _, old in stack.crates do
+						if old.Parent then
+							old:Destroy()
+						end
+					end
+					stackCrates(stack, parent)
+				end
+			end)
+		end
+	end
+end
+
+function CarnivalService.RegisterHit(part: BasePart, attacker: Player?, direction: Vector3?): boolean
 	local game_ = part:GetAttribute("Carnival")
 	if game_ == "Dunk" then
 		dunk(attacker)
@@ -455,6 +900,24 @@ function CarnivalService.RegisterHit(part: BasePart, attacker: Player?): boolean
 		return true
 	elseif game_ == "Striker" then
 		ringBell(attacker)
+		return true
+	elseif game_ == "Balloon" then
+		return popBalloon(part, attacker)
+	elseif game_ == "Bottle" then
+		return knockBottle(part, attacker, direction)
+	elseif game_ == "Mole" then
+		return whackMole(part, attacker)
+	elseif game_ == "Crate" then
+		-- A bullet nudges a crate; the cannon is what flattens a stack.
+		local push = direction or Vector3.new(0, 0, -1)
+		part.AssemblyLinearVelocity = push * 40 + Vector3.new(0, 18, 0)
+		if attacker then
+			lastCannonFirer = attacker
+		end
+		award(attacker, Config.Carnival.CratePoints, "CRATE")
+		return true
+	elseif game_ == "Cannon" then
+		CarnivalService.FireCannon(attacker)
 		return true
 	end
 	return false
@@ -484,6 +947,10 @@ function CarnivalService.Build(mapSize: number)
 	buildDunkTank(origin + Vector3.new(-45, 1, 0), folder)
 	buildGallery(origin + Vector3.new(30, 1, -30), folder)
 	buildStriker(origin + Vector3.new(35, 1, 35), folder)
+	buildBalloonPop(origin + Vector3.new(-10, 1, -48), folder)
+	buildMilkBottles(origin + Vector3.new(62, 1, -6), folder)
+	buildMoles(origin + Vector3.new(-62, 1, 42), folder)
+	buildCannonRange(origin + Vector3.new(0, 1, 56), folder)
 
 	-- Overhead warm fairground festoon string lights for Future-lighting ambience.
 	for idx, lightPos in {
@@ -545,6 +1012,64 @@ local function step()
 		return
 	end
 	local now = os.clock()
+
+	--[[
+		The moles, rising and dropping on their own timers.
+
+		Each hole runs independently, so the pattern is never the same twice
+		-- which is the only thing that makes a grid of nine holes a game
+		rather than a shooting drill.
+	]]
+	for _, mole in moles do
+		if not mole.head.Parent then
+			continue
+		end
+		if mole.up then
+			if now >= mole.upUntil then
+				mole.up = false
+				mole.nextUpAt = now + Config.Carnival.MoleDownSeconds * (0.6 + math.random())
+				mole.head.CFrame = CFrame.new(mole.home - Vector3.new(0, 4.5, 0))
+			end
+		elseif now >= mole.nextUpAt then
+			mole.up = true
+			mole.upUntil = now + Config.Carnival.MoleUpSeconds
+			mole.head.CFrame = CFrame.new(mole.home + Vector3.new(0, 1.6, 0))
+		end
+	end
+
+	-- Has a crate stack been flattened? Checked here rather than on every
+	-- bullet, because a stack comes down over a second or two of physics
+	-- and the shot that started it has long since been resolved.
+	checkCrateStacks()
+
+	--[[
+		The moles, rising and dropping on their own timers.
+
+		Each hole runs independently, so the pattern is never the same twice
+		-- which is the only thing that makes a grid of nine holes a game
+		rather than a shooting drill.
+	]]
+	for _, mole in moles do
+		if not mole.head.Parent then
+			continue
+		end
+		if mole.up then
+			if now >= mole.upUntil then
+				mole.up = false
+				mole.nextUpAt = now + Config.Carnival.MoleDownSeconds * (0.6 + math.random())
+				mole.head.CFrame = CFrame.new(mole.home - Vector3.new(0, 4.5, 0))
+			end
+		elseif now >= mole.nextUpAt then
+			mole.up = true
+			mole.upUntil = now + Config.Carnival.MoleUpSeconds
+			mole.head.CFrame = CFrame.new(mole.home + Vector3.new(0, 1.6, 0))
+		end
+	end
+
+	-- Has a crate stack been flattened? Checked here rather than on every
+	-- bullet, because a stack comes down over a second or two of physics
+	-- and the shot that started it has long since been resolved.
+	checkCrateStacks()
 
 	for _, duck in ducks do
 		if not duck.part.Parent then

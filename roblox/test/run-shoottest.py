@@ -213,6 +213,99 @@ for _, child in shooterChar:GetChildren() do
 end
 check("only ever one weapon held", heldCount == 1, string.format("%d models", heldCount))
 
+-- ------------------------------------------------------ the fairground
+-- Seven stalls now, and each one has to actually respond to a bullet. A
+-- stall that looks right and does nothing is the worst kind of scenery,
+-- because you cannot tell it is broken by looking.
+DUMP("")
+DUMP("The fairground stalls:")
+do
+	CarnivalService.Build(1900)
+	PlayerState.Reset(shooter, false)
+	local state = PlayerState.Get(shooter)
+	state.points = 0
+
+	local stalls = {}
+	for _, child in workspace:GetChildren() do
+		if child._props.Name == "Carnival" then
+			for _, part in child:GetChildren() do
+				local which = part:GetAttribute("Carnival")
+				if which and not stalls[which] then
+					stalls[which] = part
+				end
+			end
+		end
+	end
+
+	local wanted = { "Balloon", "Bottle", "Mole", "Crate", "Cannon" }
+	local missing = {}
+	for _, which in wanted do
+		if not stalls[which] then table.insert(missing, which) end
+	end
+	check("every new stall got built", #missing == 0, table.concat(missing, ", "))
+
+	-- A balloon pops and pays.
+	if stalls.Balloon then
+		local before = PlayerState.Get(shooter).points
+		local handled = CarnivalService.RegisterHit(stalls.Balloon, shooter, Vector3.new(0, 0, -1))
+		check("shooting a balloon pops it", handled and not stalls.Balloon.Parent, "")
+		check("and pays out", PlayerState.Get(shooter).points > before,
+			string.format("%d points", PlayerState.Get(shooter).points))
+	end
+
+	-- A milk bottle gets knocked off its shelf rather than vanishing.
+	if stalls.Bottle then
+		stalls.Bottle._props.AssemblyLinearVelocity = Vector3.new()
+		local handled = CarnivalService.RegisterHit(stalls.Bottle, shooter, Vector3.new(0, 0, -1))
+		check("a bottle is knocked flying", handled
+			and stalls.Bottle._props.AssemblyLinearVelocity.Magnitude > 20,
+			string.format("%.0f studs/sec",
+				stalls.Bottle._props.AssemblyLinearVelocity.Magnitude))
+	end
+
+	-- A mole only counts while it is up, which is the whole game.
+	if stalls.Mole then
+		local sunk = CarnivalService.RegisterHit(stalls.Mole, shooter, Vector3.new(0, 0, -1))
+		check("a sunk mole is handled but not scored", sunk == true, "")
+	end
+
+	-- And the cannon fires something heavy down the range.
+	if stalls.Cannon then
+		local before = 0
+		for _, child in workspace:GetChildren() do
+			if child._props.Name == "Carnival" then
+				for _, part in child:GetChildren() do
+					if part._props.Name == "Cannonball" then before += 1 end
+				end
+			end
+		end
+		CarnivalService.FireCannon(shooter)
+		local after = 0
+		for _, child in workspace:GetChildren() do
+			if child._props.Name == "Carnival" then
+				for _, part in child:GetChildren() do
+					if part._props.Name == "Cannonball" then after += 1 end
+				end
+			end
+		end
+		check("the cannon fires a cannonball", after > before,
+			string.format("%d balls, was %d", after, before))
+
+		-- And not twice in a frame, or holding the trigger is a minigun.
+		CarnivalService.FireCannon(shooter)
+		local third = 0
+		for _, child in workspace:GetChildren() do
+			if child._props.Name == "Carnival" then
+				for _, part in child:GetChildren() do
+					if part._props.Name == "Cannonball" then third += 1 end
+				end
+			end
+		end
+		check("the cannon has a cooldown", third == after,
+			string.format("%d balls after a second press", third))
+	end
+end
+
 -- --------------------------------------------- armed in every sport
 -- The shape of the whole game: a shooter with sports scattered through it,
 -- and you can shoot people while playing any of them. A seat that quietly
