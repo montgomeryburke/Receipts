@@ -193,9 +193,17 @@ function localBase(settings) {
 async function localHeaders(settings) {
   const h = { 'content-type': 'application/json' };
   if (settings.localAuth === 'nas') {
+    // The NAS login goes only to the NAS address itself (its /.llm/ proxy), never to another server.
     const c = await nasCreds().catch(() => null);
-    if (c) h.authorization = basicAuthHeader(c.username, c.password);
-  } else if (settings.localKey) h.authorization = `Bearer ${settings.localKey}`;
+    let sameHost = false;
+    try {
+      const { CONFIG } = await import('./config-store.js');
+      sameHost = new URL(localBase(settings)).origin === new URL(CONFIG.serverUrl).origin && /^https:/.test(CONFIG.serverUrl);
+    } catch {
+      sameHost = false;
+    }
+    if (c && sameHost) h.authorization = basicAuthHeader(c.username, c.password);
+  } else if (settings.localAuth === 'key' && settings.localKey) h.authorization = `Bearer ${settings.localKey}`;
   return h;
 }
 
