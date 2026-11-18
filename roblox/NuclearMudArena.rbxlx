@@ -751,16 +751,16 @@ Config.Effects = {
 	for four wheels, not for feet.
 ]]
 Config.Maps = {
-	{ Id = "BogBasin", Name = "Bog Basin", Size = 700, MudFraction = 0.55, Buildings = 25, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
-	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 760, MudFraction = 0.25, Buildings = 33, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
-	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 820, MudFraction = 0.6, Buildings = 18, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
-	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 720, MudFraction = 0.2, Buildings = 42, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
-	{ Id = "GatorCreek", Name = "Gator Creek", Size = 780, MudFraction = 0.7, Buildings = 21, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
-	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 900, MudFraction = 0.15, Buildings = 29, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
-	{ Id = "HollerHills", Name = "Holler Hills", Size = 760, MudFraction = 0.45, Buildings = 23, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
-	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 680, MudFraction = 0.3, Buildings = 46, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
-	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 960, MudFraction = 0.35, Buildings = 27, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
-	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 820, MudFraction = 0.4, Buildings = 37, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
+	{ Id = "BogBasin", Name = "Bog Basin", Size = 1150, MudFraction = 0.55, Buildings = 22, Jumps = 8, Ramps = 10, Theme = Color3.fromRGB(96, 78, 52) },
+	{ Id = "DiamondQuarry", Name = "Diamond Quarry", Size = 1300, MudFraction = 0.25, Buildings = 28, Jumps = 12, Ramps = 14, Theme = Color3.fromRGB(150, 160, 170) },
+	{ Id = "SwampCircuit", Name = "Swamp Circuit", Size = 1250, MudFraction = 0.6, Buildings = 18, Jumps = 14, Ramps = 12, Theme = Color3.fromRGB(70, 96, 66) },
+	{ Id = "RustyOverpass", Name = "Rusty Overpass", Size = 1200, MudFraction = 0.2, Buildings = 30, Jumps = 16, Ramps = 18, Theme = Color3.fromRGB(140, 84, 56) },
+	{ Id = "GatorCreek", Name = "Gator Creek", Size = 1200, MudFraction = 0.7, Buildings = 20, Jumps = 9, Ramps = 10, Theme = Color3.fromRGB(64, 88, 74) },
+	{ Id = "FalloutFlats", Name = "Fallout Flats", Size = 1450, MudFraction = 0.15, Buildings = 26, Jumps = 10, Ramps = 8, Theme = Color3.fromRGB(122, 122, 96) },
+	{ Id = "HollerHills", Name = "Holler Hills", Size = 1250, MudFraction = 0.45, Buildings = 22, Jumps = 18, Ramps = 16, Theme = Color3.fromRGB(88, 110, 70) },
+	{ Id = "ScrapyardSprint", Name = "Scrapyard Sprint", Size = 1200, MudFraction = 0.3, Buildings = 32, Jumps = 11, Ramps = 20, Theme = Color3.fromRGB(110, 100, 106) },
+	{ Id = "MoonshineMile", Name = "Moonshine Mile", Size = 1500, MudFraction = 0.35, Buildings = 24, Jumps = 20, Ramps = 12, Theme = Color3.fromRGB(104, 92, 64) },
+	{ Id = "ReactorRidge", Name = "Reactor Ridge", Size = 1300, MudFraction = 0.4, Buildings = 29, Jumps = 13, Ramps = 15, Theme = Color3.fromRGB(74, 130, 132) },
 }
 
 Config.Teams = {
@@ -3374,7 +3374,23 @@ end
 	staircase in one corner connects the floors on foot; a switchback ramp
 	around the outside gets vehicles to the roof.
 ]]
-local function building(origin: Vector3, footprint: number, floors: number, color: Color3, parent: Instance)
+--[[
+	A hollow building you can fight through.
+
+	`vehicleRamp` decides whether it gets the switchback ramp around the
+	outside. A tower with one needs a whole city block to itself; without it
+	the footprint is all the room it takes, which is what makes it possible
+	to put two low buildings in a block and get a dense street rather than
+	a handful of islands.
+]]
+local function building(
+	origin: Vector3,
+	footprint: number,
+	floors: number,
+	color: Color3,
+	parent: Instance,
+	vehicleRamp: boolean?
+)
 	local half = footprint * 0.5
 	local height = floors * FLOOR_HEIGHT
 	local holeSize = 24
@@ -3455,6 +3471,10 @@ local function building(origin: Vector3, footprint: number, floors: number, colo
 		})
 	end
 
+	if vehicleRamp == false then
+		return roofY
+	end
+
 	-- The vehicle route: a ramp that switchbacks around the outside, with a
 	-- flat landing at every corner so you do not clip the turn.
 	local rampWidth = 16
@@ -3501,6 +3521,8 @@ local function building(origin: Vector3, footprint: number, floors: number, colo
 		rampColor,
 		parent
 	)
+
+	return roofY
 end
 
 -- =================================================================== PIECES ==
@@ -3606,59 +3628,132 @@ local function stuntJump(origin: Vector3, direction: Vector3, scale: number, col
 	)
 end
 
---[[ Roads. They give the map a shape you can learn and drive along fast. ]]
-local function streets(size: number, parent: Instance)
-	local half = size * 0.5
-	local spacing = 190
-	local roadWidth = 44
-	local roadColor = Color3.fromRGB(58, 58, 62)
+--[[
+	The street grid.
 
-	local lanes = math.floor(size / spacing)
-	local start = -(lanes - 1) * spacing * 0.5
+	Roads are laid first and everything else is fitted into the blocks they
+	leave, which is the whole difference between a city and a field with
+	buildings dropped on it. Returns the grid offsets so the rest of the
+	build can line up with them.
+]]
+local ROAD_WIDTH = 40
 
-	for index = 0, lanes - 1 do
-		local offset = start + index * spacing
+local function streets(size: number, pitch: number, offsets: { number }, parent: Instance)
+	local roadColor = Color3.fromRGB(56, 56, 60)
+	local kerbColor = Color3.fromRGB(150, 148, 142)
 
-		-- One road running each way, crossing at the junctions.
-		Util.Part({
-			Name = "Street",
-			Size = Vector3.new(roadWidth, 1, size),
-			CFrame = CFrame.new(offset, 0.6, 0),
-			Color = roadColor,
-			Material = Enum.Material.Asphalt,
-			Parent = parent,
-		})
-		Util.Part({
-			Name = "Street",
-			Size = Vector3.new(size, 1, roadWidth),
-			CFrame = CFrame.new(0, 0.6, offset),
-			Color = roadColor,
-			Material = Enum.Material.Asphalt,
-			Parent = parent,
-		})
+	for _, offset in offsets do
+		-- The carriageway, both ways.
+		for _, alongZ in { true, false } do
+			Util.Part({
+				Name = "Street",
+				Size = if alongZ
+					then Vector3.new(ROAD_WIDTH, 1, size)
+					else Vector3.new(size, 1, ROAD_WIDTH),
+				CFrame = if alongZ then CFrame.new(offset, 0.6, 0) else CFrame.new(0, 0.6, offset),
+				Color = roadColor,
+				Material = Enum.Material.Asphalt,
+				Parent = parent,
+			})
 
-		-- Centre lines, so the roads read as roads at speed.
-		Util.Part({
-			Name = "Line",
-			Size = Vector3.new(1.5, 1, size),
-			CFrame = CFrame.new(offset, 1.15, 0),
-			Color = Color3.fromRGB(210, 190, 90),
-			Material = Enum.Material.SmoothPlastic,
-			CanCollide = false,
-			Parent = parent,
-		})
-		Util.Part({
-			Name = "Line",
-			Size = Vector3.new(size, 1, 1.5),
-			CFrame = CFrame.new(0, 1.15, offset),
-			Color = Color3.fromRGB(210, 190, 90),
-			Material = Enum.Material.SmoothPlastic,
-			CanCollide = false,
-			Parent = parent,
-		})
+			-- Centre line, so the road reads as a road at speed.
+			Util.Part({
+				Name = "Line",
+				Size = if alongZ then Vector3.new(1.6, 1, size) else Vector3.new(size, 1, 1.6),
+				CFrame = if alongZ then CFrame.new(offset, 1.15, 0) else CFrame.new(0, 1.15, offset),
+				Color = Color3.fromRGB(214, 194, 92),
+				Material = Enum.Material.SmoothPlastic,
+				CanCollide = false,
+				Parent = parent,
+			})
+
+			-- Kerbs down both sides. Low enough to drive over, high enough
+			-- to see, which is what makes the road feel like a road.
+			for _, side in { -1, 1 } do
+				local edge = offset + side * (ROAD_WIDTH * 0.5 + 2)
+				Util.Part({
+					Name = "Kerb",
+					Size = if alongZ then Vector3.new(4, 1.6, size) else Vector3.new(size, 1.6, 4),
+					CFrame = if alongZ then CFrame.new(edge, 1, 0) else CFrame.new(0, 1, edge),
+					Color = kerbColor,
+					Material = Enum.Material.Concrete,
+					Parent = parent,
+				})
+			end
+		end
 	end
 
-	local _ = half
+	-- Zebra crossings, at the interior intersections only and three stripes
+	-- wide. It is the detail that stops a grid of grey strips reading as a
+	-- car park, but five stripes on every junction of a large map is well
+	-- over a thousand parts of paint for no extra legibility.
+	for xi = 2, #offsets - 1 do
+		for zi = 2, #offsets - 1 do
+			local x, z = offsets[xi], offsets[zi]
+			for _, axis in { true, false } do
+				for stripe = -1, 1 do
+					local slide = stripe * 7
+					local reach = ROAD_WIDTH * 0.5 + 4
+					Util.Part({
+						Name = "Crossing",
+						Size = if axis
+							then Vector3.new(4, 1, reach)
+							else Vector3.new(reach, 1, 4),
+						CFrame = if axis
+							then CFrame.new(x + slide, 1.15, z + (ROAD_WIDTH * 0.5 + reach * 0.5))
+							else CFrame.new(x + (ROAD_WIDTH * 0.5 + reach * 0.5), 1.15, z + slide),
+						Color = Color3.fromRGB(225, 225, 220),
+						Material = Enum.Material.SmoothPlastic,
+						CanCollide = false,
+						Parent = parent,
+					})
+				end
+			end
+		end
+	end
+
+	-- Street lights, at every other junction and two to a junction. These
+	-- carry a real PointLight, which is most of what makes a street look
+	-- built rather than drawn -- and also the most expensive thing here, so
+	-- there are tens of them rather than hundreds.
+	for xi = 1, #offsets, 2 do
+		for zi = 1, #offsets, 2 do
+			local x, z = offsets[xi], offsets[zi]
+			for _, corner in { Vector2.new(-1, -1), Vector2.new(1, 1) } do
+				local base = Vector3.new(
+					x + corner.X * (ROAD_WIDTH * 0.5 + 6),
+					0,
+					z + corner.Y * (ROAD_WIDTH * 0.5 + 6)
+				)
+
+				local post = Util.Part({
+					Name = "LampPost",
+					Size = Vector3.new(1, 26, 1),
+					CFrame = CFrame.new(base + Vector3.new(0, 13, 0)),
+					Color = Color3.fromRGB(70, 72, 76),
+					Material = Enum.Material.Metal,
+					Parent = parent,
+				})
+
+				local head = Util.Part({
+					Name = "Lamp",
+					Size = Vector3.new(3.5, 1.2, 3.5),
+					CFrame = CFrame.new(base + Vector3.new(0, 26, 0)),
+					Color = Color3.fromRGB(255, 240, 200),
+					Material = Enum.Material.Neon,
+					CanCollide = false,
+					Parent = parent,
+				})
+				Util.Weld(post, head)
+
+				local glow = Instance.new("PointLight")
+				glow.Color = Color3.fromRGB(255, 236, 190)
+				glow.Brightness = 1.8
+				glow.Range = 52
+				glow.Parent = head
+			end
+		end
+	end
 end
 
 local function mudPatch(origin: Vector3, size: number, parent: Instance)
@@ -3731,7 +3826,21 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		Parent = model,
 	})
 
-	streets(size, model)
+	-- ---------------------------------------------------------- the city grid
+	--
+	-- Roads first, then everything else fitted into the blocks they leave.
+	-- Doing it the other way round is what produced the old maps, where
+	-- buildings sat in the middle of the road and the streets led nowhere.
+	local gridHalf = half - 46 -- an open ring outside the city, for flanking
+	local blocksPerSide = math.max(3, math.floor((gridHalf * 2) / 172 + 0.5))
+	local pitch = (gridHalf * 2) / blocksPerSide
+
+	local offsets: { number } = {}
+	for index = 0, blocksPerSide do
+		table.insert(offsets, -gridHalf + pitch * index)
+	end
+
+	streets(size, pitch, offsets, model)
 
 	-- Walls, so nobody drives off the edge of the world.
 	local wallHeight = 160
@@ -3751,80 +3860,307 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		})
 	end
 
-	for _ = 1, math.floor(mapConfig.MudFraction * 26) do
-		mudPatch(Util.RandomFlatPoint(half * 0.85, rng), rng:NextNumber(50, 130), model)
+	-- One block per square of the grid. The usable half-extent is what is
+	-- left after the two half-roads either side and a strip of pavement, so
+	-- by construction nothing placed inside a block can reach the asphalt.
+	type Block = { center: Vector3, extent: number, role: string, roof: number }
+	local blockExtent = pitch * 0.5 - ROAD_WIDTH * 0.5 - 7
+	local blocks: { Block } = {}
+	for xi = 1, blocksPerSide do
+		for zi = 1, blocksPerSide do
+			table.insert(blocks, {
+				center = Vector3.new(
+					(offsets[xi] + offsets[xi + 1]) * 0.5,
+					0,
+					(offsets[zi] + offsets[zi + 1]) * 0.5
+				),
+				extent = blockExtent,
+				role = "yard",
+				roof = 0,
+			})
+		end
 	end
 
-	-- Buildings, spaced so their outside ramps never overlap.
-	local placed: { Vector3 } = {}
-	local attempts = 0
-	while #placed < mapConfig.Buildings and attempts < mapConfig.Buildings * 30 do
-		attempts += 1
-		local spot = Util.RandomFlatPoint(half * 0.72, rng)
-		local clear = true
-		for _, other in placed do
-			if (other - spot).Magnitude < 118 then
-				clear = false
+	-- Reservations, decided before anything is built.
+	--
+	--   the carnival      CarnivalService builds its own ground at 0.3 * size
+	--   the spawn rows    both teams need to get out of their base without
+	--                     being funnelled through a doorway
+	local carnival = Vector3.new(size * 0.3, 0, 0)
+	local spawnReach = gridHalf - pitch * 0.9
+	local available: { Block } = {}
+	for _, block in blocks do
+		local flat = Vector3.new(block.center.X, 0, block.center.Z)
+		if (flat - carnival).Magnitude < 145 then
+			block.role = "reserved"
+		elseif math.abs(block.center.Z) > spawnReach and math.abs(block.center.X) < half * 0.45 then
+			block.role = "plaza" -- kept open: this is a team's way out of its base
+		else
+			table.insert(available, block)
+		end
+	end
+
+	-- Shuffled with the map's own seed, so a given map always looks the same
+	-- but no two maps share a skyline.
+	for index = #available, 2, -1 do
+		local swap = rng:NextInteger(1, index)
+		available[index], available[swap] = available[swap], available[index]
+	end
+
+	-- How the blocks get used.
+	--
+	-- A tower needs a whole block, because its vehicle ramp wraps the
+	-- outside. A row block holds two low buildings you enter on foot, which
+	-- is how the map reaches the configured building count without either
+	-- shrinking the blocks until trucks cannot turn or thinning the city out
+	-- into islands. Whatever is left over is open ground, and the map needs
+	-- that just as much: a city of nothing but buildings has no firefights
+	-- in it, only corridors.
+	local towerTarget = math.min(
+		math.ceil(mapConfig.Buildings * 0.55),
+		math.max(1, #available - 4)
+	)
+	local rowTarget = math.min(
+		math.ceil((mapConfig.Buildings - towerTarget) / 2),
+		math.max(0, #available - towerTarget - 3)
+	)
+
+	for index, block in available do
+		if index <= towerTarget then
+			block.role = "tower"
+		elseif index <= towerTarget + rowTarget then
+			block.role = "row"
+		elseif index <= towerTarget + rowTarget + 3 then
+			block.role = "plaza"
+		else
+			block.role = "yard"
+		end
+	end
+
+	-- --------------------------------------------------------- fill the blocks
+	local towers: { Block } = {}
+	for _, block in blocks do
+		if block.role == "tower" then
+			-- A building plus its outside vehicle ramp has to fit the block.
+			local footprint = math.clamp(
+				rng:NextNumber(50, 88),
+				34, -- below this the 22-stud doorway stops fitting
+				(block.extent - 26) * 2
+			)
+			local floors = rng:NextInteger(2, 5)
+			local spot = block.center + Vector3.new(
+				rng:NextNumber(-6, 6),
+				0,
+				rng:NextNumber(-6, 6)
+			)
+			block.roof = building(spot, footprint, floors, mapConfig.Theme, model)
+			block.center = spot
+			table.insert(towers, block)
+		elseif block.role == "row" then
+			-- Two low buildings sharing a block, with a gap between them you
+			-- can run down but not drive through. No outside ramp, so the
+			-- roof is a foot-only sniper spot reached by the inside stairs.
+			local footprint = math.min(48, block.extent - 10)
+			local shift = block.extent - footprint * 0.5 - 2
+			local alongX = rng:NextNumber() < 0.5
+			for _, side in { -1, 1 } do
+				local spot = block.center + if alongX
+					then Vector3.new(side * shift * 0.5, 0, 0)
+					else Vector3.new(0, 0, side * shift * 0.5)
+				local roof = building(spot, footprint, rng:NextInteger(2, 3), mapConfig.Theme, model, false)
+				table.insert(towers, {
+					center = spot,
+					extent = footprint * 0.5,
+					role = "row",
+					roof = roof,
+				})
+			end
+		elseif block.role == "plaza" then
+			-- Paved, open, and worth crossing: cover to fight around and a
+			-- pickup in the middle.
+			Util.Part({
+				Name = "Plaza",
+				Size = Vector3.new(block.extent * 2, 1, block.extent * 2),
+				CFrame = CFrame.new(block.center + Vector3.new(0, 0.6, 0)),
+				Color = Color3.fromRGB(128, 126, 120),
+				Material = Enum.Material.Pavement,
+				Parent = model,
+			})
+			local room = math.max(4, block.extent - 14)
+			for _ = 1, 4 do
+				cover(block.center + Vector3.new(
+					rng:NextNumber(-room, room),
+					0,
+					rng:NextNumber(-room, room)
+				), rng, mapConfig.Theme, model)
+			end
+		elseif block.role == "yard" then
+			-- Mud and barricades. Open ground to fight across, which a city
+			-- made only of buildings never gives you.
+			if rng:NextNumber() < mapConfig.MudFraction then
+				mudPatch(block.center, block.extent * rng:NextNumber(1.1, 1.7), model)
+			end
+			-- Pulled well inside the block: a barricade is up to 30 studs
+			-- across, and one hanging over the kerb is an obstacle in the
+			-- road rather than cover beside it.
+			local room = math.max(4, block.extent - 30)
+			for _ = 1, rng:NextInteger(3, 6) do
+				barricade(
+					block.center + Vector3.new(
+						rng:NextNumber(-room, room),
+						0,
+						rng:NextNumber(-room, room)
+					),
+					rng:NextNumber(0, math.pi * 2),
+					rng,
+					model
+				)
+			end
+		end
+	end
+
+	-- Sky bridges between neighbouring rooftops, so the roofs are a second
+	-- level you can cross rather than a set of islands. Only between blocks
+	-- that are actually adjacent, and drawn at the lower of the two roofs.
+	local bridgeSpan = pitch * 1.35
+	local bridged = 0
+	for i = 1, #towers do
+		for j = i + 1, #towers do
+			local a, b = towers[i], towers[j]
+			local gap = (a.center - b.center).Magnitude
+			if gap < bridgeSpan and bridged < #towers then
+				local deck = math.min(a.roof, b.roof)
+				ramp(
+					Vector3.new(a.center.X, deck, a.center.Z),
+					Vector3.new(b.center.X, deck, b.center.Z),
+					14,
+					Color3.fromRGB(120, 116, 108),
+					model
+				)
+				bridged += 1
 				break
 			end
 		end
-		if clear then
-			table.insert(placed, spot)
-			building(spot, rng:NextNumber(50, 88), rng:NextInteger(2, 5), mapConfig.Theme, model)
-		end
 	end
 
-	-- Sky bridges, so the rooftops are one connected level instead of islands.
-	for index = 1, #placed - 1 do
-		local a, b = placed[index], placed[index + 1]
-		if (a - b).Magnitude < 280 then
-			ramp(
-				a + Vector3.new(0, 44, 0),
-				b + Vector3.new(0, 44, 0),
-				14,
-				Color3.fromRGB(120, 116, 108),
-				model
-			)
+	-- -------------------------------------------------------- street furniture
+	--
+	-- Jumps and ramps go ON the roads, pointed along them, because a jump you
+	-- cannot reach at speed is just scenery.
+	--[[
+		Keep an along-the-street coordinate clear of the CROSSING streets.
+
+		A point on the x = 200 road is still in the middle of a junction if
+		its z happens to land on the z = 200 road, and that is how street
+		furniture ends up blocking a road it was never placed on.
+	]]
+	local function clearOfJunctions(along: number): number
+		local nearest = offsets[1]
+		for _, lane in offsets do
+			if math.abs(along - lane) < math.abs(along - nearest) then
+				nearest = lane
+			end
 		end
+		local gap = ROAD_WIDTH * 0.5 + 26
+		local delta = along - nearest
+		if math.abs(delta) < gap then
+			return nearest + (if delta < 0 then -gap else gap)
+		end
+		return along
+	end
+
+	local function randomStreet(): (Vector3, Vector3)
+		local lane = offsets[rng:NextInteger(1, #offsets)]
+		local along = clearOfJunctions(rng:NextNumber(-gridHalf * 0.85, gridHalf * 0.85))
+		if rng:NextNumber() < 0.5 then
+			return Vector3.new(lane, 0, along), Vector3.new(0, 0, if along < 0 then 1 else -1)
+		end
+		return Vector3.new(along, 0, lane), Vector3.new(if along < 0 then 1 else -1, 0, 0)
 	end
 
 	for _ = 1, mapConfig.Jumps do
-		local heading = CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0).LookVector
-		stuntJump(Util.RandomFlatPoint(half * 0.8, rng), heading, rng:NextNumber(0.8, 2.2), Color3.fromRGB(150, 120, 60), model)
+		local spot, heading = randomStreet()
+		stuntJump(spot, heading, rng:NextNumber(0.8, 2.2), Color3.fromRGB(150, 120, 60), model)
 	end
 
 	for _ = 1, mapConfig.Ramps do
-		local spot = Util.RandomFlatPoint(half * 0.85, rng)
-		local heading = CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0).LookVector
-		ramp(spot, spot + heading * rng:NextNumber(30, 60) + Vector3.new(0, rng:NextNumber(8, 22), 0), 18, Color3.fromRGB(130, 110, 70), model)
-	end
-
-	for _ = 1, 30 do
-		cover(Util.RandomFlatPoint(half * 0.88, rng), rng, mapConfig.Theme, model)
-	end
-
-	-- Barricades, thickly. Somewhere to break line of sight is the difference
-	-- between a firefight and being shot from across an empty field.
-	for _ = 1, 70 do
-		barricade(
-			Util.RandomFlatPoint(half * 0.9, rng),
-			rng:NextNumber(0, math.pi * 2),
-			rng,
+		local spot, heading = randomStreet()
+		ramp(
+			spot,
+			spot + heading * rng:NextNumber(30, 60) + Vector3.new(0, rng:NextNumber(8, 22), 0),
+			18,
+			Color3.fromRGB(130, 110, 70),
 			model
 		)
 	end
 
-	-- Team spawns at opposite ends, with real SpawnLocations on them.
+	-- Cover on the pavements, where you actually need it: crossing a street
+	-- is the most exposed thing you do.
+	for _ = 1, 26 do
+		local spot, heading = randomStreet()
+		-- Across the street, not along it: heading runs with the road, so
+		-- swapping its components gives the pavement direction.
+		local side = (if rng:NextNumber() < 0.5 then -1 else 1) * (ROAD_WIDTH * 0.5 + 18)
+		cover(spot + Vector3.new(heading.Z, 0, heading.X) * side, rng, mapConfig.Theme, model)
+	end
+
+	-- The open ring outside the grid, so the map edge is not a dead zone.
+	--
+	-- A SQUARE ring, hugging the four edges. A circle of this radius looks
+	-- right on paper and then cuts straight back through the city at the
+	-- diagonals, dropping barricades in the middle of interior roads.
+	local ringInset = ROAD_WIDTH * 0.5 + 24
+	for _ = 1, 20 do
+		local along = clearOfJunctions(rng:NextNumber(-gridHalf, gridHalf))
+		local out = (if rng:NextNumber() < 0.5 then -1 else 1) * (gridHalf + ringInset)
+		local spot = if rng:NextNumber() < 0.5
+			then Vector3.new(along, 0, out)
+			else Vector3.new(out, 0, along)
+		barricade(spot, rng:NextNumber(0, math.pi * 2), rng, model)
+	end
+
+	-- Team spawns at opposite ends, out in the open ring, with real
+	-- SpawnLocations on them.
 	local teamSpawns: { [number]: { Vector3 } } = { {}, {} }
 	for teamIndex = 1, 2 do
 		local zSign = if teamIndex == 1 then -1 else 1
 		local colour = teamColors[teamIndex] or BrickColor.new("Medium stone grey")
 		for slot = 1, 6 do
 			local x = -half * 0.35 + (slot - 1) * (half * 0.7 / 5)
-			local position = Vector3.new(x, 4, zSign * half * 0.86)
+			local position = Vector3.new(x, 4, zSign * (half - 24))
 			table.insert(teamSpawns[teamIndex], position)
 			teamSpawn(position, colour, model)
 		end
+	end
+
+	-- --------------------------------------------------------------- the pads
+	--
+	-- Intersections, which is where you look for a vehicle in a city.
+	local intersections: { Vector3 } = {}
+	for _, x in offsets do
+		for _, z in offsets do
+			table.insert(intersections, Vector3.new(x, 4, z))
+		end
+	end
+	for index = #intersections, 2, -1 do
+		local swap = rng:NextInteger(1, index)
+		intersections[index], intersections[swap] = intersections[swap], intersections[index]
+	end
+
+	local nextIntersection = 0
+	local function takeIntersection(): Vector3
+		nextIntersection += 1
+		local spot = intersections[((nextIntersection - 1) % #intersections) + 1]
+		-- Nudge repeats apart once the list wraps.
+		local lap = math.floor((nextIntersection - 1) / #intersections)
+		if lap == 0 then
+			return spot
+		end
+		return spot + Vector3.new(
+			rng:NextNumber(-ROAD_WIDTH * 0.4, ROAD_WIDTH * 0.4),
+			0,
+			rng:NextNumber(-ROAD_WIDTH * 0.4, ROAD_WIDTH * 0.4)
+		)
 	end
 
 	-- One tank, one plane, one torpedo and two turret trucks, always. They
@@ -3836,16 +4172,13 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		-- on the map and one was never enough.
 		"Torpedo", "Torpedo", "Torpedo", "Torpedo",
 	}
-	for index, kind in bigVehicles do
-		local angle = (index / #bigVehicles) * math.pi * 2
-		-- Pulled in towards the middle so they are a short drive apart rather
-		-- than a long walk.
-		local position = Vector3.new(math.cos(angle) * half * 0.38, 4, math.sin(angle) * half * 0.38)
+	for _, kind in bigVehicles do
+		local position = takeIntersection()
 		table.insert(vehiclePads, { position = position, kind = kind })
 
 		Util.Part({
 			Name = "VehiclePad",
-			Size = Vector3.new(40, 1, 40),
+			Size = Vector3.new(34, 1, 34),
 			CFrame = CFrame.new(position - Vector3.new(0, 3, 0)),
 			Color = Color3.fromRGB(70, 90, 110),
 			Material = Enum.Material.DiamondPlate,
@@ -3854,13 +4187,8 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	end
 
 	local pickupPads: { { position: Vector3, kind: string, weapon: string? } } = {}
-	local pickupKinds = { "Burger", "Fries", "Shield", "Ammo", "Burger", "Fries", "Shield", "Ammo" }
-	for index, kind in pickupKinds do
-		local angle = (index / #pickupKinds) * math.pi * 2 + 0.4
-		table.insert(pickupPads, {
-			position = Vector3.new(math.cos(angle) * half * 0.3, 4, math.sin(angle) * half * 0.3),
-			kind = kind,
-		})
+	for _, kind in { "Burger", "Fries", "Shield", "Ammo", "Burger", "Fries", "Shield", "Ammo" } do
+		table.insert(pickupPads, { position = takeIntersection(), kind = kind })
 	end
 
 	-- Guns, everywhere. Walk over one and it is in your hands.
@@ -3870,38 +4198,31 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		"MachineGun", "Sniper", "DiamondGun", "Deagle", "SMG", "Shotgun",
 	}
 	for index = 1, 34 do
-		local weapon = scattered[((index - 1) % #scattered) + 1]
+		local spot = randomStreet()
 		table.insert(pickupPads, {
-			position = Util.RandomFlatPoint(half * 0.86, rng) + Vector3.new(0, 4, 0),
+			position = spot + Vector3.new(0, 4, 0),
 			kind = "Weapon",
-			weapon = weapon,
+			weapon = scattered[((index - 1) % #scattered) + 1],
 		})
 	end
 
 	-- Ammo, and the point multiplier, scattered just as freely.
 	for _ = 1, 16 do
-		table.insert(pickupPads, {
-			position = Util.RandomFlatPoint(half * 0.86, rng) + Vector3.new(0, 4, 0),
-			kind = "Ammo",
-		})
+		table.insert(pickupPads, { position = randomStreet() + Vector3.new(0, 4, 0), kind = "Ammo" })
 	end
 	for _ = 1, 5 do
-		table.insert(pickupPads, {
-			position = Util.RandomFlatPoint(half * 0.7, rng) + Vector3.new(0, 4, 0),
-			kind = "Multiplier",
-		})
+		table.insert(pickupPads, { position = takeIntersection(), kind = "Multiplier" })
 	end
 
 	-- The hidden ones. These go INSIDE buildings rather than out on the pads,
 	-- so they are a reward for going in and looking rather than something you
 	-- trip over crossing the map.
 	local hiddenKinds = { "Health", "Invincibility", "DroneAmmo", "Health", "Invincibility", "DroneAmmo" }
-	for index, spot in placed do
-		local kind = hiddenKinds[((index - 1) % #hiddenKinds) + 1]
+	for index, tower in towers do
 		table.insert(pickupPads, {
 			-- Ground floor, tucked into a corner of the interior.
-			position = spot + Vector3.new(rng:NextNumber(-14, 14), 6, rng:NextNumber(-14, 14)),
-			kind = kind,
+			position = tower.center + Vector3.new(rng:NextNumber(-14, 14), 6, rng:NextNumber(-14, 14)),
+			kind = hiddenKinds[((index - 1) % #hiddenKinds) + 1],
 		})
 	end
 
@@ -4453,6 +4774,20 @@ function MatchService.Start()
 	})
 
 	task.spawn(loop)
+end
+
+--[[
+	Put the match straight into a running round.
+
+	Only the tests use this: kills are deliberately ignored outside a round,
+	so without it a test would have to wait out the real loop to score one.
+]]
+function MatchService.ForceRoundForTests()
+	phase = "Playing"
+	phaseEndsAt = os.clock() + Config.Match.RoundDuration
+	scores = { 0, 0 }
+	table.clear(recentKills)
+	table.clear(sprees)
 end
 
 --[[ Which phase the game is in, for anything that needs to care. ]]

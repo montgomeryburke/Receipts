@@ -5,7 +5,9 @@ Run the map generator outside Roblox.
 Roblox Studio cannot be scripted from a terminal, so this stitches the real
 MapService together with the stand-ins in stubs.luau and executes it with the
 plain Luau interpreter. It proves the generator runs without erroring and that
-what it produces is sane: ground exists, spawns exist, no broken geometry.
+what it produces is sane: ground exists, spawns exist, no broken geometry, the
+configured number of buildings actually got built, and -- the one that used to
+be wrong -- that no building stands in the middle of a road.
 
     python3 test/run-maptest.py | luau /dev/stdin
 
@@ -16,6 +18,8 @@ or write it to a file first:
 import os
 import re
 import sys
+
+CITY_CHECK = '\t-- ------------------------------------------------- is it actually a city?\n\t--\n\t-- Buildings used to be scattered at random, independent of the street\n\t-- grid, so they stood in the middle of roads and the streets led nowhere.\n\t-- These two checks are the invariants that fix introduced.\n\n\t-- Every building has four roof lips, so that count is the building count.\n\tlocal built = math.floor((named["RoofLip"] or 0) / 4)\n\tif built < math.floor(spec.Buildings * 0.7) then\n\t\tprint(string.format("      ^ ONLY %d OF %d BUILDINGS FIT", built, spec.Buildings))\n\t\tfailures += 1\n\tend\n\n\t-- Work the carriageways out of the generated Street parts rather than\n\t-- assuming them, so the check cannot drift away from the generator.\n\tlocal lanesX, lanesZ, roadWidth = {}, {}, math.huge\n\tfor _, part in STATS.parts do\n\t\tif part._props.Name == "Street" then\n\t\t\tlocal size = part._props.Size\n\t\t\tlocal at = part._props.CFrame.Position\n\t\t\tif size.X < size.Z then\n\t\t\t\ttable.insert(lanesX, at.X)\n\t\t\t\troadWidth = math.min(roadWidth, size.X)\n\t\t\telse\n\t\t\t\ttable.insert(lanesZ, at.Z)\n\t\t\t\troadWidth = math.min(roadWidth, size.Z)\n\t\t\tend\n\t\tend\n\tend\n\n\t-- Ramps and jumps belong ON the road. Structure never does.\n\tlocal blocking = {\n\t\tWall = true, Floor = true, Step = true, RoofLip = true,\n\t\tPlaza = true, Mud = true, Cover = true, Barricade = true,\n\t}\n\tlocal inRoad = 0\n\tlocal worst = ""\n\tlocal byName = {}\n\tfor _, part in STATS.parts do\n\t\tif blocking[part._props.Name] then\n\t\t\tlocal at = part._props.CFrame.Position\n\t\t\tlocal size = part._props.Size\n\t\t\tfor _, lane in lanesX do\n\t\t\t\t-- How far the part reaches past the kerb, if at all.\n\t\t\t\tlocal intrusion = roadWidth * 0.5 - (math.abs(at.X - lane) - size.X * 0.5)\n\t\t\t\tif intrusion > 1 then\n\t\t\t\t\tinRoad += 1\n\t\t\t\t\tbyName[part._props.Name] = (byName[part._props.Name] or 0) + 1\n\t\t\t\t\tworst = string.format("%s %.0f studs into the x=%.0f road", part._props.Name, intrusion, lane)\n\t\t\t\t\tbreak\n\t\t\t\tend\n\t\t\tend\n\t\t\tfor _, lane in lanesZ do\n\t\t\t\tlocal intrusion = roadWidth * 0.5 - (math.abs(at.Z - lane) - size.Z * 0.5)\n\t\t\t\tif intrusion > 1 then\n\t\t\t\t\tinRoad += 1\n\t\t\t\t\tbyName[part._props.Name] = (byName[part._props.Name] or 0) + 1\n\t\t\t\t\tworst = string.format("%s %.0f studs into the z=%.0f road", part._props.Name, intrusion, lane)\n\t\t\t\t\tbreak\n\t\t\t\tend\n\t\t\tend\n\t\tend\n\tend\n\n\tlocal breakdown = {}\n\tfor name, count in byName do\n\t\ttable.insert(breakdown, string.format("%s x%d", name, count))\n\tend\n\ttable.sort(breakdown)\n\tprint(string.format("      buildings=%-3d in-road=%-4d %s | %s",\n\t\tbuilt, inRoad, table.concat(breakdown, " "), worst))\n\tif inRoad > 0 then failures += 1 end\n\n'
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "src")
@@ -103,6 +107,7 @@ for _, spec in Config.Maps do
 		named["Floor"] or 0, named["Ramp"] or 0
 	))
 
+--[[CITYCHECK]]
 	if bad > 0 then failures += 1 end
 	if (STATS.byClass["SpawnLocation"] or 0) < 2 then
 		print("      ^ NOT ENOUGH SPAWNS")
@@ -118,4 +123,4 @@ print("")
 print(if failures == 0 then "ALL MAPS BUILD CLEAN" else string.format("%d FAILURES", failures))
 """
 
-sys.stdout.write(harness)
+sys.stdout.write(harness.replace('--[[CITYCHECK]]', CITY_CHECK))
