@@ -481,7 +481,22 @@ function Inst:FindFirstAncestor(name)
 	end
 	return nil
 end
-function Inst:GetChildren() return self._children end
+--[[
+	A COPY of the children, which is what Roblox returns.
+
+	Handing back the live array meant the extremely ordinary
+	`for _, child in parent:GetChildren() do child:Destroy() end` removed
+	items from the table it was walking, so it cleared roughly every other
+	child and left the rest behind. Correct code looked broken, and the
+	stand-in was the thing that was wrong.
+]]
+function Inst:GetChildren()
+	local copy = table.create(#self._children)
+	for index, child in self._children do
+		copy[index] = child
+	end
+	return copy
+end
 function Inst:PivotTo(cf)
 	local primary = self._props.PrimaryPart
 	if primary then primary._props.CFrame = cf end

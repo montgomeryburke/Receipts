@@ -21,6 +21,16 @@ local EVENT_NAMES = {
 	"SetAimDirection",
 	"SetTurbo",
 	"Melee",
+	-- Driving fittings, claimed by the vehicle context rather than by
+	-- whichever script connected first.
+	"CycleDriveMode",
+	"ToggleDiffLock",
+	"ToggleWinch",
+	"ReelWinch",
+	-- The shove-and-boost shared by skis, snowboard, tube and bike.
+	"ShoveBoost",
+	-- A held tool's second action: lighting a poured gas trail, so far.
+	"ToolSecondary",
 	"SetPedal",
 	"Eject",
 

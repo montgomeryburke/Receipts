@@ -88,6 +88,7 @@ local arcadeChoices: { [string]: TextButton } = {}
 local arcadePick: ((string) -> ())? = nil
 local wienerOverlay: TextLabel
 local toastHolder: Frame
+local actionBar: Frame? = nil
 
 -- ================================================================ BUILDING ==
 
@@ -686,6 +687,24 @@ function Hud.Build()
 			fightTheirsBar, fightTheirsFill = bar, fill
 		end
 	end
+
+	--[[
+		The context action bar.
+
+		Three or four keys along the bottom, showing only what is live for
+		whatever you are doing right now. This exists because the same three
+		keys mean different things in a car, on skis, in a fight and on foot,
+		and a player cannot be expected to hold that in their head -- the
+		game should just tell them.
+	]]
+	actionBar = makeFrame(screen, {
+		Name = "ActionBar",
+		Size = UDim2.new(0, 560, 0, 34),
+		Position = UDim2.new(0.5, -280, 1, -96),
+		BackgroundTransparency = 1,
+		Visible = false,
+		ZIndex = 9,
+	})
 
 	-- ------------------------------------------------- the sub-game menu
 	local panel = makeFrame(screen, {
@@ -1426,6 +1445,84 @@ function Hud.FightHealth(mine: number, theirs: number, maximum: number, theyBloc
 			then "THEIR GUARD IS UP — WAIT FOR IT TO DROP"
 			else "F  PUNCH      Q  BLOCK      MOUSE  STILL SHOOTS"
 	end
+end
+
+--[[
+	Which keys are live, and what they do right now.
+
+	Rebuilt rather than updated in place: the number of keys changes between
+	contexts, and four labels is cheap next to the bookkeeping of pooling
+	them. Controls only calls this when the set actually changes.
+]]
+function Hud.SetActionBar(entries: { { key: string, label: string } })
+	local bar = actionBar
+	if not bar then
+		return
+	end
+
+	for _, child in bar:GetChildren() do
+		child:Destroy()
+	end
+
+	if #entries == 0 then
+		bar.Visible = false
+		return
+	end
+	bar.Visible = true
+
+	local SLOT = 136
+	local total = #entries * SLOT
+	for index, entry in entries do
+		local slot = makeFrame(bar, {
+			Name = `Slot{index}`,
+			Size = UDim2.fromOffset(SLOT - 8, 28),
+			Position = UDim2.new(0.5, -total * 0.5 + (index - 1) * SLOT + 4, 0, 3),
+			BackgroundColor3 = Color3.fromRGB(12, 15, 20),
+			BackgroundTransparency = 0.25,
+			Visible = true,
+			ZIndex = 9,
+		})
+
+		makeLabel(slot, {
+			Name = "Key",
+			Size = UDim2.fromOffset(52, 28),
+			Position = UDim2.fromOffset(0, 0),
+			Text = entry.key,
+			TextSize = 15,
+			Font = Enum.Font.GothamBlack,
+			TextColor3 = Color3.fromRGB(185, 255, 50),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = 10,
+		})
+
+		makeLabel(slot, {
+			Name = "Action",
+			Size = UDim2.new(1, -56, 0, 28),
+			Position = UDim2.fromOffset(54, 0),
+			Text = entry.label,
+			TextSize = 14,
+			TextColor3 = Color3.fromRGB(226, 232, 240),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 10,
+		})
+	end
+end
+
+--[[ For tests: what the strip currently says. ]]
+function Hud.ActionBarForTests(): { { key: string, label: string } }
+	local out = {}
+	local bar = actionBar
+	if not bar or not bar.Visible then
+		return out
+	end
+	for _, slot in bar:GetChildren() do
+		local key = slot:FindFirstChild("Key")
+		local action = slot:FindFirstChild("Action")
+		if key and action and key:IsA("TextLabel") and action:IsA("TextLabel") then
+			table.insert(out, { key = key.Text, label = action.Text })
+		end
+	end
+	return out
 end
 
 --[[

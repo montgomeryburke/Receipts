@@ -305,6 +305,10 @@ local nextShotFeedback = 0
 -- detonating. Zero means no fight.
 local inFight = false
 local guardUp = false
+local heldTool: string? = nil
+local guardKeyDown = false
+local reelKeyDown = false
+local shownContext: string? = nil
 
 local function tryFire()
 	local spec = arsenal[effectiveWeaponName()]
@@ -529,6 +533,287 @@ local function setScoreboard(visible: boolean)
 	end
 end
 
+
+-- =================================================================== CONTEXT ==
+
+--[[
+	One context at a time, and it owns the contested keys.
+
+	Q, E and F each used to mean three different things depending on which
+	script got to the input first: F was the mega-detonate AND the hockey
+	punch AND lighting a gas trail; Q was the hockey guard AND the melee AND
+	the mud truck's drivetrain; E was the diff lock AND the ski shove AND
+	every ProximityPrompt in the game. With a flat if-chain, whichever branch
+	came first won, so pressing F in a fight also set off a diamond round and
+	pressing Q in a truck also swung a stick.
+
+	So: what you are currently DOING claims those keys. The table below holds
+	only the OVERRIDES -- a key a context does not name falls through to the
+	ordinary on-foot handling below, which is why reload still works while
+	driving and the gun still works in a fight. That fall-through is the
+	whole reason this is a small change rather than a rewrite.
+
+	Higher in the list wins. A fight outranks a vehicle because you cannot
+	start one while seated, so if both flags are somehow set the fight is the
+	stale one to trust least -- and being unable to punch is more confusing
+	than being unable to change gear.
+]]
+local CONTEXT_PRIORITY = { "Fight", "Vehicle", "Riding", "Tool" }
+
+-- Which VehicleKind counts as driving, and which counts as riding. Anything
+-- unlisted is treated as a vehicle, because a seat you steer is the common
+-- case and a wrong guess there is harmless.
+local RIDING_KINDS = {
+	Tube = true,
+	Glider = true,
+	Skis = true,
+	Snowboard = true,
+	Bike = true,
+}
+
+local function vehicleModel(): Model?
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local seat = humanoid and humanoid.SeatPart
+	if not seat then
+		return nil
+	end
+	return seat:FindFirstAncestorOfClass("Model")
+end
+
+local function contextActive(name: string): boolean
+	if name == "Fight" then
+		return inFight
+	elseif name == "Tool" then
+		return heldTool ~= nil
+	end
+
+	local model = vehicleModel()
+	if not model then
+		return false
+	end
+	local riding = RIDING_KINDS[tostring(model:GetAttribute("VehicleKind"))] == true
+	return if name == "Riding" then riding else not riding
+end
+
+local function activeContext(): string
+	for _, name in CONTEXT_PRIORITY do
+		if contextActive(name) then
+			return name
+		end
+	end
+	return "Foot"
+end
+
+--[[ Does the thing we are sitting in have this fitting? ]]
+local function vehicleHas(attribute: string): boolean
+	local model = vehicleModel()
+	return model ~= nil and model:GetAttribute(attribute) == true
+end
+
+--[[
+	The contested keys, per context.
+
+	`down` and `up` are optional; `label` is what the action bar shows, and a
+	`when` predicate hides a key the current vehicle has no fitting for --
+	there is no point telling somebody in a Jeep about a winch.
+]]
+type Binding = {
+	label: string,
+	down: (() -> ())?,
+	up: (() -> ())?,
+	when: (() -> boolean)?,
+}
+
+local CONTEXT_BINDINGS: { [string]: { [Enum.KeyCode]: Binding } } = {
+	Fight = {
+		[Enum.KeyCode.F] = {
+			label = "PUNCH",
+			down = function()
+				Remotes.Event("HockeyPunch"):FireServer()
+			end,
+		},
+		[Enum.KeyCode.Q] = {
+			label = "GUARD",
+			down = function()
+				if not guardUp then
+					guardUp = true
+					Remotes.Event("HockeyBlock"):FireServer(true)
+				end
+			end,
+			up = function()
+				if guardUp then
+					guardUp = false
+					Remotes.Event("HockeyBlock"):FireServer(false)
+				end
+			end,
+		},
+	},
+
+	Vehicle = {
+		[Enum.KeyCode.Q] = {
+			label = "4WD",
+			when = function()
+				return vehicleHas("HasDriveModes")
+			end,
+			down = function()
+				Remotes.Event("CycleDriveMode"):FireServer()
+			end,
+		},
+		[Enum.KeyCode.E] = {
+			label = "DIFF LOCK",
+			when = function()
+				return vehicleHas("HasDiffLock")
+			end,
+			down = function()
+				Remotes.Event("ToggleDiffLock"):FireServer()
+			end,
+		},
+		[Enum.KeyCode.C] = {
+			label = "WINCH",
+			when = function()
+				return vehicleHas("HasWinch")
+			end,
+			down = function()
+				Remotes.Event("ToggleWinch"):FireServer()
+			end,
+		},
+		[Enum.KeyCode.X] = {
+			label = "REEL",
+			when = function()
+				return vehicleHas("HasWinch")
+			end,
+			-- Held, like a real winch switch. Reeling was originally on R,
+			-- which is reload -- so getting unstuck emptied your magazine.
+			down = function()
+				if not reelKeyDown then
+					reelKeyDown = true
+					Remotes.Event("ReelWinch"):FireServer(true)
+				end
+			end,
+			up = function()
+				if reelKeyDown then
+					reelKeyDown = false
+					Remotes.Event("ReelWinch"):FireServer(false)
+				end
+			end,
+		},
+	},
+
+	Riding = {
+		[Enum.KeyCode.E] = {
+			label = "SHOVE",
+			down = function()
+				Remotes.Event("ShoveBoost"):FireServer()
+			end,
+		},
+	},
+
+	Tool = {
+		[Enum.KeyCode.F] = {
+			label = "IGNITE",
+			down = function()
+				Remotes.Event("ToolSecondary"):FireServer()
+			end,
+		},
+	},
+}
+
+-- What the action bar says for keys that are NOT overridden, so the strip
+-- reads as a complete set of what is live rather than only the exotic bits.
+local BASE_ACTIONS: { [string]: { { key: string, label: string } } } = {
+	Foot = {
+		{ key = "F", label = "MEGA" },
+		{ key = "Q", label = "MELEE" },
+		{ key = "G", label = "GRENADE" },
+	},
+	Fight = {
+		{ key = "MOUSE", label = "STILL SHOOTS" },
+	},
+	Vehicle = {
+		{ key = "SHIFT", label = "TURBO" },
+		{ key = "SPACE", label = "BAIL" },
+	},
+	Riding = {
+		{ key = "SPACE", label = "BAIL" },
+		{ key = "MOUSE", label = "SHOOT" },
+	},
+	Tool = {
+		{ key = "LMB", label = "POUR" },
+	},
+}
+
+local KEY_LABELS: { [Enum.KeyCode]: string } = {
+	[Enum.KeyCode.Q] = "Q",
+	[Enum.KeyCode.E] = "E",
+	[Enum.KeyCode.F] = "F",
+	[Enum.KeyCode.C] = "C",
+	[Enum.KeyCode.X] = "X",
+}
+
+--[[
+	Push the strip for whatever we are doing now.
+
+	Only on a change: this is called from the heartbeat, and rebuilding four
+	labels sixty times a second to say the same thing is exactly the kind of
+	cost that adds up across twenty players.
+]]
+local function refreshActionBar(force: boolean?)
+	local context = activeContext()
+
+	local entries: { { key: string, label: string } } = {}
+	local bindings = CONTEXT_BINDINGS[context]
+	if bindings then
+		for code, binding in bindings do
+			if not binding.when or binding.when() then
+				table.insert(entries, { key = KEY_LABELS[code] or "?", label = binding.label })
+			end
+		end
+	end
+	table.sort(entries, function(a, b)
+		return a.key < b.key
+	end)
+	for _, entry in BASE_ACTIONS[context] or {} do
+		table.insert(entries, entry)
+	end
+
+	-- The signature is the context plus the keys actually offered, so a
+	-- winch being hooked up mid-drive still redraws.
+	local signature = context
+	for _, entry in entries do
+		signature ..= "|" .. entry.key .. entry.label
+	end
+	if not force and signature == shownContext then
+		return
+	end
+	shownContext = signature
+
+	Hud.SetActionBar(entries)
+end
+
+--[[
+	Run a key through the current context. True means it was handled there
+	and the ordinary handling below must not also run.
+]]
+local function dispatchContext(input: InputObject, began: boolean): boolean
+	local bindings = CONTEXT_BINDINGS[activeContext()]
+	local binding = bindings and bindings[input.KeyCode]
+	if not binding then
+		return false
+	end
+	if binding.when and not binding.when() then
+		return false
+	end
+
+	local handler = if began then binding.down else binding.up
+	if handler then
+		handler()
+	end
+	-- Claimed either way. A context that names a key owns both edges of it,
+	-- or releasing Q in a truck would swing a stick on the way up.
+	return true
+end
+
 -- ===================================================================== INPUT ==
 
 local function onInputBegan(input: InputObject, processed: boolean)
@@ -540,6 +825,12 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		or input.UserInputType == Enum.UserInputType.MouseButton2
 
 	if (processed and not isMouseButton) or (isMouseButton and mouseFree) then
+		return
+	end
+
+	-- What you are doing claims its keys first.
+	if dispatchContext(input, true) then
+		refreshActionBar()
 		return
 	end
 
@@ -639,24 +930,12 @@ local function onInputBegan(input: InputObject, processed: boolean)
 	if input.KeyCode == Enum.KeyCode.R then
 		Remotes.Event("Reload"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F then
-		-- The big one -- and, mid-fight, a punch. The same key doing both is
-		-- deliberate: there is no spare finger during a scrap, and a diamond
-		-- round going off while you are swinging is in the spirit of it.
+		-- The big one. In a fight the context table takes F for the punch,
+		-- and while holding a gas can it takes F to light the trail, so this
+		-- only ever runs on foot and empty-handed.
 		Remotes.Event("MegaDetonate"):FireServer()
-		if inFight then
-			Remotes.Event("HockeyPunch"):FireServer()
-		end
 	elseif input.KeyCode == Enum.KeyCode.Q then
-		-- Melee normally; mid-fight the same key is the guard, because a
-		-- punch IS the melee once the gloves are off.
-		if inFight then
-			if not guardUp then
-				guardUp = true
-				Remotes.Event("HockeyBlock"):FireServer(true)
-			end
-		else
-			Remotes.Event("Melee"):FireServer()
-		end
+		Remotes.Event("Melee"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.Space then
 		-- Bail out of whatever you are riding. Harmless on foot.
 		local character = player.Character
@@ -682,18 +961,13 @@ local function onInputBegan(input: InputObject, processed: boolean)
 end
 
 local function onInputEnded(input: InputObject)
-	if input.KeyCode == Enum.KeyCode.Tab then
-		setScoreboard(false)
+	if dispatchContext(input, false) then
+		refreshActionBar()
 		return
 	end
 
-	if input.KeyCode == Enum.KeyCode.Q and inFight then
-		-- The guard is held, not toggled: letting go drops it, which is what
-		-- makes a feint possible.
-		if guardUp then
-			guardUp = false
-			Remotes.Event("HockeyBlock"):FireServer(false)
-		end
+	if input.KeyCode == Enum.KeyCode.Tab then
+		setScoreboard(false)
 		return
 	end
 
@@ -706,7 +980,18 @@ local function onInputEnded(input: InputObject)
 end
 
 --[[ Held triggers keep firing, and the turret keeps following your eyes. ]]
+local lastBarCheckAt = 0
+
 local function onHeartbeat()
+	-- Sitting down, standing up and picking something up all change which
+	-- keys are live, and none of them tell us directly. Five times a second
+	-- is fast enough to feel immediate and slow enough not to matter.
+	local now = os.clock()
+	if now - lastBarCheckAt >= 0.2 then
+		lastBarCheckAt = now
+		refreshActionBar()
+	end
+
 	local spec = arsenal[effectiveWeaponName()]
 
 	-- Everything holds down, except a scoped rifle: down the sight it is one
@@ -1087,6 +1372,35 @@ function Controls.SetFighting(fighting: boolean)
 		guardUp = false
 		Remotes.Event("HockeyBlock"):FireServer(false)
 	end
+	refreshActionBar()
+end
+
+--[[
+	What is in your hands, for the tool context.
+
+	nil means empty-handed, which puts F back on the mega-detonate. Passing a
+	name claims F for that tool's second action instead -- lighting a gas
+	trail, in the one case that exists so far.
+]]
+function Controls.SetTool(name: string?)
+	heldTool = name
+	refreshActionBar()
+end
+
+--[[ For tests: which context owns the keys right now. ]]
+function Controls.ContextForTests(): string
+	return activeContext()
+end
+
+--[[
+	For tests: redraw the strip now.
+
+	In the game the heartbeat notices a context change within 200ms, which is
+	not something a terminal can wait for -- os.clock barely moves across a
+	whole suite, so the throttle would never come due.
+]]
+function Controls.RefreshActionBarForTests()
+	refreshActionBar(true)
 end
 
 --[[ For tests: is the guard up right now? ]]
