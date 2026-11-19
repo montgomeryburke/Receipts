@@ -135,6 +135,96 @@ for name, spec in Config.Weapons do
 end
 check("explosives have radius AND damage", #halfExplosive == 0, table.concat(halfExplosive, ", "))
 
+--[[
+	Every gun you shoot people with has a sight.
+
+	Right click did nothing on nine of the eleven -- the pistol, the
+	revolver, the hand cannon, all three automatics, both shotguns -- and a
+	control that works on some weapons and silently does nothing on the
+	rest reads as broken rather than as absent. Only the Minigun is
+	deliberately without one, because spraying from the hip is its whole
+	character.
+
+	Melee, explosives and the scavenged oddities are exempt: aiming down
+	the sight of a thrown gas can is not a thing.
+]]
+local SIGHTLESS_ON_PURPOSE = { Minigun = true }
+local noSight = {}
+for name, spec in Config.Weapons do
+	local shootable = spec.Kind == "Hitscan"
+		and (spec.Range or 0) > 100
+		and not spec.MountedOnly
+		and (spec.BlastRadius or 0) == 0
+	if shootable and not SIGHTLESS_ON_PURPOSE[name] then
+		local levels = spec.ZoomLevels
+		if not spec.ZoomFov and not (levels and #levels > 0) then
+			table.insert(noSight, name)
+		end
+	end
+end
+table.sort(noSight)
+check("every gun you shoot people with has a sight", #noSight == 0,
+	table.concat(noSight, ", "))
+
+--[[
+	And a sight costs what it is worth.
+
+	The slowdown and the fine mouse used to be flat: scoped or not, and the
+	mouse picked by which click of the scope you were on. That was fine
+	while only the two long scopes zoomed, because stage 1 always meant 5x.
+	Now stage 1 on a submachine gun is 1.3x, and charging that the 50x
+	price -- 42% walking speed and a mouse at 45% -- would mean nobody ever
+	used it.
+]]
+local closeSpeed = Config.ZoomSpeedFactor(1.3)
+local farSpeed = Config.ZoomSpeedFactor(50)
+check("a 1.3x hold barely slows you down", closeSpeed > 0.85,
+	string.format("%.2f of walking pace", closeSpeed))
+check("a 50x scope pins you to the spot",
+	math.abs(farSpeed - Config.Movement.ScopedSpeedFactor) < 0.001,
+	string.format("%.2f of walking pace", farSpeed))
+check("and hipfire costs nothing at all",
+	Config.ZoomSpeedFactor(1) == 1,
+	string.format("%.2f", Config.ZoomSpeedFactor(1)))
+
+-- Monotonic, or some middling magnification is cheaper than a smaller one.
+local lastFactor = 2
+local speedBroken = nil
+for step = 0, 50 do
+	local mag = 1 + step * 1.2
+	local factor = Config.ZoomSpeedFactor(mag)
+	if factor > lastFactor + 1e-9 then
+		speedBroken = string.format("%.1fx gave %.3f after %.3f", mag, factor, lastFactor)
+	end
+	lastFactor = factor
+end
+check("and more magnification is never cheaper", speedBroken == nil,
+	speedBroken or "")
+
+--[[
+	The sniper's three clicks land where they were tuned.
+
+	The sensitivity table was re-expressed as magnification bands so that a
+	1.3x sight could have its own value. The point of the bands is that
+	5x, 10x and 50x still come out at exactly 0.45, 0.22 and 0.1.
+]]
+local tuned = { [5] = 0.45, [10] = 0.22, [50] = 0.1 }
+local drifted = {}
+for mag, want in tuned do
+	local got = Config.ZoomSensitivity(mag)
+	if math.abs(got - want) > 1e-9 then
+		table.insert(drifted, string.format("%dx: %.3f not %.3f", mag, got, want))
+	end
+end
+table.sort(drifted)
+check("the long scope's tuned sensitivities are unchanged", #drifted == 0,
+	table.concat(drifted, ", "))
+check("and a 1.3x sight keeps most of the mouse",
+	Config.ZoomSensitivity(1.3) > 0.8,
+	string.format("%.2f", Config.ZoomSensitivity(1.3)))
+check("while hipfire keeps all of it", Config.ZoomSensitivity(1) == 1,
+	string.format("%.2f", Config.ZoomSensitivity(1)))
+
 -- ------------------------------------------------------------------- loadout
 print("")
 print("Loadout and slots:")

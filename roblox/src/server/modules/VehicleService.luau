@@ -2877,10 +2877,19 @@ end
 ]]
 local scoped: { [Player]: boolean? } = {}
 
-function VehicleService.SetScoped(player: Player, on: boolean)
+--[[
+	How far a player is zoomed in, and what it costs them.
+
+	Takes a MAGNIFICATION rather than a flag, because every gun has a sight
+	now and they are not worth the same: a 1.3x hold on a submachine gun
+	should barely be felt, and a 50x scope should pin you to the spot. One
+	boolean could only ever charge both of them the same, and it charged
+	them the scope's price.
+]]
+function VehicleService.SetScoped(player: Player, magnification: number)
 	-- nil rather than false, so the table does not grow an entry for every
 	-- player who ever un-scoped.
-	scoped[player] = if on then true else nil
+	scoped[player] = if magnification > 1 then true else nil
 
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -2891,9 +2900,7 @@ function VehicleService.SetScoped(player: Player, on: boolean)
 	if humanoid.SeatPart then
 		return
 	end
-	humanoid.WalkSpeed = if on
-		then Config.Turbo.WalkSpeed * Config.Movement.ScopedSpeedFactor
-		else Config.Turbo.WalkSpeed
+	humanoid.WalkSpeed = Config.Turbo.WalkSpeed * Config.ZoomSpeedFactor(magnification)
 end
 
 function VehicleService.SetTurbo(player: Player, on: boolean)

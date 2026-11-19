@@ -24,6 +24,11 @@ local Hud = {}
 -- Low-health warning and the scoreboard, declared up here with the rest of
 -- the widgets so every function can reach them.
 local lowHealthHolder: Frame? = nil
+-- The directional damage arcs: a small ring of reusable blades, lit on the
+-- bearing a hit came from.
+local hurtHolder: Frame? = nil
+local hurtBlades: { Frame } = {}
+local nextHurtBlade = 1
 local vignetteStrength = 0
 local vignettePulse = 0
 local scoreboard: Frame? = nil
@@ -583,6 +588,54 @@ function Hud.Build()
 			NumberSequenceKeypoint.new(1, 1),
 		})
 		fade.Parent = band
+	end
+
+	-- --------------------------------------------- directional damage arcs
+	--
+	-- Which way the shot came from. Without it, being shot in the back and
+	-- being shot in the face look exactly the same on screen, and the only
+	-- way to find out is to turn around twice and die doing it -- which
+	-- reads as the game being unfair rather than as missing information.
+	--
+	-- Drawn as a thin bar set out from the middle of the screen and rotated
+	-- to the bearing, for the same reason the vignette is four gradients:
+	-- an image would need an asset ID, and an asset ID in a place that has
+	-- never been published can silently fail to load.
+	--
+	-- Four of them, reused in turn, so three people shooting you from three
+	-- sides shows as three arcs rather than one that keeps jumping.
+	local hurtRing = makeFrame(screen, {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		ZIndex = 5,
+	})
+	hurtRing.Name = "HurtArcs"
+	hurtHolder = hurtRing
+
+	table.clear(hurtBlades)
+	for _ = 1, 4 do
+		local blade = makeFrame(hurtRing, {
+			Size = UDim2.fromOffset(170, 9),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			BackgroundColor3 = Color3.fromRGB(235, 40, 40),
+			BackgroundTransparency = 1,
+			Visible = false,
+			ZIndex = 5,
+		})
+		blade.Name = "HurtArc"
+		-- Faded at both ends so it reads as an arc rather than a domino.
+		local taper = Instance.new("UIGradient")
+		taper.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.5, 0),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		taper.Parent = blade
+		local round = Instance.new("UICorner")
+		round.CornerRadius = UDim.new(0, 4)
+		round.Parent = blade
+		table.insert(hurtBlades, blade)
 	end
 
 	-- ------------------------------------------------------- the scoreboard
@@ -1347,6 +1400,82 @@ function Hud.Hit(damage: number, headshot: boolean)
 	drift.Completed:Connect(function()
 		number:Destroy()
 	end)
+end
+
+--[[
+	Show which way a hit came from.
+
+	`from` is a WORLD position, because the server has no idea which way
+	anybody's camera is pointing and should not: that is the one piece of
+	state a client genuinely owns. So the bearing is worked out here, as the
+	angle between where you are looking and where the shot came from,
+	measured flat -- a sniper on a roof reads as a bearing, not as "up",
+	because turning to face them is the only useful response either way.
+
+	A hit with no direction -- a zombie, a fall, a fire you are standing in
+	-- shows nothing rather than an arbitrary arc. An arrow pointing at
+	nothing is worse than no arrow.
+]]
+function Hud.ShowHurtFrom(from: Vector3?)
+	if not from or #hurtBlades == 0 then
+		return
+	end
+	local camera = workspace.CurrentCamera
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not camera or not root or not root:IsA("BasePart") then
+		return
+	end
+
+	local toward = from - root.Position
+	local flat = Vector3.new(toward.X, 0, toward.Z)
+	if flat.Magnitude < 1 then
+		-- Standing inside it. No direction to point.
+		return
+	end
+	flat = flat.Unit
+
+	local look = camera.CFrame.LookVector
+	local facing = Vector3.new(look.X, 0, look.Z)
+	if facing.Magnitude < 1e-4 then
+		return
+	end
+	facing = facing.Unit
+	local right = Vector3.new(-facing.Z, 0, facing.X)
+
+	-- Bearing in screen terms: 0 is dead ahead, positive is to the right.
+	local bearing = math.atan2(flat:Dot(right), flat:Dot(facing))
+
+	local blade = hurtBlades[nextHurtBlade]
+	nextHurtBlade = (nextHurtBlade % #hurtBlades) + 1
+
+	-- Out from the middle on that bearing, and turned to lie along the ring.
+	local radius = 0.3
+	blade.Position = UDim2.fromScale(
+		0.5 + math.sin(bearing) * radius,
+		0.5 - math.cos(bearing) * radius * 0.78
+	)
+	blade.Rotation = math.deg(bearing)
+	blade.Visible = true
+	blade.BackgroundTransparency = 0.1
+
+	local fade = TweenService:Create(
+		blade,
+		TweenInfo.new(0.75, Enum.EasingStyle.Quad),
+		{ BackgroundTransparency = 1 }
+	)
+	fade:Play()
+	fade.Completed:Connect(function()
+		-- Only hide it if nothing has reused it in the meantime.
+		if blade.BackgroundTransparency >= 1 then
+			blade.Visible = false
+		end
+	end)
+end
+
+--[[ For tests: the arcs, so a test can see which one lit and where. ]]
+function Hud.HurtArcsForTests(): { Frame }
+	return hurtBlades
 end
 
 --[[ One line in the kill feed. ]]

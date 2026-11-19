@@ -52,6 +52,15 @@ local EVENT_NAMES = {
 	"VoteOptions",
 	"DeathScreen",
 	"Notify",
+	--[[
+		Where a hit came from, to the player who took it.
+
+		Sent as a world position rather than a screen angle, because the
+		server does not know which way anybody's camera is pointing -- and
+		should not, since that is the one piece of state a client genuinely
+		owns.
+	]]
+	"Hurt",
 	"Hitmarker",
 	"Medal",
 	"KillFeed",

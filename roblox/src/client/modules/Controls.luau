@@ -428,7 +428,7 @@ local function applyZoom()
 		Hud.SetNightVision(false)
 		UserInputService.MouseDeltaSensitivity = 1
 		-- Back to walking pace.
-		Remotes.Event("SetScoped"):FireServer(false)
+		Remotes.Event("SetScoped"):FireServer(1)
 		return
 	end
 
@@ -456,17 +456,21 @@ local function applyZoom()
 		rather than powerful. This single line is what makes the top
 		magnification worth having.
 	]]
-	local sensitivity = Config.Visuals.ScopedSensitivity
-	UserInputService.MouseDeltaSensitivity =
-		sensitivity[math.clamp(zoomStage + 1, 1, #sensitivity)] or 1
+	UserInputService.MouseDeltaSensitivity = Config.ZoomSensitivity(magnification)
 	--[[
 		Scoped, you move at a fraction of walking pace.
 
 		Without it a 50x scope is a free sprinting wallhack. With it,
 		committing to a shot means committing to standing still, which is the
 		trade every shooter with a scope in it makes.
+
+		The MAGNIFICATION goes over the wire, not just "scoped". Now that
+		every gun has a sight, charging the full slowdown for a 1.3x hold
+		would mean nobody ever used one -- the penalty has to be
+		proportionate to what the sight gives you, and that is a number the
+		server cannot work out for itself.
 	]]
-	Remotes.Event("SetScoped"):FireServer(true)
+	Remotes.Event("SetScoped"):FireServer(magnification)
 end
 
 --[[ Right click: next magnification, then back out to hipfire. ]]

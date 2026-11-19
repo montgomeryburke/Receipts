@@ -449,6 +449,18 @@ Remotes.Event("Notify").OnClientEvent:Connect(function(message)
 	end
 end)
 
+--[[
+	Which way a hit came from.
+
+	A world position, not an angle: the server has no idea which way the
+	camera is pointing, and the HUD turns it into a bearing itself.
+]]
+Remotes.Event("Hurt").OnClientEvent:Connect(function(from)
+	if typeof(from) == "Vector3" then
+		Hud.ShowHurtFrom(from)
+	end
+end)
+
 task.spawn(function()
 	local ok, state = pcall(function()
 		return Remotes.Function("GetPlayerState"):InvokeServer()

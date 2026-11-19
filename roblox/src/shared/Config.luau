@@ -142,6 +142,8 @@ Config.Weapons = {
 		Slot = 1, Category = "Sidearm", DisplayName = "9mm Pistol", Recoil = 0.9,
 		Kind = "Hitscan", Damage = 12, Cooldown = 0.28, Range = 400,
 		MagSize = 12, ReloadTime = 1.3, Spread = 1.2,
+		-- 2x, like the pistol in the game this is in the spirit of.
+		ZoomFov = 38,
 		Color = Color3.fromRGB(90, 90, 96),
 		Automatic = true,
 		Points = 10,
@@ -150,6 +152,7 @@ Config.Weapons = {
 		Slot = 1, Category = "Sidearm", DisplayName = ".44 Revolver", Recoil = 2.6,
 		Kind = "Hitscan", Damage = 34, Cooldown = 0.7, Range = 500,
 		MagSize = 6, ReloadTime = 2.1, Spread = 0.8,
+		ZoomFov = 34,
 		Color = Color3.fromRGB(150, 130, 90),
 		Automatic = true,
 		Points = 15,
@@ -158,6 +161,7 @@ Config.Weapons = {
 		Slot = 1, Category = "Sidearm", DisplayName = "Hand Cannon", Recoil = 2.9,
 		Kind = "Hitscan", Damage = 42, Cooldown = 0.75, Range = 480,
 		MagSize = 7, ReloadTime = 2.0, Spread = 1.0,
+		ZoomFov = 34,
 		Color = Color3.fromRGB(200, 180, 110),
 		Automatic = true,
 		Points = 15,
@@ -168,6 +172,9 @@ Config.Weapons = {
 		Slot = 2, Category = "Automatic", DisplayName = "Backroad SMG", Recoil = 0.5,
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.075, Range = 380,
 		MagSize = 35, ReloadTime = 1.7, Spread = 2.6, Automatic = true,
+		-- Barely more than a steadier hold: a submachine gun is a
+		-- close-range weapon and a big magnification on one is a trap.
+		ZoomFov = 58,
 		Color = Color3.fromRGB(70, 76, 84),
 		Points = 8,
 	},
@@ -175,6 +182,7 @@ Config.Weapons = {
 		Slot = 2, Category = "Automatic", DisplayName = "Assault Rifle", Recoil = 0.7,
 		Kind = "Hitscan", Damage = 14, Cooldown = 0.11, Range = 700,
 		MagSize = 30, ReloadTime = 2.0, Spread = 1.5, Automatic = true,
+		ZoomFov = 47,
 		Color = Color3.fromRGB(60, 68, 58),
 		Points = 10,
 	},
@@ -182,6 +190,7 @@ Config.Weapons = {
 		Slot = 2, Category = "Automatic", DisplayName = "Machine Gun", Recoil = 0.6,
 		Kind = "Hitscan", Damage = 11, Cooldown = 0.09, Range = 650,
 		MagSize = 80, ReloadTime = 3.4, Spread = 2.2, Automatic = true,
+		ZoomFov = 50,
 		Color = Color3.fromRGB(52, 54, 58),
 		Points = 10,
 	},
@@ -191,6 +200,9 @@ Config.Weapons = {
 		MagSize = 200, ReloadTime = 5.0, Spread = 3.4, Automatic = true,
 		-- Slows you down while you hold the trigger, because it is enormous.
 		MoveSpeedFactor = 0.45,
+		-- And no sight. It is the one gun in the game whose whole character
+		-- is spraying from the hip, and a scope on it would be a worse
+		-- version of the machine gun.
 		Color = Color3.fromRGB(96, 100, 104),
 		Points = 8,
 	},
@@ -200,6 +212,10 @@ Config.Weapons = {
 		Slot = 3, Category = "Shotgun", DisplayName = "Pump Shotgun", Recoil = 3.4,
 		Kind = "Hitscan", Damage = 9, Cooldown = 0.85, Range = 160,
 		MagSize = 6, ReloadTime = 2.6, Spread = 6.0, Pellets = 9,
+		-- A modest one. Magnifying a nine-pellet cone at 160 studs tells
+		-- you nothing you did not already know, but the steadier hold is
+		-- still worth having in a doorway.
+		ZoomFov = 62,
 		Color = Color3.fromRGB(120, 84, 52),
 		Automatic = true,
 		Points = 14,
@@ -208,6 +224,7 @@ Config.Weapons = {
 		Slot = 3, Category = "Shotgun", DisplayName = "Auto Shotgun", Recoil = 2.2,
 		Kind = "Hitscan", Damage = 7, Cooldown = 0.4, Range = 140,
 		MagSize = 8, ReloadTime = 3.0, Spread = 7.5, Pellets = 8, Automatic = true,
+		ZoomFov = 64,
 		Color = Color3.fromRGB(90, 70, 60),
 		Points = 12,
 	},
@@ -781,6 +798,33 @@ Config.WeaponsAlwaysAvailable = true
 	can hit a high striker with. Anything scoring a shot by its force wants
 	this rather than the raw field.
 ]]
+--[[
+	How much to slow a player down, and how much to fine the mouse, for a
+	given magnification.
+
+	Both live here rather than in the client because both are the same
+	judgement -- how much a sight should cost -- and because the server needs
+	the speed half of it. A 1.3x hold costs almost nothing; a 50x scope costs
+	you standing still.
+]]
+function Config.ZoomSpeedFactor(magnification: number): number
+	local span = math.max(Config.Movement.ScopedSlowAt - 1, 0.001)
+	local t = math.clamp((magnification - 1) / span, 0, 1)
+	return 1 + (Config.Movement.ScopedSpeedFactor - 1) * t
+end
+
+function Config.ZoomSensitivity(magnification: number): number
+	if magnification <= 1 then
+		return 1
+	end
+	for _, band in Config.Visuals.ScopedSensitivity do
+		if magnification <= band.upTo then
+			return band.factor
+		end
+	end
+	return 1
+end
+
 function Config.ShotPower(spec: { Damage: number?, BlastDamage: number? }): number
 	return math.max(spec.Damage or 0, spec.BlastDamage or 0)
 end
@@ -1186,7 +1230,28 @@ Config.Visuals = {
 		Keyed by zoom STAGE rather than by magnification, because the stages
 		are what the player steps through.
 	]]
-	ScopedSensitivity = { 1, 0.45, 0.22, 0.1 },
+	--[[
+		How much finer the mouse gets when you are zoomed in.
+
+		Read against MAGNIFICATION, not against which click of the scope you
+		are on: the first band whose `upTo` covers your magnification wins.
+		Indexing by the stage number was fine while only the long scopes had
+		sights, because stage 1 always meant 5x or 6x -- but now every gun
+		has one, and stage 1 on a submachine gun is 1.3x. Cutting the mouse
+		to 45% for that would make aiming down a red dot feel like dragging
+		it through treacle.
+
+		The sniper's three clicks still land on exactly the values they were
+		tuned to: 5x on 0.45, 10x on 0.22, 50x on 0.1.
+	]]
+	ScopedSensitivity = {
+		{ upTo = 1.4, factor = 0.9 },
+		{ upTo = 2.5, factor = 0.7 },
+		{ upTo = 4, factor = 0.55 },
+		{ upTo = 7, factor = 0.45 },
+		{ upTo = 12, factor = 0.22 },
+		{ upTo = math.huge, factor = 0.1 },
+	},
 }
 
 --[[
@@ -1387,10 +1452,20 @@ Config.Movement = {
 	-- separate places, which is one place too many for a number anybody
 	-- would want to tune.
 	HeadshotMultiplier = 1.8,
-	-- Scoped, you move at a fraction of walking pace. It is the thing that
-	-- stops a 50x scope being a free sprinting wallhack, and it is what
-	-- makes committing to a shot feel like committing.
+	--[[
+		Scoped, you move at a fraction of walking pace.
+
+		It is the thing that stops a 50x scope being a free sprinting
+		wallhack, and it is what makes committing to a shot feel like
+		committing. It is also far too much to charge for a 1.3x red dot,
+		which is why the penalty now arrives gradually: full speed at 1x,
+		the full slowdown from ScopedSlowAt upwards, interpolated between.
+
+		Before every gun had a sight this did not matter, because the only
+		things that zoomed were the two long scopes.
+	]]
 	ScopedSpeedFactor = 0.42,
+	ScopedSlowAt = 5,
 }
 
 --[[
@@ -1828,7 +1903,12 @@ export type ConfigType = {
 		Force: number, Lift: number, Points: number,
 	},
 	VoidHeight: number,
-	Movement: { JumpPower: number, HeadshotMultiplier: number, ScopedSpeedFactor: number },
+	Movement: {
+		JumpPower: number,
+		HeadshotMultiplier: number,
+		ScopedSpeedFactor: number,
+		ScopedSlowAt: number,
+	},
 	Help: { { question: string, answer: string, keywords: { string } } },
 	Medals: { [string]: { name: string, points: number, sound: string } },
 	Fire: {
@@ -1866,7 +1946,7 @@ export type ConfigType = {
 		NightVisionTint: Color3,
 		NightVisionBrightness: number,
 		NightVisionContrast: number,
-		ScopedSensitivity: { number },
+		ScopedSensitivity: { { upTo: number, factor: number } },
 	},
 	Carnival: {
 		BalloonPoints: number, BalloonClearBonus: number,

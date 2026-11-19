@@ -217,6 +217,130 @@ if INPUT_CONNECTIONS < 2 then
 	failures += 1
 end
 DUMP("")
+DUMP("Being shot tells you where from:")
+do
+	--[[
+		THE CLAIM: being shot in the back and being shot in the face look
+		identical on screen.
+
+		They did. Nothing told you the direction, so the only way to find
+		out was to turn around twice and die doing it -- which reads as the
+		game being unfair rather than as missing information.
+
+		The direction is the whole feature and the one thing that can be
+		subtly wrong, so this checks each of the four quarters rather than
+		just that something lit up. An arc that points the wrong way is
+		worse than no arc: it sends you away from the fight.
+	]]
+	local camera = rawget(workspace, "_props").CurrentCamera
+	local root = localPlayer._props.Character:FindFirstChild("HumanoidRootPart")
+	check("there is a camera and a body to measure from",
+		camera ~= nil and root ~= nil)
+
+	if camera and root then
+		--[[
+			Standing at the origin, looking down -Z.
+
+			Which matters, and is the thing to get right before reading
+			anything below: Roblox's identity CFrame looks along -Z with its
+			RightVector at +X, so facing -Z puts +X on your right. Writing
+			this test with the camera facing +Z and still calling +X "your
+			right" made it fail against perfectly correct code -- the test
+			was turned round, not the arc.
+		]]
+		root._props.CFrame = CFrame.new(0, 5, 0)
+		camera._props.CFrame = CFrame.lookAt(Vector3.new(0, 5, 0), Vector3.new(0, 5, -10))
+
+		local arcs = Hud.HurtArcsForTests()
+		check("the HUD has damage arcs", #arcs == 4, string.format("%d", #arcs))
+
+		local function arcFor(from)
+			for _, blade in arcs do
+				blade._props.Visible = false
+			end
+			Hud.ShowHurtFrom(from)
+			for _, blade in arcs do
+				if blade._props.Visible then
+					return blade
+				end
+			end
+			return nil
+		end
+
+		-- Shot from straight ahead: the arc goes to the top of the screen.
+		local ahead = arcFor(Vector3.new(0, 5, -200))
+		check("a shot from in front shows above you",
+			ahead ~= nil and ahead._props.Position.Y.Scale < 0.45,
+			if ahead then string.format("y=%.2f", ahead._props.Position.Y.Scale) else "none")
+
+		-- From behind: below.
+		local behind = arcFor(Vector3.new(0, 5, 200))
+		check("a shot from behind shows below you",
+			behind ~= nil and behind._props.Position.Y.Scale > 0.55,
+			if behind then string.format("y=%.2f", behind._props.Position.Y.Scale) else "none")
+
+		-- From the right: right. This is the one a sign error flips.
+		local right = arcFor(Vector3.new(200, 5, 0))
+		check("a shot from your right shows on the right",
+			right ~= nil and right._props.Position.X.Scale > 0.55,
+			if right then string.format("x=%.2f", right._props.Position.X.Scale) else "none")
+
+		local left = arcFor(Vector3.new(-200, 5, 0))
+		check("and one from your left on the left",
+			left ~= nil and left._props.Position.X.Scale < 0.45,
+			if left then string.format("x=%.2f", left._props.Position.X.Scale) else "none")
+
+		--[[
+			It is relative to the CAMERA, not to the world.
+
+			Turning around has to move the arc, or it is a compass rather
+			than a damage indicator -- and a compass is no use for deciding
+			which way to point a gun.
+		]]
+		camera._props.CFrame = CFrame.lookAt(Vector3.new(0, 5, 0), Vector3.new(0, 5, 10))
+		local turned = arcFor(Vector3.new(0, 5, -200))
+		check("turning round moves the arc to the other side",
+			turned ~= nil and turned._props.Position.Y.Scale > 0.55,
+			if turned then string.format("y=%.2f", turned._props.Position.Y.Scale) else "none")
+
+		--[[
+			And a hit with no direction shows nothing.
+
+			A fall, a fire you are standing in, a zombie with no Player
+			behind it. An arrow pointing nowhere is worse than no arrow.
+		]]
+		local none = arcFor(nil)
+		check("a hit from nowhere draws nothing", none == nil,
+			if none then "lit anyway" else "")
+
+		-- Standing inside the blast: also no direction worth drawing.
+		local onTop = arcFor(Vector3.new(0, 5, 0))
+		check("and neither does one you are standing in", onTop == nil,
+			if onTop then "lit anyway" else "")
+
+		--[[
+			Four arcs, used in turn.
+
+			Three people shooting from three sides should show three arcs,
+			not one that keeps jumping about.
+		]]
+		for _, blade in arcs do
+			blade._props.Visible = false
+		end
+		Hud.ShowHurtFrom(Vector3.new(0, 5, -200))
+		Hud.ShowHurtFrom(Vector3.new(200, 5, 0))
+		Hud.ShowHurtFrom(Vector3.new(-200, 5, 0))
+		local lit = 0
+		for _, blade in arcs do
+			if blade._props.Visible then
+				lit += 1
+			end
+		end
+		check("three attackers light three arcs", lit == 3, string.format("%d lit", lit))
+	end
+end
+
+DUMP("")
 DUMP("Pickups spin on the client that is looking at them:")
 do
 	--[[

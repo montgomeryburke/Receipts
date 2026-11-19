@@ -911,8 +911,15 @@ function WeaponService.Start()
 		handleFire(player, direction)
 	end)
 
-	Remotes.Event("SetScoped").OnServerEvent:Connect(function(player, on)
-		VehicleService.SetScoped(player, on == true)
+	Remotes.Event("SetScoped").OnServerEvent:Connect(function(player, magnification)
+		-- A number now, not a flag: the slowdown is proportionate to how far
+		-- in you are. Anything that is not a sane number reads as hipfire,
+		-- because a client is not to be trusted with a divisor.
+		local zoom = if type(magnification) == "number" then magnification else 1
+		if zoom ~= zoom or zoom == math.huge then
+			zoom = 1
+		end
+		VehicleService.SetScoped(player, math.clamp(zoom, 1, 100))
 	end)
 
 	Remotes.Event("ThrowGrenade").OnServerEvent:Connect(function(player, direction)

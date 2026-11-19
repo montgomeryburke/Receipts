@@ -13,6 +13,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
 local Signal = require(Shared:WaitForChild("Signal"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
@@ -45,7 +46,8 @@ function DamageService.ApplyDamage(
 	victim: Player,
 	amount: number,
 	attacker: Player?,
-	cause: string?
+	cause: string?,
+	from: Vector3?
 ): boolean
 	if not (amount > 0) or amount == math.huge then
 		return false
@@ -92,6 +94,33 @@ function DamageService.ApplyDamage(
 
 	if remaining > 0 then
 		humanoid:TakeDamage(remaining)
+	end
+
+	--[[
+		Tell them which way it came from.
+
+		Here rather than at each of the dozens of call sites, because this is
+		already the one place anybody loses health -- the same reason the
+		shield and spawn-protection rules live here. A hit with no source at
+		all (a fall, standing in a fire, a zombie with no Player behind it)
+		sends nothing, and the HUD draws nothing: an arrow pointing nowhere
+		is worse than no arrow.
+
+		`from` wins when a caller has something better than the attacker's
+		own position -- an explosion knows where it went off, and that is
+		where you want to be told to look, not at whoever threw it.
+	]]
+	local source = from
+	if not source and attacker then
+		local attackerCharacter = attacker.Character
+		local attackerRoot = attackerCharacter
+			and attackerCharacter:FindFirstChild("HumanoidRootPart")
+		if attackerRoot and attackerRoot:IsA("BasePart") then
+			source = attackerRoot.Position
+		end
+	end
+	if source then
+		Remotes.Event("Hurt"):FireClient(victim, source)
 	end
 
 	PlayerState.Changed.Fire(victim)
@@ -199,7 +228,11 @@ function DamageService.Explode(
 			local distance = (root.Position - position).Magnitude
 			if distance <= radius then
 				local falloff = 1 - (distance / radius)
-				DamageService.ApplyDamage(player, maxDamage * falloff, attacker, damageCause)
+				-- The blast, not whoever threw it: that is where the player
+				-- needs to look.
+				DamageService.ApplyDamage(
+					player, maxDamage * falloff, attacker, damageCause, position
+				)
 			end
 		end
 	end
