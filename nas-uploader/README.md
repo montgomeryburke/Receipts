@@ -47,6 +47,20 @@ and password are built into `config.js`.
 **Nothing is ever installed on the offsite computer.** It only needs Chrome and this extension. Everything
 below happens on the HP at home.
 
+**The quick way: one line in the Proxmox shell** (web interface → pve → Shell) does all of it:
+
+```
+bash <(curl -fsSL https://raw.githubusercontent.com/montgomeryburke/Receipts/claude/friendly-pasteur-uixwht/nas-uploader/server/hp-bootstrap.sh)
+```
+
+It sets up the NAS container (101 unless `--nas-ct`): WebDAV through Tailscale Funnel, the OCR job, and commands
+from the assistant. If a container named like "llm" or "ollama" has Ollama, it also makes Ollama listen on the
+network with a 16k context, pulls `qwen2.5:7b` (`--model` to change it), and connects it at `<NAS address>/.llm/`.
+It ends by printing what to paste into the extension, plus a **command login** (`commander` + key). That login can
+only run commands in the NAS container (as the limited user `nas-runner`, logged), never open files over WebDAV,
+so you can hand it to Claude to do HP jobs for you. `--dry-run` shows what it would do; sections 1a–1b below are the
+same steps by hand.
+
 ### 1a. Add the drive for the mirror (Proxmox web interface)
 
 1. Fit the new drive in the HP and start it up.
@@ -567,6 +581,7 @@ control (page, browser agent, files, commands on the HP through the real endpoin
 above. It uses mock Claude and
 Gemini servers, so no keys are needed: `node tests/assistant-e2e.cjs` with the WebDAV test servers running.
 
+`tests/test-hp-bootstrap.sh` dry-runs the one-line HP setup against a stand-in for Proxmox's `pct`;
 `tests/test-ocr-index.py` checks the HP's OCR/full-text job on a throwaway folder (symbolic links, Word headers,
 Excel inline text, zip bombs); `tests/test-setup-script.sh` runs the setup script for real in a throwaway container
 (`CI_OK_TO_MODIFY_SYSTEM=1`), including commands on the HP.

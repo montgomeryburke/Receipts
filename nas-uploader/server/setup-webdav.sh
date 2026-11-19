@@ -470,7 +470,7 @@ $LLM_SSL
         AuthName "NAS Uploader"
         AuthBasicProvider file
         AuthUserFile "$HTPASSWD"
-        Require valid-user
+        Require user $WEB_USER
         RequestHeader unset Authorization
         ProxyPass "${LLM_URL%/}/" timeout=600
         ProxyPassReverse "${LLM_URL%/}/"
@@ -487,6 +487,7 @@ CMD_KEY_FILE=/etc/nas-uploader-command-key
 [[ -z "$COMMANDS" && -f "$STATE_DIR/commands" ]] && COMMANDS=1
 if [[ "$COMMANDS" == "0" ]]; then
   rm -f "$STATE_DIR/commands" "$CMD_KEY_FILE" /etc/sudoers.d/nas-uploader-commands "$RUN_DIR/cgi/run.cgi"
+  [[ -f "$HTPASSWD" ]] && htpasswd -D "$HTPASSWD" commander >/dev/null 2>&1 || true
   ok "Commands from Project Assistant are off"
 elif [[ "$COMMANDS" == "1" ]]; then
   command -v sudo >/dev/null || apt-get install -y -qq sudo >/dev/null
@@ -612,7 +613,9 @@ def main():
     given = os.environ.get('HTTP_X_COMMAND_KEY', '')
     who = os.environ.get('REMOTE_USER', '')
     ip = os.environ.get('HTTP_X_FORWARDED_FOR') or os.environ.get('REMOTE_ADDR', '')
-    if not key or not hmac.compare_digest(given.encode(), key.encode()):
+    # The command login ("commander") was already checked by Apache: its password IS the command key.
+    # Anyone else (the NAS user) also needs the key in the X-Command-Key header.
+    if who != 'commander' and (not key or not hmac.compare_digest(given.encode(), key.encode())):
         log({'at': time.strftime('%Y-%m-%dT%H:%M:%S'), 'user': who, 'ip': ip, 'refused': 'wrong command key'})
         return reply('403 Forbidden', {'error': 'wrong command key'})
     try:
@@ -660,6 +663,9 @@ PYEOF
   [[ -s "$CMD_KEY_FILE" ]] || { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$CMD_KEY_FILE"; }
   chown "root:nas-secrets" "$CMD_KEY_FILE"; chmod 640 "$CMD_KEY_FILE"
   CMD_KEY="$(cat "$CMD_KEY_FILE")"
+  # The command login: user "commander", password = the command key. It can only reach /.run (see the site below).
+  [[ "$WEB_USER" != "commander" ]] || die "The NAS username can't be \"commander\" (that name is the command login)."
+  htpasswd -iB "$HTPASSWD" commander <<<"$CMD_KEY" >/dev/null 2>&1
   touch /var/log/nas-uploader-commands.log; chown "$RUN_USER:$RUN_GROUP" /var/log/nas-uploader-commands.log; chmod 640 /var/log/nas-uploader-commands.log
   printf '%s ALL=(nas-runner) NOPASSWD: %s\n' "$RUN_USER" "$RUN_DIR/run-command" > /etc/sudoers.d/nas-uploader-commands.tmp
   chmod 440 /etc/sudoers.d/nas-uploader-commands.tmp
@@ -679,7 +685,8 @@ PYEOF
         AuthName "NAS Uploader"
         AuthBasicProvider file
         AuthUserFile "$HTPASSWD"
-        Require valid-user
+        # The NAS user (with the X-Command-Key header), or the command login "commander" (its password is the key).
+        Require user $WEB_USER commander
         SetEnv NAS_RUN_COMMAND "$RUN_DIR/run-command"
         SetEnv NAS_COMMAND_KEY_FILE "$CMD_KEY_FILE"
         SetEnv NAS_RUNNER_HOME "$FOLDER"
@@ -706,7 +713,8 @@ COMMON=$(cat <<EOF
         AuthName "NAS Uploader"
         AuthBasicProvider file
         AuthUserFile "$HTPASSWD"
-        Require valid-user
+        # Only the NAS user: the command login (commander) can never read or change files over WebDAV.
+        Require user $WEB_USER
         # Never run anything that gets uploaded.
         <IfModule mod_mime.c>
             RemoveHandler .php .phtml .cgi .pl .py .sh
@@ -957,6 +965,8 @@ fi
   if [[ -n "$CMD_KEY" ]]; then
     echo
     echo "Commands on this container (Project Assistant: Settings, Run on the HP): command key $CMD_KEY"
+    echo "Command login (for Claude to do HP jobs for you; it can only run commands, not open files over WebDAV):"
+    echo "  address ${PUBLIC_URL}.run   user: commander   password: $CMD_KEY"
   fi
 } > "$SUMMARY"
 chmod 600 "$SUMMARY"

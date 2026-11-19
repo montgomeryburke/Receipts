@@ -46,7 +46,9 @@ def main():
     given = os.environ.get('HTTP_X_COMMAND_KEY', '')
     who = os.environ.get('REMOTE_USER', '')
     ip = os.environ.get('HTTP_X_FORWARDED_FOR') or os.environ.get('REMOTE_ADDR', '')
-    if not key or not hmac.compare_digest(given.encode(), key.encode()):
+    # The command login ("commander") was already checked by Apache: its password IS the command key.
+    # Anyone else (the NAS user) also needs the key in the X-Command-Key header.
+    if who != 'commander' and (not key or not hmac.compare_digest(given.encode(), key.encode())):
         log({'at': time.strftime('%Y-%m-%dT%H:%M:%S'), 'user': who, 'ip': ip, 'refused': 'wrong command key'})
         return reply('403 Forbidden', {'error': 'wrong command key'})
     try:

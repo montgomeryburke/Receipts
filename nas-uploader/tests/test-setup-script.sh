@@ -214,10 +214,15 @@ check "commands: the key file is not readable by everyone" [ "$(stat -c %a /etc/
 check "commands: nas-runner can't read the command key" bash -c "! runuser -u nas-runner -- cat /etc/nas-uploader-command-key >/dev/null 2>&1"
 check "commands: nas-runner can't read the login file" bash -c "! runuser -u nas-runner -- cat /etc/apache2/nas-uploader.htpasswd >/dev/null 2>&1"
 check "commands: a folder outside the share is refused (400)" [ "$(run_cmd "$KEY" '{"cmd":"pwd","cwd":"/etc"}' | tail -1)" = 400 ]
+check "commands: the command login runs commands (no header needed)" bash -c "curl -sk -X POST -u 'commander:$KEY' --data '{\"cmd\":\"whoami\"}' https://127.0.0.1:18490/.run | grep -q '\"stdout\": \"nas-runner'"
+check "commands: the command login can't open files over WebDAV" [ "$(curl -sk -o /dev/null -w '%{http_code}' -X PROPFIND -H 'Depth: 0' -u "commander:$KEY" https://127.0.0.1:18490/)" = 401 ]
+check "commands: the NAS login still opens files" [ "$(propfind https://127.0.0.1:18490/)" = 207 ]
+check "commands: the command login needs the right password" [ "$(curl -sk -o /dev/null -w '%{http_code}' -X POST -u 'commander:wrong' --data '{\"cmd\":\"whoami\"}' https://127.0.0.1:18490/.run)" = 401 ]
 check "commands: a folder inside the share is used" grep -q '"cwd": "/srv/test-media/Movies"' <<<"$(run_cmd "$KEY" '{"cmd":"pwd","cwd":"/srv/test-media/Movies"}')"
 out="$("$SCRIPT" --yes --access local --port 18490 --password "$PASS" 2>&1)"
 check "commands: remembered on a later run" [ "$(run_cmd "$KEY" '{"cmd":"echo still"}' | tail -1)" = 200 ]
 out="$("$SCRIPT" --yes --access local --port 18490 --password "$PASS" --disable-commands 2>&1)"
+check "commands: --disable-commands removes the command login" bash -c "[ \"\$(curl -sk -o /dev/null -w '%{http_code}' -X POST -u 'commander:$KEY' --data '{}' https://127.0.0.1:18490/.run)\" != 200 ] && ! grep -q '^commander:' /etc/apache2/nas-uploader.htpasswd"
 check "commands: --disable-commands switches them off" bash -c "[ ! -e /etc/sudoers.d/nas-uploader-commands ] && [ \"\$(curl -sk -o /dev/null -w '%{http_code}' -X POST -u 'uploader:$PASS' -H 'X-Command-Key: $KEY' --data '{\"cmd\":\"whoami\"}' https://127.0.0.1:18490/.run)\" != 200 ]"
 
 echo "• folder owned by 'nobody' (unprivileged container, unmapped owner): explains the Proxmox fix"
