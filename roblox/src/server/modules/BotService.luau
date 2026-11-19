@@ -48,6 +48,12 @@ export type Bot = {
 	dead: boolean,
 	-- Where the brain currently wants to be.
 	goal: Vector3?,
+	-- Where a goalie belongs. He tracks sideways from here and never
+	-- leaves his line, which is what makes him a goalie rather than a
+	-- fifth skater. Also a dummy's post, which it wanders around.
+	home: Vector3?,
+	-- When a dummy next picks somewhere new to stand.
+	nextWanderAt: number?,
 	-- Simple combat: bots shoot back.
 	nextShotAt: number,
 	homeAt: Vector3,
@@ -75,7 +81,12 @@ end
 	round obstacles, climb the stairs, fall off things and ragdoll when they
 	die, all for free.
 ]]
-local function buildBody(name: string, team: number, position: Vector3): (Model, Humanoid, BasePart)
+local function buildBody(
+	name: string,
+	team: number,
+	position: Vector3,
+	jersey: number?
+): (Model, Humanoid, BasePart)
 	-- Config.Teams stores a BrickColor, which carries the Color3 in .Color.
 	local brick = Config.Teams[team] and Config.Teams[team].Color
 	local colour = if brick then brick.Color else Color3.fromRGB(180, 180, 190)
@@ -114,6 +125,33 @@ local function buildBody(name: string, team: number, position: Vector3): (Model,
 		Parent = model,
 	})
 	Util.Weld(torso, head)
+
+	--[[
+		A number on the back, for the ones that have one.
+
+		Only the goalie does. A squad of identically named CPUs with numbers
+		would be a wall of noise; one numbered player among them reads as
+		somebody specific, which is the entire point of giving him a number.
+	]]
+	if jersey then
+		local plate = Instance.new("BillboardGui")
+		plate.Name = "Jersey"
+		plate.Size = UDim2.fromOffset(60, 60)
+		plate.StudsOffsetWorldSpace = Vector3.new(0, 0.2, 0.9)
+		plate.AlwaysOnTop = false
+		plate.MaxDistance = 120
+		plate.Parent = torso
+
+		local number = Instance.new("TextLabel")
+		number.Size = UDim2.fromScale(1, 1)
+		number.BackgroundTransparency = 1
+		number.Font = Enum.Font.GothamBlack
+		number.TextScaled = true
+		number.Text = tostring(jersey)
+		number.TextColor3 = Color3.fromRGB(255, 255, 255)
+		number.TextStrokeTransparency = 0.2
+		number.Parent = plate
+	end
 
 	for _, side in { -1, 1 } do
 		local arm = Util.Part({
@@ -170,9 +208,17 @@ local function buildBody(name: string, team: number, position: Vector3): (Model,
 end
 
 --[[ Put a bot on the field. ]]
-function BotService.Spawn(venue: string, team: number, role: string, position: Vector3): Bot
-	local name = botName()
-	local model, humanoid, root = buildBody(name, team, position)
+function BotService.Spawn(
+	venue: string,
+	team: number,
+	role: string,
+	position: Vector3,
+	named: string?,
+	jersey: number?
+): Bot
+	-- A named bot keeps its name; everyone else gets the next off the list.
+	local name = named or botName()
+	local model, humanoid, root = buildBody(name, team, position, jersey)
 
 	model:SetAttribute("Bot", true)
 	model:SetAttribute("BotTeam", team)
@@ -185,6 +231,8 @@ function BotService.Spawn(venue: string, team: number, role: string, position: V
 		team = team,
 		venue = venue,
 		role = role,
+		home = if role == "goalie" then position + Vector3.new(0, 3, 0) else nil,
+		nextWanderAt = 0,
 		health = Config.Bots.Health,
 		maxHealth = Config.Bots.Health,
 		dead = false,
@@ -316,6 +364,16 @@ end
 -- =================================================================== BRAINS ==
 
 --[[
+	Where the puck is, if there is one.
+
+	Set by HockeyService each time the puck moves, rather than BotService
+	reaching into the rink. A goalie needs exactly one fact about hockey and
+	this is it: anything more and this module would have to know what a
+	face-off is.
+]]
+BotService.PuckPosition = nil :: Vector3?
+
+--[[
 	Walk somewhere, using the Humanoid's own pathing.
 
 	MoveTo rather than setting a velocity: it steps up kerbs, round walls and
@@ -325,6 +383,29 @@ function BotService.WalkTo(bot: Bot, goal: Vector3)
 	bot.goal = goal
 	if not bot.dead and bot.humanoid.Parent then
 		bot.humanoid:MoveTo(goal)
+	end
+end
+
+--[[
+	A handful of wandering targets around a spot.
+
+	Team 0 on purpose: they are nobody's side, so friendly fire never
+	refuses a shot at one and the aim assist does not treat them as allies.
+	They belong to a pseudo-venue so they can be cleared with everything
+	else at the end of a round.
+]]
+function BotService.SpawnDummies(centre: Vector3, count: number?)
+	local wanted = count or Config.Dummies.Count
+	for index = 1, wanted do
+		local angle = (index / wanted) * math.pi * 2
+		local at = centre
+			+ Vector3.new(
+				math.cos(angle) * Config.Dummies.Radius * 0.6,
+				0,
+				math.sin(angle) * Config.Dummies.Radius * 0.6
+			)
+		local bot = BotService.Spawn("dummies", 0, "dummy", at)
+		bot.home = centre
 	end
 end
 
@@ -379,6 +460,64 @@ local function step()
 			continue
 		end
 
+		--[[
+			A dummy wanders near its post.
+
+			A stationary target teaches you nothing about leading a shot,
+			which is the one skill a long scope asks for -- so they drift,
+			slowly, and pick a new spot every few seconds.
+		]]
+		if bot.role == "dummy" then
+			local home = bot.home
+			if home and now >= (bot.nextWanderAt or 0) then
+				bot.nextWanderAt = now + Config.Dummies.WanderSeconds
+				local angle = math.random() * math.pi * 2
+				local reach = math.random() * Config.Dummies.Radius
+				BotService.WalkTo(
+					bot,
+					home + Vector3.new(math.cos(angle) * reach, 0, math.sin(angle) * reach)
+				)
+			end
+		end
+
+		--[[
+			A goalie does not walk to a goal, he slides along his line.
+
+			Handled before the walking because it is not walking: MoveTo
+			would have him leave the crease to meet the puck, which is the
+			one thing a goalie must not do. He tracks sideways between his
+			posts and stays on his line, so beating him means picking a
+			corner rather than waiting for him to wander off.
+		]]
+		if bot.role == "goalie" then
+			local home = bot.home
+			if home then
+				local puck = BotService.PuckPosition
+				local target = home
+				if puck then
+					local across = math.clamp(
+						puck.X - home.X,
+						-Config.Goalie.SideToSide,
+						Config.Goalie.SideToSide
+					)
+					target = Vector3.new(home.X + across, home.Y, home.Z)
+				end
+
+				-- Moved by hand rather than by MoveTo, because the whole
+				-- point is that he does not path.
+				local here = bot.root.Position
+				local step = target - here
+				if step.Magnitude > 0.2 then
+					local travel = math.min(
+						step.Magnitude,
+						Config.Goalie.TrackSpeed * Config.Bots.ThinkInterval
+					)
+					bot.root.CFrame = CFrame.new(here + step.Unit * travel)
+				end
+			end
+			continue
+		end
+
 		-- Keep walking toward whatever the venue last asked for. The venue
 		-- brains set the goal; this just makes sure a bot that has stopped
 		-- short of it starts again.
@@ -397,6 +536,11 @@ function BotService.Start()
 end
 
 --[[ One tick, for tests. ]]
+--[[ Every bot alive right now, for tests. ]]
+function BotService.AllForTests(): { Bot }
+	return bots
+end
+
 function BotService.StepForTests()
 	lastStep = 0
 	step()

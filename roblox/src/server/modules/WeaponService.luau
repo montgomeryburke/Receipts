@@ -25,6 +25,7 @@ local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 local FireService = require(script.Parent:WaitForChild("FireService"))
+local MedalService = require(script.Parent:WaitForChild("MedalService"))
 local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local WeaponService = {}
@@ -259,6 +260,20 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 					headshot = headshot,
 					position = result.Position,
 				})
+
+				--[[
+					The medal is for a headshot KILL, not a headshot.
+
+					Awarded here rather than from the death handler because
+					this is the only place that knows WHERE the shot landed
+					-- by the time a death is reported, the part that was hit
+					is long gone. Checked after the damage, so grazing
+					somebody's head for the last of their shield does not
+					count.
+				]]
+				if headshot and humanoid.Health <= 0 then
+					MedalService.Award(player, "Headshot")
+				end
 			end
 			return
 		end

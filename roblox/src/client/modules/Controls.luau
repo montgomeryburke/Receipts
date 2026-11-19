@@ -354,6 +354,18 @@ local function tryFire()
 	Feel.Kick(spec.Recoil)
 	Sound.Flat(spec.SoundName, 0.65)
 
+	--[[
+		A rifle crack on top of the boom.
+
+		What makes a high-powered rifle sound high-powered is the snap, not
+		the bass -- the bass alone reads as a thud. Layered rather than
+		replaced, because the boom is what carries it across the map and the
+		crack is what sells it in your hands.
+	]]
+	if spec.Category == "Sniper" then
+		Sound.Flat("SniperCrack", 0.55)
+	end
+
 	local muzzle = origin + direction * 2
 	-- Trace it locally too, so the tracer stops at the wall rather than
 	-- carrying on through it. This raycast decides nothing: the server does

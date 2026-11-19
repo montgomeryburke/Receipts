@@ -539,6 +539,30 @@ Config.Wildlife = {
 	Pitch is a range: every play picks a random value inside it, which is what
 	stops a machine gun sounding like a metronome.
 ]]
+--[[
+	Medals: the moments worth announcing.
+
+	Halo's medals worked because each one marked something you DID rather
+	than something that happened to you -- a headshot is a decision, a
+	chain reaction is a plan, a knockout is a fight you won. So there is no
+	medal for taking damage, dying well, or surviving; those are not
+	achievements, they are weather.
+
+	Only moments that EXIST are listed. A medal for bowling a strike would
+	be a promise the game cannot keep yet, and an unearnable medal is worse
+	than a missing one -- it sends players looking for something that is not
+	there. Strike and the low-blow sting arrive with the lanes and the kick.
+
+	`points` is awarded through the one scoring path, so a medal moves the
+	team score like everything else.
+]]
+Config.Medals = {
+	Headshot = { name = "HEADSHOT", points = 15, sound = "Headshot" },
+	Knockout = { name = "KNOCKOUT", points = 40, sound = "MeleeHit" },
+	AirborneKill = { name = "AIRBORNE KILL", points = 35, sound = "Medal" },
+	ChainReaction = { name = "CHAIN REACTION", points = 50, sound = "ExplosionBig" },
+}
+
 Config.Sounds = {
 	-- ----------------------------------------------------------- gunfire
 	ShotLight = { Asset = "rbxasset://sounds/clickfast.wav", Volume = 0.45, Pitch = { 1.6, 2.0 } },
@@ -572,6 +596,30 @@ Config.Sounds = {
 	RoundStart = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.9, 0.9 } },
 	RoundEnd = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.6, 0.6 } },
 	Medal = { Asset = "rbxasset://sounds/electronicpingshort.wav", Volume = 0.9, Pitch = { 1.7, 1.7 } },
+
+	-- ------------------------------------------------------- signature
+	--[[
+		The noises that belong to one thing and nothing else.
+
+		All of these are built from the same handful of rbxasset files as
+		everything above -- pitched, and in two cases layered. That is a real
+		constraint, not laziness: a numeric asset ID can fail to load in an
+		unpublished place or after a moderation sweep, and a goal horn that
+		sometimes does not exist is worse than one made of a bass note.
+
+		A horn is a long low note. A crowd is many voices at once, which is
+		why CrowdVoice is pitched wide and played several times over rather
+		than being one file -- layering is how you make a crowd out of a
+		groan.
+	]]
+	GoalHorn = { Asset = "rbxasset://sounds/bass.wav", Volume = 1, Pitch = { 0.32, 0.34 } },
+	CrowdVoice = { Asset = "rbxasset://sounds/uuhhh.wav", Volume = 0.5, Pitch = { 0.8, 1.9 } },
+	-- A rifle crack is the snap, not the boom. The boom is ShotSniper; this
+	-- is the layer on top that makes it read as a high-powered rifle.
+	SniperCrack = { Asset = "rbxasset://sounds/snap.wav", Volume = 0.8, Pitch = { 2.2, 2.4 } },
+	-- The turret winding up before it fires, and the rattle while it does.
+	TurretSpool = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 0.7, Pitch = { 0.5, 0.6 } },
+	TurretRattle = { Asset = "rbxasset://sounds/clickfast.wav", Volume = 0.5, Pitch = { 0.9, 1.1 } },
 
 	-- --------------------------------------------------------- the world
 	EngineLoop = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.35, Pitch = { 0.5, 0.5 }, Looped = true },
@@ -711,10 +759,65 @@ Config.Arcade = {
 	BeaconHeight = 420,
 	-- Past this the name is clutter; the colour alone still reads.
 	BeaconNameDistance = 900,
+	--[[
+		How long you can stand in an empty venue before it fills itself.
+
+		Short, because the failure it fixes is standing on an empty sheet of
+		ice wondering whether the game is broken -- and that judgement is
+		made in a couple of seconds, not a minute. Long enough that walking
+		across a corner of the rink on your way somewhere does not summon a
+		hockey team.
+	]]
+	SoloFillSeconds = 5,
 	-- How close you have to be for a venue to offer you a game.
 	OfferRadius = 150,
 	-- And how long before it asks again, if you said no or ignored it.
 	ReofferSeconds = 45,
+}
+
+--[[
+	The goalie.
+
+	Named, numbered and stationary, which is three things no other bot is.
+	A goalie that chases the puck is not a goalie, it is a fifth skater --
+	so this one holds its crease and only shuffles sideways to stay between
+	the puck and the net. That is both the correct behaviour and the cheaper
+	one, since it never needs to path anywhere.
+
+	Both nets get a Milo. Two of him, one at each end, which is funnier than
+	picking a side.
+]]
+Config.Goalie = {
+	Name = "Milo",
+	Number = 29,
+	-- How far off his line he will drift to track the puck. Small on
+	-- purpose: a goalie who wanders is a goalie who gets scored on.
+	SideToSide = 11,
+	-- How quickly he tracks across. Fast enough to cover a pass, slow
+	-- enough that a hard shot to the far corner beats him.
+	TrackSpeed = 14,
+}
+
+--[[
+	Target dummies.
+
+	The point of these is that every toy in this game needs something to try
+	it on. A sniper with a 50x scope, a gas trail, a land mine and a winch
+	are all things you want to TEST, and testing them on the only other
+	player in the server is how you lose the only other player in the
+	server. So there are a few wanderers by the carnival, where the shooting
+	gallery already is, who come back when you kill them.
+
+	They wander rather than stand still because a stationary target teaches
+	you nothing about leading a shot, which is the whole skill a long scope
+	asks for.
+]]
+Config.Dummies = {
+	Count = 4,
+	-- How far from their post they will stray, and how often they pick a
+	-- new spot. Slow enough to hit, moving enough to have to aim.
+	Radius = 46,
+	WanderSeconds = 4,
 }
 
 Config.Bots = {
@@ -1358,6 +1461,7 @@ export type ConfigType = {
 	WeaponsAlwaysAvailable: boolean,
 	Movement: { JumpPower: number, HeadshotMultiplier: number, ScopedSpeedFactor: number },
 	Help: { { question: string, answer: string, keywords: { string } } },
+	Medals: { [string]: { name: string, points: number, sound: string } },
 	Fire: {
 		CanFuel: number, FuelPerPuddle: number, PourInterval: number,
 		PuddleSize: number, PuddleLifetime: number,
@@ -1391,7 +1495,10 @@ export type ConfigType = {
 	Arcade: {
 		OfferRadius: number, ReofferSeconds: number,
 		BeaconHeight: number, BeaconNameDistance: number,
+		SoloFillSeconds: number,
 	},
+	Goalie: { Name: string, Number: number, SideToSide: number, TrackSpeed: number },
+	Dummies: { Count: number, Radius: number, WanderSeconds: number },
 	Bots: {
 		Health: number,
 		WalkSpeed: number,

@@ -39,6 +39,7 @@ local Util = require(Shared:WaitForChild("Util"))
 
 local BotService = require(script.Parent:WaitForChild("BotService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
+local MedalService = require(script.Parent:WaitForChild("MedalService"))
 
 local FireService = {}
 
@@ -324,6 +325,18 @@ function FireService.Detonate(can: Can, by: Player?, depth: number?)
 				FireService.Ignite(puddle, by)
 			end
 		end
+	end
+
+	--[[
+		A chain reaction is a PLAN, so it is worth announcing.
+
+		Awarded on the second can rather than the first: one can going off
+		is a shot, two is a chain. The medal's own repeat guard collapses a
+		six-can cluster into one award, which is right -- a chain reaction
+		that sets off six cans is one chain reaction, not five.
+	]]
+	if (depth or 0) >= 1 then
+		MedalService.Broadcast(by, "ChainReaction")
 	end
 
 	-- And so does the next can along, up to a depth limit so a cluster

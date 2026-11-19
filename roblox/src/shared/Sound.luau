@@ -84,6 +84,34 @@ function Sound.At(name: string, position: Vector3, volumeScale: number?)
 end
 
 --[[
+	The same noise several times at once, at spread pitches.
+
+	This is how you make a crowd out of a groan, or a clatter out of one
+	collide: a single file played once is one voice, and several of the same
+	file at different pitches is a mass of them. The alternative was a
+	numeric asset ID for a real crowd recording, which can fail to load in
+	an unpublished place -- and a goal horn that sometimes does not exist is
+	worse than one made of a bass note.
+
+	The voices are staggered by a few milliseconds as well as detuned,
+	because perfectly simultaneous copies phase into one louder copy rather
+	than into a crowd.
+]]
+function Sound.Chorus(name: string, position: Vector3, voices: number, volumeScale: number?)
+	local count = math.clamp(voices, 1, 8)
+	for index = 1, count do
+		local delay = (index - 1) * 0.035
+		if delay <= 0 then
+			Sound.At(name, position, volumeScale)
+		else
+			task.delay(delay, function()
+				Sound.At(name, position, volumeScale)
+			end)
+		end
+	end
+end
+
+--[[
 	A noise in one player's ears, with no position at all.
 
 	Client only — on the server there is nobody to hear it.

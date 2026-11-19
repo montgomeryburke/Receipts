@@ -27,6 +27,7 @@ local FireService = require(script.Parent:WaitForChild("FireService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local EffectService = require(script.Parent:WaitForChild("EffectService"))
+local MedalService = require(script.Parent:WaitForChild("MedalService"))
 local ScoreboardService = require(script.Parent:WaitForChild("ScoreboardService"))
 local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 local ResortService = require(script.Parent:WaitForChild("ResortService"))
@@ -514,6 +515,28 @@ function MatchService.Start()
 			-- twice for the round and once for the player.
 			PlayerState.AwardPoints(killer, base, cause)
 			Remotes.Event("PlaySound"):FireClient(killer, "KillConfirm")
+
+			--[[
+				Shot somebody while off the ground.
+
+				Checked here rather than in the weapon code because it is a
+				fact about the KILLER at the moment of the kill, and this is
+				where a kill is known about. FloorMaterial is the engine's
+				own answer to "are they standing on anything", which beats
+				guessing from vertical velocity -- that reads as airborne at
+				the top of a ramp and on a lift.
+
+				Hang gliding over the map is the main way this happens, and
+				it is exactly the thing worth rewarding about hang gliding
+				over the map.
+			]]
+			local killerCharacter = killer.Character
+			local killerHumanoid = killerCharacter
+				and killerCharacter:FindFirstChildOfClass("Humanoid")
+			if killerHumanoid and killerHumanoid.FloorMaterial == Enum.Material.Air then
+				MedalService.Award(killer, "AirborneKill")
+			end
+
 			awardMedals(killer)
 		end
 	end)

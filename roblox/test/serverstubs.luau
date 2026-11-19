@@ -15,20 +15,23 @@ FIRED_TO = function(remoteName)
 	return out
 end
 DELAYED = {}
+--[[
+	Run every thread that task.spawn captured.
+
+	A copy of the FIRED / FIRED_TO definitions used to sit INSIDE this
+	function, pasted in by accident. Both are already defined above, so the
+	only thing the duplicate did was reset FIRED to {} on every call --
+	which silently threw away the record of everything the server had sent.
+
+	Any test that fired a remote, flushed the spawned threads and then asked
+	what the player was told saw an empty list, and read as a feature that
+	had sent nothing. The evidence was being destroyed by the act of
+	looking at it.
+]]
 RUN_SPAWNED = function()
 	local pending = SPAWNED
 	SPAWNED = {}
 	WAIT_BUDGET = 20000
--- Everything the server sends to a client, so a test can assert on what the
--- player would actually be told rather than only on internal state.
-FIRED = {}
-FIRED_TO = function(remoteName)
-	local out = {}
-	for _, call in FIRED do
-		if call.remote == remoteName then table.insert(out, call) end
-	end
-	return out
-end
 	for _, item in pending do
 		local ok, err = pcall(item.fn, table.unpack(item.args, 1, item.args.n))
 		if not ok then

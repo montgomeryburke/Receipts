@@ -543,6 +543,228 @@ end
 -- prompt if you walk into one. And a venue is filled out with bots, because
 -- an empty rink is worse than no rink.
 DUMP("")
+DUMP("Nothing stalls when you are alone:")
+do
+	--[[
+		Standing in an empty venue on your own.
+
+		Joining a game already fills it out with bots. The gap was walking in
+		WITHOUT joining, which is what people actually do -- a rink looks
+		like a place you can just skate onto. You would stand on an empty
+		sheet of ice with a prompt in the corner and nothing happening, which
+		reads as a broken game rather than an unaccepted invitation.
+	]]
+	--[[
+		Deliberately NOT ArcadeService.Clear() here.
+
+		Clearing wipes the venue REGISTRY, not just the bots -- so doing it
+		mid-suite left every later test seeing two activities instead of
+		four, and the failure surfaced three sections away from its cause.
+		The rink is already registered by this point; only the bots need
+		clearing.
+	]]
+	BotService.Clear(nil)
+	for _, player in { killer, prey } do
+		ArcadeService.Leave(player)
+	end
+
+	-- Put the player on the rink, not in the game.
+	local rinkCentre = ArcadeService.CentreOf("hockey")
+	check("the rink knows where it is", rinkCentre ~= nil, tostring(rinkCentre))
+	local root = killer._props.Character:FindFirstChild("HumanoidRootPart")
+	root._props.CFrame = CFrame.new(rinkCentre or Vector3.new())
+	killer._props.Character:FindFirstChildOfClass("Humanoid")._props.Health = 100
+
+	check("walking in is not joining", ArcadeService.VenueOf(killer) == nil, "")
+
+	-- One sweep: too soon to fill. The wait exists so that crossing a
+	-- corner of the rink on the way somewhere does not summon a team.
+	ArcadeService.SweepForTests()
+	check("it does not fill the instant you arrive",
+		#BotService.AllForTests() == 0,
+		string.format("%d bots", #BotService.AllForTests()))
+
+	-- Still alone a few seconds later: now it fills itself.
+	ADVANCE(Config.Arcade.SoloFillSeconds + 1)
+	ArcadeService.SweepForTests()
+	check("standing there alone fills the game out",
+		#BotService.AllForTests() > 0,
+		string.format("%d bots after %d seconds",
+			#BotService.AllForTests(), Config.Arcade.SoloFillSeconds))
+
+	-- And it still did not drag them into a team they did not ask for.
+	check("without joining them to anything",
+		ArcadeService.VenueOf(killer) == nil,
+		tostring(ArcadeService.VenueOf(killer)))
+
+	--[[
+		Something to test the toys on.
+
+		A 50x scope, a gas trail and a land mine all need a target, and
+		testing them on the only other player in the server is how you lose
+		the only other player in the server.
+	]]
+	BotService.Clear(nil)
+	CarnivalService.Build(1900)
+	local dummies = 0
+	for _, bot in BotService.AllForTests() do
+		if bot.role == "dummy" then
+			dummies += 1
+		end
+	end
+	check("there are targets by the shooting gallery", dummies > 0,
+		string.format("%d dummies", dummies))
+
+	-- They WANDER. A stationary target teaches you nothing about leading a
+	-- shot, which is the one skill a long scope asks for.
+	local wanderer = nil
+	for _, bot in BotService.AllForTests() do
+		if bot.role == "dummy" then
+			wanderer = bot
+			break
+		end
+	end
+	if wanderer then
+		local first = wanderer.goal
+		ADVANCE(Config.Dummies.WanderSeconds + 0.1)
+		BotService.StepForTests()
+		local second = wanderer.goal
+		check("and they move about rather than standing still",
+			second ~= nil and (first == nil or (second - first).Magnitude > 0.01),
+			if second then string.format("%.0f, %.0f", second.X, second.Z) else "no goal")
+
+		check("staying near their post",
+			second ~= nil and (second - wanderer.home).Magnitude
+				<= Config.Dummies.Radius + 0.5,
+			if second then string.format("%.0f studs from post",
+				(second - wanderer.home).Magnitude) else "none")
+
+		-- Nobody's side, so friendly fire never refuses a shot at one.
+		check("a dummy is on nobody's team", wanderer.team == 0,
+			tostring(wanderer.team))
+	end
+end
+
+DUMP("")
+DUMP("Medals and the goalie:")
+do
+	--[[
+		A medal marks something you DID.
+
+		The catalogue deliberately holds no medal for taking damage, dying
+		well or surviving -- those are not achievements, they are weather --
+		and no medal for anything that cannot be earned yet, because an
+		unearnable medal sends players hunting for something that is not
+		there.
+	]]
+	MedalService.ResetForTests()
+	MatchService.SetPhaseForTests("Playing")
+
+	FIRED = {}
+	local pointsBefore = PlayerState.Get(killer).points
+	local gave = MedalService.Award(killer, "Headshot")
+	RUN_SPAWNED()
+	check("a medal is awarded", gave, tostring(gave))
+	check("and reaches the player", #FIRED_TO("Medal") == 1,
+		string.format("%d medals", #FIRED_TO("Medal")))
+	check("with a noise of its own", #FIRED_TO("PlaySound") >= 1,
+		string.format("%d sounds", #FIRED_TO("PlaySound")))
+
+	--[[
+		A medal scores through the one scoring path.
+
+		Which means it moves the team total and appears in the end-of-round
+		breakdown under its own name, rather than being a separate kind of
+		number nobody can account for.
+	]]
+	check("a medal is worth points", PlayerState.Get(killer).points > pointsBefore,
+		string.format("%d -> %d", pointsBefore, PlayerState.Get(killer).points))
+	check("and the breakdown records what for",
+		PlayerState.Get(killer).scoredBy["headshot"] ~= nil,
+		tostring(PlayerState.Get(killer).scoredBy["headshot"]))
+
+	--[[
+		The same medal twice in an instant is one medal.
+
+		A shotgun landing four pellets on a head is one headshot, and a
+		chain reaction that sets off six cans is one chain reaction. Without
+		the guard both would spam the screen and the score.
+	]]
+	FIRED = {}
+	local again = MedalService.Award(killer, "Headshot")
+	check("the same medal does not repeat instantly", not again,
+		string.format("%d medals", #FIRED_TO("Medal")))
+
+	-- After the guard, it can be earned again.
+	ADVANCE(3)
+	check("but can be earned again later", MedalService.Award(killer, "Headshot"), "")
+
+	-- A medal that does not exist is loud rather than silent: an unawarded
+	-- medal is invisible, and that is how a typo survives for months.
+	WARNINGS = {}
+	check("an unknown medal is refused", not MedalService.Award(killer, "NoSuchThing"), "")
+	check("and warns about it", #WARNINGS > 0, string.format("%d warnings", #WARNINGS))
+
+	--[[
+		The goalie: named, numbered, and stays in his net.
+
+		A goalie that chases the puck is a fifth skater. This one tracks
+		sideways between his posts and never leaves his line, so beating him
+		means picking a corner rather than waiting for him to wander off.
+	]]
+	ArcadeService.Staff("hockey")
+	local goalies = {}
+	for _, bot in BotService.AllForTests() do
+		if bot.role == "goalie" then
+			table.insert(goalies, bot)
+		end
+	end
+	check("both nets have a keeper", #goalies == 2, string.format("%d goalies", #goalies))
+
+	if #goalies == 2 then
+		local named = 0
+		local numbered = 0
+		for _, bot in goalies do
+			if bot.name == Config.Goalie.Name then
+				named += 1
+			end
+			local torso = bot.model:FindFirstChild("Torso")
+			local plate = torso and torso:FindFirstChild("Jersey")
+			local label = plate and plate:GetChildren()[1]
+			if label and label._props.Text == tostring(Config.Goalie.Number) then
+				numbered += 1
+			end
+		end
+		check("the keeper is called " .. Config.Goalie.Name, named == 2,
+			string.format("%d of 2 named %s", named, Config.Goalie.Name))
+		check("and wears " .. tostring(Config.Goalie.Number), numbered == 2,
+			string.format("%d of 2 numbered", numbered))
+
+		-- He tracks the puck sideways, but stays on his line.
+		local keeper = goalies[1]
+		local line = keeper.home.Z
+		BotService.PuckPosition = Vector3.new(keeper.home.X + 400, 4, line)
+		for _ = 1, 40 do
+			ADVANCE(Config.Bots.ThinkInterval + 0.01)
+			BotService.StepForTests()
+		end
+		local moved = keeper.root._props.CFrame.Position
+		check("the keeper slides across to cover a shot",
+			math.abs(moved.X - keeper.home.X) > 1,
+			string.format("%.0f studs across", moved.X - keeper.home.X))
+		check("but never further than his posts",
+			math.abs(moved.X - keeper.home.X) <= Config.Goalie.SideToSide + 0.5,
+			string.format("%.1f studs, limit %d",
+				math.abs(moved.X - keeper.home.X), Config.Goalie.SideToSide))
+		check("and never leaves his line",
+			math.abs(moved.Z - line) < 1,
+			string.format("%.1f studs off the line", math.abs(moved.Z - line)))
+
+		BotService.PuckPosition = nil
+	end
+end
+
+DUMP("")
 DUMP("Petrol and fire:")
 do
 	--[[
@@ -881,7 +1103,7 @@ def strip(s):
     return '\n'.join(out)
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
-SERVER = ['PlayerState', 'TeamService', 'BotService', 'ArcadeService', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
+SERVER = ['PlayerState', 'MedalService', 'TeamService', 'BotService', 'ArcadeService', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'FireService', 'ProjectileService', 'WeaponService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',
           'GraphicsService']

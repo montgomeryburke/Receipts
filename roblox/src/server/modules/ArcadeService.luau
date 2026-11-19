@@ -53,6 +53,14 @@ export type VenueInfo = {
 	perTeam: number,
 	-- Does it have sides at all? Bowling does not.
 	teamed: boolean,
+	--[[
+		Where a keeper stands, if this game has nets.
+
+		Declared by the venue rather than worked out here, because knowing
+		where a crease is means knowing what a crease is -- and this module
+		deliberately knows nothing about any particular sport.
+	]]
+	goalieSpots: { Vector3 }?,
 	-- The beacon colour, so each activity is recognisable from a distance
 	-- rather than being one of six identical lights. Optional; venues that
 	-- do not care get one from the palette by registration order.
@@ -70,6 +78,10 @@ local membership: { [Player]: { venue: string, team: number } } = {}
 
 -- Which venues have been filled out with bots.
 local staffed: { [string]: boolean } = {}
+
+-- When each player first turned up inside each venue, for the lone-player
+-- fill below.
+local arrivedAt: { [Player]: { [string]: number } } = {}
 
 --[[
 	Declare a venue.
@@ -90,6 +102,7 @@ function ArcadeService.Clear()
 	table.clear(order)
 	table.clear(membership)
 	table.clear(staffed)
+	table.clear(arrivedAt)
 	for _, beacon in beacons do
 		beacon:Destroy()
 	end
@@ -268,6 +281,25 @@ function ArcadeService.Staff(venueId: string)
 		return
 	end
 
+	--[[
+		A keeper in each net before anything else.
+
+		Both get the same name on purpose. Two of him, one at each end, is
+		funnier than picking a side -- and a goalie is the one bot worth
+		recognising, so he is the one bot with a name and a number.
+	]]
+	for index, spot in info.goalieSpots or {} do
+		local team = if index == 1 then 1 else 2
+		BotService.Spawn(
+			venueId,
+			team,
+			"goalie",
+			spot,
+			Config.Goalie.Name,
+			Config.Goalie.Number
+		)
+	end
+
 	for team = 1, 2 do
 		local wanted = info.perTeam - (humans[team] or 0)
 		for index = 1, math.max(0, wanted) do
@@ -339,6 +371,12 @@ function ArcadeService.Leave(player: Player)
 	Remotes.Event("ArcadeLeft"):FireClient(player, { id = where.venue })
 end
 
+--[[ Where a venue is, for anything that needs to stand in it. ]]
+function ArcadeService.CentreOf(venueId: string): Vector3?
+	local info = venues[venueId]
+	return if info then info.centre else nil
+end
+
 --[[ Which game a player is in, if any. ]]
 function ArcadeService.VenueOf(player: Player): string?
 	local where = membership[player]
@@ -388,12 +426,45 @@ local function sweep()
 			end
 		end
 
-		-- Walked out of everything: drop out of whatever they were in.
+		-- Walked out of everything: drop out of whatever they were in, and
+		-- forget how long they were standing anywhere.
 		if not inside then
 			if membership[player] then
 				ArcadeService.Leave(player)
 			end
+			arrivedAt[player] = nil
 			continue
+		end
+
+		--[[
+			Standing in an empty venue, on your own.
+
+			Joining already fills a game out. The gap was walking in without
+			joining -- which is what people actually do, because the rink
+			looks like a place you can just skate onto. You would stand on
+			an empty sheet of ice with a prompt in the corner and nothing
+			happening, which reads as a broken game rather than as an
+			unaccepted invitation.
+
+			So after a few seconds of being in there alone, the venue staffs
+			itself. Not a join: nobody is dragged into a team they did not
+			ask for, and the prompt is still there. There is just now
+			somebody to play against while they decide.
+		]]
+		local mine = arrivedAt[player]
+		if not mine then
+			mine = {}
+			arrivedAt[player] = mine
+		end
+		if not mine[inside] then
+			mine[inside] = now
+		end
+
+		if not staffed[inside] and now - mine[inside] >= Config.Arcade.SoloFillSeconds then
+			local humans = humanCount(inside)
+			if (humans[1] or 0) + (humans[2] or 0) == 0 then
+				ArcadeService.Staff(inside)
+			end
 		end
 
 		-- Already playing this one, nothing to ask.
@@ -445,6 +516,7 @@ function ArcadeService.Start()
 		local where = membership[player]
 		membership[player] = nil
 		offered[player] = nil
+		arrivedAt[player] = nil
 		if where then
 			ArcadeService.Staff(where.venue)
 		end

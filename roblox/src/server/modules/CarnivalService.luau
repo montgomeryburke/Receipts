@@ -20,6 +20,7 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
+local BotService = require(script.Parent:WaitForChild("BotService"))
 
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
@@ -983,6 +984,17 @@ function CarnivalService.Build(mapSize: number)
 		glow.Shadows = true
 		glow.Parent = bulb
 	end
+
+	--[[
+		A few wanderers to try things on.
+
+		Every toy in this game needs something to test it against -- a 50x
+		scope, a gas trail, a land mine -- and testing them on the only
+		other player in the server is how you lose the only other player in
+		the server. They go here because the shooting gallery is already
+		here, so the place that means "aim at things" has things to aim at.
+	]]
+	BotService.SpawnDummies(origin + Vector3.new(0, 0, 70))
 
 	-- Offered as a sub-game, so "fair games" is something you can pick from
 	-- a menu rather than something you have to stumble across.

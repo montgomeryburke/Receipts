@@ -30,12 +30,14 @@ local Signal = require(Shared:WaitForChild("Signal"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
+local MedalService = require(script.Parent:WaitForChild("MedalService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 -- Required, and it was not. TeamService.IndexOf is called when a goal goes
 -- in, so without this every single goal threw "attempt to index nil" inside
 -- the Heartbeat connection and took the whole hockey step down with it.
 local TeamService = require(script.Parent:WaitForChild("TeamService"))
 local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
+local BotService = require(script.Parent:WaitForChild("BotService"))
 
 local HockeyService = {}
 
@@ -498,6 +500,17 @@ end
 	are knocked down. Welding would make possession absolute, and a puck
 	nobody can take off you is not hockey.
 ]]
+--[[
+	Tell the bots where the puck is.
+
+	One fact, pushed rather than pulled, so BotService never has to know
+	what hockey is -- a goalie needs the puck's position and nothing else.
+]]
+local function publishPuck()
+	local live = puck
+	BotService.PuckPosition = if live and live.Parent then live.Position else nil
+end
+
 local function stepPossession()
 	local live = puck
 	if not live or not live.Parent then
@@ -653,7 +666,18 @@ local function checkGoals()
 			end
 			HockeyService.Goal.Fire(scorer, scoringTeam, points)
 
-			Sound.At("RoundEnd", live.Position, 1.2)
+			--[[
+				The horn, then the crowd.
+
+				In that order and with a gap, because that is the order it
+				happens in a rink: the horn is automatic and the roar is a
+				reaction to it. Firing them together makes one loud noise
+				instead of a goal.
+			]]
+			Sound.At("GoalHorn", live.Position, 1.2)
+			task.delay(0.35, function()
+				Sound.Chorus("CrowdVoice", zone.part.Position, 6, 0.9)
+			end)
 			dropPuck()
 			setPuckOwner(nil)
 			return
@@ -829,6 +853,7 @@ function HockeyService.EndFight(fight: Fight, winner: Player, loser: Player)
 	releaseFighter(loser)
 
 	PlayerState.AwardPoints(winner, Config.Hockey.FightWinPoints, "won the fight")
+	MedalService.Award(winner, "Knockout")
 
 	-- The loser goes down, then serves time. Not killed -- knocked over and
 	-- benched, which is both funnier and leaves them in the game.
@@ -988,6 +1013,12 @@ function HockeyService.Build(mapSize: number)
 		},
 		perTeam = 4,
 		teamed = true,
+		-- In front of each net, a little out from the goal line. Order
+		-- matters: the first is the team-1 end, which is the net at -Z.
+		goalieSpots = {
+			centre + Vector3.new(0, 0, -RINK_LENGTH * 0.42 + 9),
+			centre + Vector3.new(0, 0, RINK_LENGTH * 0.42 - 9),
+		},
 	})
 
 	return { centre = centre, puckHome = puckHome }
@@ -1033,6 +1064,7 @@ function HockeyService.Start()
 	RunService.Heartbeat:Connect(function()
 		checkGoals()
 		stepPossession()
+		publishPuck()
 
 		local now = os.clock()
 		for index = #fights, 1, -1 do
