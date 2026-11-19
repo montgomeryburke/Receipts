@@ -71,6 +71,9 @@ local pickupBlockedUntil: { [Player]: number } = {}
 -- sixty saves a second.
 local nextSaveAt = 0
 local saveCounts: { [string]: number } = {}
+-- When each player began winding up a shot. Server-side, so a client cannot
+-- claim a full slapshot it never waited for.
+local shotStartedAt: { [Player]: number } = {}
 local goalLights: { [number]: BasePart } = {}
 local penaltyBox = Vector3.new()
 
@@ -687,6 +690,28 @@ local function stepPossession()
 end
 
 --[[ Shoot the puck where the shooter is looking. ]]
+--[[
+	Start the wind-up.
+
+	Timed on the SERVER, like the basketball's, so a client cannot claim a
+	full slapshot it never waited for.
+]]
+function HockeyService.StartShot(player: Player)
+	if puckOwner ~= player then
+		return
+	end
+	shotStartedAt[player] = os.clock()
+end
+
+--[[
+	Let go, and shoot it as hard as the wind-up earned.
+
+	It used to leave the stick at one fixed speed with a constant nine studs
+	of lift whatever you did, so a wrist shot and a slapshot were the same
+	shot -- you could not keep it on the ice and you could not deliberately
+	raise it. With Milo making saves the only way past him was picking a
+	corner; pace is meant to be the other way round.
+]]
 function HockeyService.ShootPuck(player: Player, direction: any)
 	if puckOwner ~= player then
 		return
@@ -700,6 +725,15 @@ function HockeyService.ShootPuck(player: Player, direction: any)
 		return
 	end
 
+	local began = shotStartedAt[player]
+	shotStartedAt[player] = nil
+	local held = if began then os.clock() - began else 0
+	local power = math.clamp(
+		held / Config.Hockey.FullChargeSeconds,
+		Config.Hockey.WeakestShot,
+		1
+	)
+
 	setPuckOwner(nil)
 	-- A moment before you can scoop it straight back up.
 	pickupBlockedUntil[player] = os.clock() + 0.6
@@ -708,9 +742,37 @@ function HockeyService.ShootPuck(player: Player, direction: any)
 	if flat.Magnitude < 0.01 then
 		flat = Vector3.new(0, 0, -1)
 	end
-	live.AssemblyLinearVelocity = flat.Unit * Config.Hockey.ShotSpeed + Vector3.new(0, 9, 0)
+
+	--[[
+		Lift falls as power rises, which is the opposite of the basketball.
+
+		A basketball's lift scales WITH the throw to keep the shape of the
+		arc. A puck is not thrown, it is driven: the hard ones stay low and
+		rise late, the floaters are the soft ones. So winding all the way up
+		is also how you keep it on the ice, which makes that a decision
+		rather than something the game does to you.
+	]]
+	local lift = Config.Hockey.SoftShotLift
+		+ (Config.Hockey.HardShotLift - Config.Hockey.SoftShotLift) * power
+
+	live.AssemblyLinearVelocity = flat.Unit * (Config.Hockey.ShotSpeed * power)
+		+ Vector3.new(0, lift, 0)
 	live:SetAttribute("LastTouchUserId", player.UserId)
-	Sound.At("MeleeHit", live.Position, 1.1)
+	-- A slapshot cracks; a wrist shot does not.
+	Sound.At("MeleeHit", live.Position, 0.8 + power * 0.5)
+end
+
+--[[ For tests: how far wound up this player is, as a fraction. ]]
+function HockeyService.ShotChargeForTests(player: Player): number
+	local began = shotStartedAt[player]
+	if not began then
+		return 0
+	end
+	return math.clamp(
+		(os.clock() - began) / Config.Hockey.FullChargeSeconds,
+		Config.Hockey.WeakestShot,
+		1
+	)
 end
 
 --[[ How many a keeper has stopped this round. ]]
@@ -726,6 +788,11 @@ end
 --[[ One pass of the save check, for tests. ]]
 function HockeyService.StepSavesForTests()
 	checkSaves()
+end
+
+--[[ One pass of possession, for tests: picking the puck up and carrying it. ]]
+function HockeyService.StepPossessionForTests()
+	stepPossession()
 end
 
 --[[ Who has it, for tests. ]]
@@ -1184,6 +1251,10 @@ function HockeyService.Start()
 		HockeyService.Block(player, up == true)
 	end)
 
+	Remotes.Event("HockeyCharge").OnServerEvent:Connect(function(player: Player)
+		HockeyService.StartShot(player)
+	end)
+
 	Remotes.Event("HockeyShoot").OnServerEvent:Connect(function(player: Player, direction)
 		HockeyService.ShootPuck(player, direction)
 	end)
@@ -1227,6 +1298,7 @@ function HockeyService.Start()
 		-- off and then leaving stayed in here with a Player key holding them
 		-- alive for as long as the server ran.
 		pickupBlockedUntil[player] = nil
+		shotStartedAt[player] = nil
 	end)
 end
 

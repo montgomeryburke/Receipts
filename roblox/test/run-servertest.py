@@ -2077,6 +2077,97 @@ do
 				HockeyService.SaveCount(saveTarget.name) == stillFrom,
 				string.format("%d saves, was %d",
 					HockeyService.SaveCount(saveTarget.name), stillFrom))
+
+			--[[
+				THE CLAIM: a wrist shot and a slapshot are the same shot.
+
+				They were. The puck left the stick at one fixed speed with
+				a constant nine studs of lift whatever you did, so you
+				could not keep it on the ice, could not deliberately raise
+				it, and pace was not a thing you could choose. Nothing in
+				the game tested ShootPuck at all, which is how it stayed
+				that way.
+
+				It winds up now, the same way the basketball and the
+				bowling ball already did -- held longer is harder, timed on
+				the SERVER so a client cannot claim a slapshot it never
+				waited for.
+			]]
+			local shooter = killer
+			ADVANCE(1)
+
+			-- Pick it up for real, by standing next to it.
+			local shooterRoot = shooter._props.Character:FindFirstChild("HumanoidRootPart")
+			shooterRoot._props.CFrame = CFrame.new(live._props.CFrame.Position)
+			HockeyService.StepPossessionForTests()
+			check("you can pick the puck up by skating into it",
+				HockeyService.PuckOwner() == shooter,
+				tostring(HockeyService.PuckOwner() and HockeyService.PuckOwner()._props.Name))
+
+			if HockeyService.PuckOwner() == shooter then
+				-- A tap: pressed and released at once.
+				HockeyService.StartShot(shooter)
+				HockeyService.ShootPuck(shooter, Vector3.new(0, 0, -1))
+				local tap = live._props.AssemblyLinearVelocity
+
+				-- And a full wind-up.
+				ADVANCE(1)
+				shooterRoot._props.CFrame = CFrame.new(live._props.CFrame.Position)
+				HockeyService.StepPossessionForTests()
+				HockeyService.StartShot(shooter)
+				ADVANCE(Config.Hockey.FullChargeSeconds + 0.1)
+				check("winding up reads as a full charge",
+					HockeyService.ShotChargeForTests(shooter) >= 1,
+					string.format("%.2f", HockeyService.ShotChargeForTests(shooter)))
+				HockeyService.ShootPuck(shooter, Vector3.new(0, 0, -1))
+				local slap = live._props.AssemblyLinearVelocity
+
+				local tapFlat = Vector3.new(tap.X, 0, tap.Z).Magnitude
+				local slapFlat = Vector3.new(slap.X, 0, slap.Z).Magnitude
+				check("a slapshot is much harder than a tap",
+					slapFlat > tapFlat * 2,
+					string.format("%.0f vs %.0f studs/s", slapFlat, tapFlat))
+
+				--[[
+					And the hard one sits LOWER.
+
+					The opposite of the basketball, whose lift scales WITH
+					the throw to keep the shape of its arc. A puck is not
+					thrown, it is driven: the hard ones stay low and rise
+					late, the floaters are the soft ones. Which makes
+					keeping it on the ice something you do on purpose, by
+					winding all the way up.
+				]]
+				check("and it stays lower than a soft one",
+					slap.Y < tap.Y,
+					string.format("%.1f vs %.1f lift", slap.Y, tap.Y))
+
+				-- A tap is still a shot: a stick-tap to a team-mate is a
+				-- pass, and a pass should not need a full wind-up.
+				check("but a tap still moves the puck", tapFlat > 1,
+					string.format("%.0f studs/s", tapFlat))
+
+				--[[
+					Shooting with no wind-up recorded at all is a tap, not
+					a slapshot.
+
+					The one thing a client could lie about: firing the
+					release without ever sending the charge. The floor has
+					to be the weakest shot, not the strongest.
+				]]
+				ADVANCE(1)
+				shooterRoot._props.CFrame = CFrame.new(live._props.CFrame.Position)
+				HockeyService.StepPossessionForTests()
+				HockeyService.ShootPuck(shooter, Vector3.new(0, 0, -1))
+				local unwound = Vector3.new(
+					live._props.AssemblyLinearVelocity.X,
+					0,
+					live._props.AssemblyLinearVelocity.Z
+				).Magnitude
+				check("a release with no wind-up is the weakest shot",
+					unwound < slapFlat * 0.5,
+					string.format("%.0f vs a slapshot's %.0f", unwound, slapFlat))
+			end
 		end
 	end
 end

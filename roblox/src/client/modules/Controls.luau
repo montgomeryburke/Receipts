@@ -416,6 +416,19 @@ end
 ]]
 local turboHeld = false
 
+--[[
+	When the current wind-up began, and how long a full one takes.
+
+	Three sports charge a shot by how long you hold the key -- the
+	basketball, the bowling ball and the puck -- and none of them showed
+	anything, so you held the key and guessed. The meter is drawn from the
+	client's own press rather than from the server, because a remote round
+	trip per frame to draw a bar would be absurd and both sides read the
+	same Config seconds, so the bar and the shot agree without talking.
+]]
+local chargeStartedAt: number? = nil
+local chargeSeconds = 1
+
 local function restingFov(): number
 	return if turboHeld then Config.Visuals.TurboFieldOfView else defaultFov
 end
@@ -858,31 +871,39 @@ local CONTEXT_BINDINGS: { [string]: { [Enum.KeyCode]: Binding } } = {
 				return carrying or carryingBall or carryingBowling
 			end,
 			down = function()
+				chargeStartedAt = os.clock()
 				if carryingBowling then
+					chargeSeconds = Config.Bowling.FullChargeSeconds
 					Remotes.Event("BallCharge"):FireServer(true)
 					return
 				end
 				if carryingBall then
 					-- Held: the wind-up starts now and the power is however
 					-- long it lasts, timed on the server.
+					chargeSeconds = Config.Basketball.FullChargeSeconds
 					Remotes.Event("BallCharge"):FireServer(true)
 					return
 				end
-				local _, direction = currentAimDirection()
-				if direction then
-					Remotes.Event("HockeyShoot"):FireServer(direction)
-				end
+				-- The puck winds up too now, the same way the ball does:
+				-- held longer is harder, timed on the server.
+				chargeSeconds = Config.Hockey.FullChargeSeconds
+				Remotes.Event("HockeyCharge"):FireServer()
 			end,
 			up = function()
+				chargeStartedAt = nil
+				Hud.SetCharge(nil)
 				local _, direction = currentAimDirection()
 				if carryingBowling then
 					Remotes.Event("RollBall"):FireServer(direction)
 					return
 				end
-				if not carryingBall then
+				if carryingBall then
+					Remotes.Event("BallShoot"):FireServer(direction)
 					return
 				end
-				Remotes.Event("BallShoot"):FireServer(direction)
+				if direction then
+					Remotes.Event("HockeyShoot"):FireServer(direction)
+				end
 			end,
 		},
 		[Enum.KeyCode.X] = {
@@ -1256,6 +1277,26 @@ local function onHeartbeat()
 	if now - lastBarCheckAt >= 0.2 then
 		lastBarCheckAt = now
 		refreshActionBar()
+	end
+
+	--[[
+		The wind-up meter, every frame while a shot is charging.
+
+		Every frame rather than on the action-bar's five-a-second tick: a
+		bar that fills in five steps looks broken, and the whole point of it
+		is judging the moment you are fully wound up.
+
+		Dropped if whatever you were charging left your hands -- shot out of
+		them, or you walked out of the venue -- because a meter still
+		filling for a puck you no longer have is worse than none.
+	]]
+	if chargeStartedAt then
+		if carrying or carryingBall or carryingBowling then
+			Hud.SetCharge((now - chargeStartedAt) / math.max(chargeSeconds, 0.001))
+		else
+			chargeStartedAt = nil
+			Hud.SetCharge(nil)
+		end
 	end
 
 	local spec = arsenal[effectiveWeaponName()]

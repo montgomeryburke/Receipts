@@ -1567,6 +1567,32 @@ Config.Hockey = {
 	PickupRange = 9,
 	CarryDistance = 4.5,
 	ShotSpeed = 110,
+	--[[
+		The wind-up.
+
+		The puck used to leave the stick at one fixed speed with a constant
+		nine studs of lift, whatever you did -- so a wrist shot and a
+		slapshot were the same shot, you could not keep it on the ice, and
+		you could not deliberately raise it. With Milo making saves the only
+		way past him was position; pace is meant to be the other way.
+
+		Held longer means harder. A weak shot is still a shot, because a
+		stick-tap to a team-mate is a pass and a pass should not require a
+		full wind-up.
+	]]
+	FullChargeSeconds = 0.85,
+	WeakestShot = 0.25,
+	--[[
+		And a hard shot sits LOWER, which is the opposite of the basketball.
+
+		A basketball's lift scales with its throw to keep the arc's shape.
+		A puck is not thrown, it is driven: the hard ones stay low and rise
+		late, and the floaters are the soft ones. So lift falls as power
+		rises -- which also means keeping it on the ice is something you do
+		on purpose, by winding all the way up.
+	]]
+	SoftShotLift = 13,
+	HardShotLift = 3,
 	-- A fight is a punch-and-block contest now rather than a mash. These are
 	-- its numbers.
 	FightHealth = 100,
@@ -2081,6 +2107,8 @@ export type ConfigType = {
 		StickBreakChance: number,
 		StickWeapon: string,
 		PickupRange: number, CarryDistance: number, ShotSpeed: number,
+		FullChargeSeconds: number, WeakestShot: number,
+		SoftShotLift: number, HardShotLift: number,
 		FightHealth: number, PunchCooldown: number,
 		PunchDamageMin: number, PunchDamageMax: number,
 		BlockedDamage: number, PenaltySeconds: number,

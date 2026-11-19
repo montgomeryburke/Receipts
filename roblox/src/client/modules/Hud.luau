@@ -74,6 +74,9 @@ local statsLabel: TextLabel
 local clockLabel: TextLabel
 local scoreLabel: TextLabel
 local crosshair: Frame
+-- The wind-up meter under the crosshair: a track and the fill inside it.
+local chargeTrack: Frame? = nil
+local chargeFill: Frame? = nil
 local votePanel: Frame
 local deathOverlay: Frame
 local deathTitle: TextLabel? = nil
@@ -263,6 +266,46 @@ function Hud.Build()
 	local crosshairCorner = Instance.new("UICorner")
 	crosshairCorner.CornerRadius = UDim.new(1, 0)
 	crosshairCorner.Parent = crosshair
+
+	--[[
+		The wind-up meter.
+
+		Three sports charge a shot by how long you hold the key -- the
+		basketball, the bowling ball and now the puck -- and not one of them
+		showed you anything. You held the key and guessed. A hold-to-charge
+		control with no readout is not a skill, it is a hidden timer, and
+		the difference between a tap and a full slapshot was invisible until
+		after you had taken the shot.
+
+		Under the crosshair rather than off in a corner, because it is
+		information you need while aiming, and because your eyes are already
+		there. Hidden entirely when nothing is charging: an empty bar on
+		screen at all times is clutter that teaches you to ignore the spot
+		it appears in.
+	]]
+	chargeTrack = makeFrame(screen, {
+		Name = "ChargeTrack",
+		Size = UDim2.fromOffset(84, 6),
+		Position = UDim2.new(0.5, -42, 0.5, 22),
+		BackgroundColor3 = Color3.fromRGB(16, 20, 26),
+		BackgroundTransparency = 0.35,
+		Visible = false,
+		ZIndex = 6,
+	})
+	local trackCorner = Instance.new("UICorner")
+	trackCorner.CornerRadius = UDim.new(1, 0)
+	trackCorner.Parent = chargeTrack
+
+	chargeFill = makeFrame(chargeTrack, {
+		Name = "ChargeFill",
+		Size = UDim2.fromScale(0, 1),
+		BackgroundColor3 = Color3.fromRGB(255, 205, 70),
+		BackgroundTransparency = 0,
+		ZIndex = 7,
+	})
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(1, 0)
+	fillCorner.Parent = chargeFill
 
 	-- --------------------------------------------------------- vote panel
 	votePanel = makeFrame(screen, {
@@ -1472,6 +1515,40 @@ function Hud.ShowHurtFrom(from: Vector3?)
 			blade.Visible = false
 		end
 	end)
+end
+
+--[[
+	Show how far wound up a shot is, nil to hide the meter.
+
+	Driven from the client's own press rather than from the server, because
+	the meter is feedback and a remote round trip per frame to draw a bar
+	would be absurd. Both sides read the same Config seconds, so the bar and
+	the shot agree without having to talk.
+
+	Goes green at full so the moment you are fully wound up is something you
+	can see rather than something you have to count.
+]]
+function Hud.SetCharge(fraction: number?)
+	local track, fill = chargeTrack, chargeFill
+	if not track or not fill then
+		return
+	end
+	if not fraction then
+		track.Visible = false
+		return
+	end
+
+	local amount = math.clamp(fraction, 0, 1)
+	track.Visible = true
+	fill.Size = UDim2.fromScale(amount, 1)
+	fill.BackgroundColor3 = if amount >= 1
+		then Color3.fromRGB(120, 240, 140)
+		else Color3.fromRGB(255, 205, 70)
+end
+
+--[[ For tests: the wind-up meter's track and fill. ]]
+function Hud.ChargeMeterForTests(): (Frame?, Frame?)
+	return chargeTrack, chargeFill
 end
 
 --[[ For tests: where the floating damage numbers live. ]]

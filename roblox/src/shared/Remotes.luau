@@ -75,6 +75,14 @@ local EVENT_NAMES = {
 	-- The hockey fight scene: the server starts one, the client mashes, the
 	-- server says who won.
 	-- Hockey: possession, shooting, and the fight.
+	--[[
+		The puck's wind-up and its release.
+
+		Two events rather than one because the power is how long the key was
+		held, and that is timed on the server -- a client that simply sent
+		"full slapshot" would be believed.
+	]]
+	"HockeyCharge",
 	"HockeyShoot",
 	"HockeyChallenge",
 	"HockeyPunch",
