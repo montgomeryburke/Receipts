@@ -457,6 +457,14 @@ function BowlingService.Clear()
 	table.clear(chargeStartedAt)
 end
 
+--[[ Where the alley will be, so the city leaves room for it. ]]
+function BowlingService.ReservedArea(mapSize: number): { centre: Vector3, radius: number }
+	return {
+		centre = Config.VenueCentre("Bowling", mapSize),
+		radius = Config.Venues.Bowling.radius,
+	}
+end
+
 function BowlingService.Build(mapSize: number)
 	BowlingService.Clear()
 
@@ -464,7 +472,7 @@ function BowlingService.Build(mapSize: number)
 	model.Name = "BowlingAlley"
 	alley = model
 
-	local centre = Vector3.new(-mapSize * 0.26, 0, -mapSize * 0.24)
+	local centre = Config.VenueCentre("Bowling", mapSize)
 
 	Util.Part({
 		Name = "AlleyFloor",

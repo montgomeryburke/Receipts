@@ -932,6 +932,23 @@ function CarnivalService.RegisterHit(part: BasePart, attacker: Player?, directio
 end
 
 --[[ Put the fairground up, off to one side of the arena. ]]
+--[[
+	Where the carnival will be, before it exists.
+
+	A pure function of the map size, so the city can be told to keep clear
+	of it while it is still being laid out -- the carnival itself is not
+	built until after MapService has finished. Only the resort and the rink
+	used to do this, which meant buildings, barricades and street furniture
+	were dropped straight onto the fairground: a dunk tank inside a
+	warehouse, benches through the duck gallery.
+]]
+function CarnivalService.ReservedArea(mapSize: number): { centre: Vector3, radius: number }
+	return {
+		centre = Config.VenueCentre("Carnival", mapSize),
+		radius = Config.Venues.Carnival.radius,
+	}
+end
+
 function CarnivalService.Build(mapSize: number)
 	CarnivalService.Clear()
 
@@ -941,7 +958,7 @@ function CarnivalService.Build(mapSize: number)
 	container = folder
 
 	-- Off to one side, clear of the bases at either end.
-	origin = Vector3.new(mapSize * 0.3, 0, 0)
+	origin = Config.VenueCentre("Carnival", mapSize)
 
 	Util.Part({
 		Name = "CarnivalGround",

@@ -392,6 +392,14 @@ function BasketballService.Clear()
 	table.clear(chargeStartedAt)
 end
 
+--[[ Where the court will be, so the city leaves room for it. ]]
+function BasketballService.ReservedArea(mapSize: number): { centre: Vector3, radius: number }
+	return {
+		centre = Config.VenueCentre("Basketball", mapSize),
+		radius = Config.Venues.Basketball.radius,
+	}
+end
+
 function BasketballService.Build(mapSize: number)
 	BasketballService.Clear()
 
@@ -401,7 +409,7 @@ function BasketballService.Build(mapSize: number)
 
 	-- Opposite the carnival and clear of the rink, so the three
 	-- distractions are in three different directions.
-	local centre = Vector3.new(mapSize * 0.28, 0, -mapSize * 0.22)
+	local centre = Config.VenueCentre("Basketball", mapSize)
 
 	Util.Part({
 		Name = "Court",

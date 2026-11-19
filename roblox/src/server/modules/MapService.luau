@@ -20,6 +20,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Util = require(Shared:WaitForChild("Util"))
 local ResortService = require(script.Parent:WaitForChild("ResortService"))
 local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
+
 local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
 local MapService = {}
@@ -388,19 +389,35 @@ local function barricade(origin: Vector3, heading: number, rng: Random, parent: 
 	})
 	wall:SetAttribute("Destructible", true)
 
-	-- A stack of sandbags along the top, so it reads as cover rather than
-	-- a random slab.
+	--[[
+		A stack of sandbags along the top, so it reads as cover rather than
+		a random slab.
+
+		Parented to the WALL, not alongside it. They used to be siblings, so
+		blowing the barricade apart destroyed the wall and left three
+		sandbags hanging in mid-air exactly where the top of it had been --
+		which looked like a glitch and, worse, was still shootable cover
+		floating at head height with nothing underneath.
+
+		Destroy takes descendants with it, so the bags now go when the wall
+		does. They are each destructible in their own right as well, which
+		is the better outcome for a near miss: you can blow the bags off the
+		top and leave the wall, which is a thing worth being able to do.
+	]]
 	for bag = 0, 2 do
 		local offset = -length * 0.3 + bag * (length * 0.3)
-		Util.Part({
+		local sack = Util.Part({
 			Name = "Sandbag",
 			Size = Vector3.new(length * 0.28, 2.4, 4.4),
 			CFrame = CFrame.new(origin + Vector3.new(0, height + 1.2, 0)) * facing * CFrame.new(offset, 0, 0),
 			Color = Color3.fromRGB(132, 118, 92),
 			Material = Enum.Material.Sand,
-			Parent = parent,
+			Parent = wall,
 		})
+		sack:SetAttribute("Destructible", true)
 	end
+
+	local _ = parent
 end
 
 --[[
@@ -707,9 +724,28 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	-- before the blocks are handed out so its footprint is known when the
 	-- city is laid down.
 	local resort = ResortService.Build(size, model)
+	--[[
+		Everywhere the city must not build.
+
+		Each venue states its own footprint as a pure function of the map
+		size, because most of them are not built until after this function
+		has finished laying the city out -- so they cannot be measured, only
+		declared.
+
+		Only the resort and the rink used to be in this list. The carnival
+		was not, so buildings, barricades and street furniture were dropped
+		straight onto the fairground; nor were the basketball court or the
+		bowling alley when they were added, for the same reason -- nothing
+		reminded anybody the list existed. There is now a map-test
+		invariant that fails if a registered venue has a building in it.
+	]]
 	local resortReserved = ResortService.ReservedAreas(size)
-	-- The rink builds its own model, but the city has to know where it is.
-	table.insert(resortReserved, HockeyService.ReservedArea(size))
+	for name, spot in Config.Venues do
+		table.insert(resortReserved, {
+			centre = Config.VenueCentre(name, size),
+			radius = spot.radius,
+		})
+	end
 
 	-- Walls, so nobody drives off the edge of the world.
 	local wallHeight = 160
@@ -750,17 +786,23 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		end
 	end
 
-	-- Reservations, decided before anything is built.
-	--
-	--   the carnival      CarnivalService builds its own ground at 0.3 * size
-	--   the spawn rows    both teams need to get out of their base without
-	--                     being funnelled through a doorway
-	local carnival = Vector3.new(size * 0.3, 0, 0)
+	--[[
+		Reservations, decided before anything is built.
 
-	--[[ Is this block inside something the resort already owns? ]]
-	local function insideResort(flat: Vector3): boolean
+		Tested against the block's EXTENT, not just its centre. A block is
+		around 140 studs across, so a centre that clears a venue by 30 studs
+		still has corners 40 studs inside it -- which is where the buildings
+		go. That is how the bowling alley ended up with 112 staircase steps
+		and 44 walls standing in it while the block allocation looked
+		perfectly correct.
+
+		The spawn rows are reserved separately below: both teams need to get
+		out of their base without being funnelled through a doorway.
+	]]
+	local function insideVenue(flat: Vector3, extent: number): boolean
 		for _, area in resortReserved do
-			if (flat - Vector3.new(area.centre.X, 0, area.centre.Z)).Magnitude < area.radius then
+			local gap = (flat - Vector3.new(area.centre.X, 0, area.centre.Z)).Magnitude
+			if gap < area.radius + extent then
 				return true
 			end
 		end
@@ -770,7 +812,7 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	local available: { Block } = {}
 	for _, block in blocks do
 		local flat = Vector3.new(block.center.X, 0, block.center.Z)
-		if (flat - carnival).Magnitude < 145 or insideResort(flat) then
+		if insideVenue(flat, block.extent) then
 			block.role = "reserved"
 		elseif math.abs(block.center.Z) > spawnReach and math.abs(block.center.X) < half * 0.45 then
 			block.role = "plaza" -- kept open: this is a team's way out of its base
@@ -948,6 +990,34 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		return along
 	end
 
+	--[[
+		Is this spot inside a venue?
+
+		The block allocator has its own version of this check, which is
+		fine for buildings because buildings live in blocks. Everything
+		placed by COORDINATE instead -- street furniture, stunt jumps,
+		ramps, ring barricades -- bypassed it entirely, which is how
+		pavement cover ended up standing in the middle of the rink.
+	]]
+	local function spotInsideVenue(spot: Vector3, margin: number): boolean
+		for _, area in resortReserved do
+			local flat = Vector3.new(spot.X - area.centre.X, 0, spot.Z - area.centre.Z)
+			if flat.Magnitude < area.radius + margin then
+				return true
+			end
+		end
+		return false
+	end
+
+	--[[
+		A street spot that is not inside a venue.
+
+		Tried a handful of times rather than once, because rejecting a spot
+		outright would quietly reduce the amount of cover on the map in
+		proportion to how many venues there are -- which is the kind of
+		thing that turns into "the city feels emptier than it used to" with
+		no obvious cause.
+	]]
 	local function randomStreet(): (Vector3, Vector3)
 		local lane = offsets[rng:NextInteger(1, #offsets)]
 		local along = clearOfJunctions(rng:NextNumber(-gridHalf * 0.85, gridHalf * 0.85))
@@ -957,13 +1027,29 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		return Vector3.new(along, 0, lane), Vector3.new(if along < 0 then 1 else -1, 0, 0)
 	end
 
+	--[[ A street spot clear of every venue, or nil after a fair few tries. ]]
+	local function clearStreet(margin: number): (Vector3?, Vector3?)
+		for _ = 1, 12 do
+			local spot, heading = randomStreet()
+			if not spotInsideVenue(spot, margin) then
+				return spot, heading
+			end
+		end
+		return nil, nil
+	end
+
 	for _ = 1, mapConfig.Jumps do
-		local spot, heading = randomStreet()
-		stuntJump(spot, heading, rng:NextNumber(0.8, 2.2), Color3.fromRGB(150, 120, 60), model)
+		local spot, heading = clearStreet(20)
+		if spot and heading then
+			stuntJump(spot, heading, rng:NextNumber(0.8, 2.2), Color3.fromRGB(150, 120, 60), model)
+		end
 	end
 
 	for _ = 1, mapConfig.Ramps do
-		local spot, heading = randomStreet()
+		local spot, heading = clearStreet(20)
+		if not spot or not heading then
+			continue
+		end
 		ramp(
 			spot,
 			spot + heading * rng:NextNumber(30, 60) + Vector3.new(0, rng:NextNumber(8, 22), 0),
@@ -976,11 +1062,21 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	-- Cover on the pavements, where you actually need it: crossing a street
 	-- is the most exposed thing you do.
 	for _ = 1, 26 do
-		local spot, heading = randomStreet()
+		local spot, heading = clearStreet(30)
+		if not spot or not heading then
+			continue
+		end
 		-- Across the street, not along it: heading runs with the road, so
 		-- swapping its components gives the pavement direction.
 		local side = (if rng:NextNumber() < 0.5 then -1 else 1) * (ROAD_WIDTH * 0.5 + 18)
-		cover(spot + Vector3.new(heading.Z, 0, heading.X) * side, rng, mapConfig.Theme, model)
+		local at = spot + Vector3.new(heading.Z, 0, heading.X) * side
+		-- Checked again AFTER stepping onto the pavement: the step is 30
+		-- studs sideways, which is enough to cross into a venue from a
+		-- street that was itself clear of one.
+		if spotInsideVenue(at, 0) then
+			continue
+		end
+		cover(at, rng, mapConfig.Theme, model)
 	end
 
 	-- The open ring outside the grid, so the map edge is not a dead zone.
@@ -995,7 +1091,29 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		local spot = if rng:NextNumber() < 0.5
 			then Vector3.new(along, 0, out)
 			else Vector3.new(out, 0, along)
-		barricade(spot, rng:NextNumber(0, math.pi * 2), rng, model)
+
+		--[[
+			The ring runs round the OUTSIDE of the grid, which is exactly
+			where the venues are -- so these have to respect the same
+			reservations the city blocks do.
+
+			They did not, because the reservation was applied when handing
+			out blocks and this loop places by coordinate instead. The
+			result was a barricade and three sandbags standing in the
+			bowling alley, which no amount of looking at the block
+			allocation would have revealed.
+		]]
+		local clear = true
+		for _, area in resortReserved do
+			local flat = Vector3.new(spot.X - area.centre.X, 0, spot.Z - area.centre.Z)
+			if flat.Magnitude < area.radius then
+				clear = false
+				break
+			end
+		end
+		if clear then
+			barricade(spot, rng:NextNumber(0, math.pi * 2), rng, model)
+		end
 	end
 
 	-- Team spawns at opposite ends, out in the open ring, with real

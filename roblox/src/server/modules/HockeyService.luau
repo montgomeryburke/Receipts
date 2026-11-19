@@ -979,8 +979,10 @@ function HockeyService.Build(mapSize: number)
 	rink = model
 
 	-- Opposite the carnival, so the two distractions are not on top of each
-	-- other and both are a drive from the middle.
-	local centre = Vector3.new(-mapSize * 0.3, 0, mapSize * 0.06)
+	-- other and both are a drive from the middle. Read from the one table
+	-- that MapService also keeps the city off, so the rink and the hole
+	-- left for it cannot drift apart.
+	local centre = Config.VenueCentre("Hockey", mapSize)
 
 	surface(centre, model)
 	boards(centre, model)
@@ -1027,8 +1029,8 @@ end
 --[[ Where the rink sits, so the city is not built on top of it. ]]
 function HockeyService.ReservedArea(mapSize: number): { centre: Vector3, radius: number }
 	return {
-		centre = Vector3.new(-mapSize * 0.3, 0, mapSize * 0.06),
-		radius = RINK_LENGTH * 0.5 + 30,
+		centre = Config.VenueCentre("Hockey", mapSize),
+		radius = Config.Venues.Hockey.radius,
 	}
 end
 

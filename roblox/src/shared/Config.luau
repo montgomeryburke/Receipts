@@ -886,6 +886,39 @@ Config.Bowling = {
 	SpareBonus = 60,
 }
 
+--[[
+	Where each venue sits, as fractions of the map size.
+
+	One place, because this answer is needed TWICE for every venue and in
+	two different modules: the venue itself needs it to know where to build,
+	and MapService needs it to keep the city off that ground -- and
+	MapService has to know before the venue exists, since most of them are
+	built after the city is laid out.
+
+	It was hardcoded in both places, which is how the carnival ended up with
+	buildings in it: its builder knew where it was and the city did not.
+	The basketball court and bowling alley then arrived with the same split,
+	because nothing connected the two numbers.
+
+	Spread deliberately around the compass so the distractions are in
+	different directions from the middle rather than clustered.
+]]
+Config.Venues = {
+	Carnival = { x = 0.3, z = 0, radius = 120 },
+	Hockey = { x = -0.3, z = 0.06, radius = 180 },
+	Basketball = { x = 0.28, z = -0.22, radius = 90 },
+	Bowling = { x = -0.26, z = -0.24, radius = 115 },
+}
+
+--[[ Where a venue is on a map of this size. ]]
+function Config.VenueCentre(name: string, mapSize: number): Vector3
+	local spot = Config.Venues[name]
+	if not spot then
+		return Vector3.new()
+	end
+	return Vector3.new(mapSize * spot.x, 0, mapSize * spot.z)
+end
+
 Config.Basketball = {
 	CourtWidth = 70,
 	CourtLength = 120,
@@ -1828,6 +1861,8 @@ export type ConfigType = {
 		SettleSeconds: number, DownTilt: number, DownDistance: number,
 		PointsPerPin: number, StrikeBonus: number, SpareBonus: number,
 	},
+	Venues: { [string]: { x: number, z: number, radius: number } },
+	VenueCentre: (string, number) -> Vector3,
 	Basketball: {
 		CourtWidth: number, CourtLength: number, ThreeLine: number,
 		TwoPoints: number, ThreePoints: number,
