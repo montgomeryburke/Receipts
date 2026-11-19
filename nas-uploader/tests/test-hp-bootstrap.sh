@@ -33,22 +33,13 @@ EOF
   chmod +x "$WORK/bin/pct"
 }
 
-echo "• the NAS container and an \"llm\" container with Ollama"
+echo "• the NAS container (other containers, like an \"llm\" one, are left alone)"
 fake_pct $'VMID       Status     Lock         Name\n101        running                 jellyfin\n105        running                 llm'
 out="$(PATH="$WORK/bin:$PATH" bash "$SCRIPT" --dry-run 2>&1)"; rc=$?
 check "succeeded" [ $rc -eq 0 ]
-check "found the local AI container" grep -q "Local AI: http://192.168.1.50:11434 (qwen2.5:7b)" <<<"$out"
-check "Ollama listens on the network with a 16k context" grep -q 'OLLAMA_HOST=0.0.0.0.*OLLAMA_CONTEXT_LENGTH=16384' <<<"$out"
-check "pulls the model only if missing" grep -q "grep -qx 'qwen2.5:7b' || ollama pull 'qwen2.5:7b'" <<<"$out"
-check "NAS setup with Funnel, commands, the mirror folder and the local AI" grep -q "bash /root/setup-webdav.sh --access funnel --enable-commands --folder /mnt/mirror --yes --llm-url http://192.168.1.50:11434" <<<"$out"
+check "NAS setup with Funnel, commands and the mirror folder, no AI model" grep -q "bash /root/setup-webdav.sh --access funnel --enable-commands --no-llm --folder /mnt/mirror --yes" <<<"$out"
+check "never touches another container" bash -c "! grep -qE 'in_ct 105|exec 105|ollama' <<<\"\$1\"" _ "$out"
 check "changes nothing in a dry run" bash -c "! grep -q '(ran in' <<<\"\$1\"" _ "$out"
-
-echo "• no local AI container"
-fake_pct $'VMID       Status     Lock         Name\n101        running                 jellyfin'
-out="$(PATH="$WORK/bin:$PATH" bash "$SCRIPT" --dry-run 2>&1)"; rc=$?
-check "succeeded" [ $rc -eq 0 ]
-check "says it skips the local model" grep -q 'No container named like "llm"' <<<"$out"
-check "NAS setup without --llm-url" bash -c "grep -q 'setup-webdav.sh --access funnel --enable-commands' <<<\"\$1\" && ! grep -q -- '--llm-url' <<<\"\$1\"" _ "$out"
 
 echo "• the NAS container is stopped"
 fake_pct $'VMID       Status     Lock         Name\n101        stopped                 jellyfin'
@@ -58,8 +49,8 @@ check "stops with a clear message" bash -c "[ $rc -ne 0 ] && grep -q \"Container
 echo "• bad options are refused"
 out="$(PATH="$WORK/bin:$PATH" bash "$SCRIPT" --dry-run --nas-ct 'x;rm' 2>&1)"; rc=$?
 check "container number checked" [ $rc -ne 0 ]
-out="$(PATH="$WORK/bin:$PATH" bash "$SCRIPT" --dry-run --model 'a b' 2>&1)"; rc=$?
-check "model name checked" [ $rc -ne 0 ]
+out="$(PATH="$WORK/bin:$PATH" bash "$SCRIPT" --dry-run --folder 'x; rm -rf /' 2>&1)"; rc=$?
+check "folder checked" [ $rc -ne 0 ]
 
 echo
 if [[ $failures -eq 0 ]]; then echo "hp bootstrap: all checks passed"; else echo "hp bootstrap: $failures check(s) failed"; fi

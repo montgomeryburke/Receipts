@@ -678,3 +678,6 @@ $('hpTest').addEventListener('click', async () => {
     $('hpOut').textContent = err.message;
   }
 });
+
+// The assistant's AI is Claude and Gemini. The section for your own model server stays hidden unless one was set up.
+getSettings().then((st) => { $('localBox').hidden = !st.localUrl; }).catch(() => {});

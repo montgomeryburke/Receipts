@@ -61,8 +61,8 @@
         </div>
       </div>
       <details class="stack" id="localBox">
-        <summary><b>Local model on your HP (free)</b> — e.g. Ollama in your "llm" container</summary>
-        <p class="small muted">Your own model does the cheap jobs for nothing: no API key, nothing leaves home. Run the HP setup script with <code>--llm-url http://&lt;llm container address&gt;:11434</code> so it is reachable at <code>&lt;your NAS address&gt;/.llm/</code> with the NAS login (from work too). Any OpenAI-compatible server works (Ollama, LM Studio, llama.cpp).</p>
+        <summary><b>Your own AI model (optional, free)</b> — only if you have a computer that can run one</summary>
+        <p class="small muted">Optional. A model on a computer with a good graphics card (Ollama, LM Studio, llama.cpp — any OpenAI-compatible server) can do the cheap jobs for nothing. The HP and the Pi are too slow for this. To reach it from work, run the NAS setup script with <code>--llm-url http://&lt;that computer's address&gt;:11434</code>; it is then at <code>&lt;your NAS address&gt;/.llm/</code> behind the NAS login. Without one, Claude or Gemini does these jobs (Settings → Background tasks &amp; cost keeps them cheap).</p>
         <div class="grid2">
           <label class="field"><span>Address</span><input type="text" data-key="localUrl" placeholder="https://nas.your-tailnet.ts.net/.llm/" spellcheck="false"></label>
           <label class="field"><span>Model</span><input type="text" data-key="localModel" list="localModels" placeholder="qwen2.5:7b" spellcheck="false"></label>

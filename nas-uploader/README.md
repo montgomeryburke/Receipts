@@ -29,7 +29,7 @@ One Chrome extension, nothing else to install on the work computer:
   action items, invoices due and your own tasks; it notes what got done), and an **invoice summary** for any month
   (who, amount, due date, status) as Word and a spreadsheet.
 - **Your own hardware first** — searching, indexing, the email index, transcription and project detection run on
-  this computer or the HP at no cost; a **local model on the HP** (e.g. Ollama) can do the cheap AI jobs for free;
+  this computer or the HP at no cost; the AI is Claude and Gemini, with a switch and a price for every automatic job;
   **Settings → Background tasks & cost** has a switch for every automatic AI job and shows what you spend.
 - **Learns each project** — decisions, names and facts from meetings and the chat are remembered per project
   and used the next time that project comes up.
@@ -54,8 +54,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/montgomeryburke/Receipts/cla
 ```
 
 It sets up the NAS container (101 unless `--nas-ct`): WebDAV through Tailscale Funnel, the OCR job, and commands
-from the assistant. If a container named like "llm" or "ollama" has Ollama, it also makes Ollama listen on the
-network with a 16k context, pulls `qwen2.5:7b` (`--model` to change it), and connects it at `<NAS address>/.llm/`.
+from the assistant. Nothing AI runs on the HP: the assistant uses Claude and Gemini.
 It ends by printing what to paste into the extension, plus a **command login** (`commander` + key). That login can
 only run commands in the NAS container (as the limited user `nas-runner`, logged), never open files over WebDAV,
 so you can hand it to Claude to do HP jobs for you. `--dry-run` shows what it would do; sections 1a–1b below are the
@@ -423,7 +422,7 @@ Side panel → **To do**:
 - **📋 Make priority list** — reads the past month: emails in the index, open drafts, meeting action items, invoices
   due and your own tasks (add them in the box), and ranks what to do: **Now**, **Today**, **This week**, **Later**,
   each with why and the next step. It notes what got done since the last list (a reply sent, a payment confirmed);
-  tick anything you finished yourself. With the local model on the HP set up for it, this costs nothing.
+  tick anything you finished yourself. It is one small AI call.
 - **🧾 Invoices** — pick a month and click **Make summary**: every invoice in that month's emails (and payments or
   reminders in the following two weeks), with who, amount, due date and status (paid, overdue, reminder…). Amounts
   and invoice numbers are checked against the emails; anything not found there is marked **check**. Saved as
@@ -480,17 +479,9 @@ to "only when I click" (minutes too: **📝 Minutes** still works); **⚖ Balanc
 up. Out of the box, drafting replies to new mail on its own and double look-ups are off — switch them on here. Spending is shown for today and the month,
 by feature (drafts, checks, meetings, research…), estimated from the token counts.
 
-**Local model on the HP (free).** If you run a model on the HP — for example Ollama in the "llm" container — the
-assistant can use it for the cheap jobs: priority lists, invoice summaries and the second check. Make Ollama listen
-on the network in that container (`systemctl edit ollama`, add `Environment="OLLAMA_HOST=0.0.0.0"`, restart it, and
-`ollama pull qwen2.5:7b`), then re-run the NAS setup script with `--llm-url http://<llm container address>:11434`
-(it's remembered when you re-run the script later, e.g. for a new password; `--no-llm` removes it). Ollama reads only
-2–4k tokens at once unless you also add `Environment="OLLAMA_CONTEXT_LENGTH=16384"`; Settings → Local model → **It can
-read** (24,000 characters by default) must stay below that — longer jobs go to Claude or Gemini instead.
-It becomes reachable at `<your NAS address>/.llm/` behind the NAS login, from work too (your NAS password is not
-passed on to the model). In Settings → AI → **Local model**, enter that address and the model name, choose **Login:
-the NAS login** (it uses the NAS login from Settings → NAS, only for the NAS's own https address), click **Test**,
-and tick what it should do. Work done by the local model isn't sent to the cloud for a second check.
+**AI: Claude and Gemini.** Every AI job goes to Claude (Anthropic) or Gemini (Google) with your keys; nothing AI
+runs on the HP or the Pi (they're too slow for it). The extension can also talk to a self-hosted, OpenAI-compatible
+model server, but that's dormant and hidden in Settings unless one is set up.
 
 Paste a Claude (Anthropic) and/or Gemini key in **Settings → AI provider**; they stay in this browser profile and
 go only to that provider. Claude uses `claude-opus-5-5` at low effort by default (Settings lets you pick Sonnet or
