@@ -991,8 +991,10 @@ Config.Help = {
 	{
 		question = "How does the sniper zoom work?",
 		answer = "Right click to zoom, and keep right clicking to step through the "
-			.. "magnifications. You move much slower while scoped, which is what "
-			.. "stops a 50x scope being a free sprinting wallhack.",
+			.. "magnifications. Press N while scoped for night vision. Your mouse "
+			.. "gets finer the further you zoom, which is the only thing that makes "
+			.. "50x usable -- and you move much slower while scoped, which stops it "
+			.. "being a free sprinting wallhack.",
 		keywords = { "sniper", "zoom", "scope", "rifle", "magnify", "aim" },
 	},
 	{
@@ -1062,6 +1064,38 @@ Config.Visuals = {
 	EnemyOutline = Color3.fromRGB(255, 70, 70),
 	FriendlyOutline = Color3.fromRGB(90, 230, 140),
 	OutlineTransparency = 0.15,
+
+	--[[
+		Night vision, down the scope only.
+
+		Parented to the CAMERA rather than to Lighting, which is not a
+		workaround for the rule that GraphicsService owns Lighting -- it is
+		the correct place for it. An effect on the camera applies to one
+		viewer by construction, so there is no way for it to leak into
+		anybody else's screen, and no way for two scripts to fight over it.
+		Night vision on everyone's screen because one player scoped in would
+		be a strange bug to debug.
+
+		The tint is green because that is what the convention is, and the
+		contrast lift is what actually does the work: brightening alone
+		turns a dark scene grey.
+	]]
+	NightVisionTint = Color3.fromRGB(140, 255, 190),
+	NightVisionBrightness = 0.25,
+	NightVisionContrast = 0.3,
+
+	--[[
+		Mouse sensitivity down the sight.
+
+		At 50x, one pixel of mouse movement is a wall-to-wall sweep of the
+		target, which is why a long scope feels unusable rather than
+		powerful. Scaling the sensitivity with the magnification is what
+		makes the top zoom level worth having at all.
+
+		Keyed by zoom STAGE rather than by magnification, because the stages
+		are what the player steps through.
+	]]
+	ScopedSensitivity = { 1, 0.45, 0.22, 0.1 },
 }
 
 --[[
@@ -1609,6 +1643,10 @@ export type ConfigType = {
 		EnemyOutline: Color3,
 		FriendlyOutline: Color3,
 		OutlineTransparency: number,
+		NightVisionTint: Color3,
+		NightVisionBrightness: number,
+		NightVisionContrast: number,
+		ScopedSensitivity: { number },
 	},
 	Carnival: {
 		BalloonPoints: number, BalloonClearBonus: number,

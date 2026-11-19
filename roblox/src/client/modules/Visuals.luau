@@ -36,6 +36,8 @@ local player = Players.LocalPlayer
 local OUTLINE_NAME = "ArenaOutline"
 
 local started = false
+local nightVision: ColorCorrectionEffect? = nil
+local nightVisionOn = false
 
 --[[ Is this player on my side? Teamless players count as enemies. ]]
 local function isFriendly(other: Player): boolean
@@ -124,9 +126,53 @@ function Visuals.Start()
 	player:GetPropertyChangedSignal("Team"):Connect(Visuals.Refresh)
 end
 
+--[[
+	Night vision, for down the scope.
+
+	The effect hangs on the CAMERA, not on Lighting. That is not a dodge
+	around GraphicsService owning Lighting -- it is where it belongs: a
+	camera effect applies to one viewer by construction, so it cannot leak
+	onto anybody else's screen and two scripts cannot fight over it. Night
+	vision appearing for everyone because one player scoped in would be a
+	strange bug to chase.
+
+	Built on first use rather than at start-up, because most players never
+	pick up a long scope and an unused effect is still a full-screen pass.
+]]
+function Visuals.SetNightVision(on: boolean)
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return
+	end
+
+	if on and not nightVision then
+		local effect = Instance.new("ColorCorrectionEffect")
+		effect.Name = "NightVision"
+		effect.Brightness = Config.Visuals.NightVisionBrightness
+		effect.Contrast = Config.Visuals.NightVisionContrast
+		effect.TintColor = Config.Visuals.NightVisionTint
+		effect.Parent = camera
+		nightVision = effect
+	end
+
+	nightVisionOn = on
+	if nightVision then
+		nightVision.Enabled = on
+	end
+end
+
+function Visuals.NightVisionOn(): boolean
+	return nightVisionOn
+end
+
 --[[ For tests. ]]
 function Visuals.ResetForTests()
 	started = false
+	if nightVision then
+		nightVision:Destroy()
+		nightVision = nil
+	end
+	nightVisionOn = false
 end
 
 function Visuals.OutlineOf(other: Player): Highlight?

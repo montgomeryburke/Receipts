@@ -39,6 +39,7 @@ local turboText: TextLabel
 local statusText: TextLabel
 local zoomText: TextLabel
 local scope: Frame
+local lastMagnification = 0
 local hitmarker: Frame
 local damageHolder: Frame
 local killFeed: Frame
@@ -1191,11 +1192,29 @@ function Hud.SetLoadout(names: { [number]: string }, activeSlot: number)
 end
 
 --[[ Show the current magnification, and raise the scope with it. ]]
+--[[
+	Say whether night vision is on.
+
+	Worth a word on screen because it is a toggle you can forget, and a
+	green lens with no explanation looks like a graphics fault.
+]]
+local nightVisionShown = false
+
+function Hud.SetNightVision(on: boolean)
+	nightVisionShown = on
+	if zoomText and zoomText.Text ~= "" then
+		Hud.SetZoom(lastMagnification)
+	end
+end
+
 function Hud.SetZoom(magnification: number)
 	if not zoomText then
 		return
 	end
-	zoomText.Text = if magnification > 0 then `{magnification}×` else ""
+	lastMagnification = magnification
+	zoomText.Text = if magnification > 0
+		then (if nightVisionShown then `{magnification}×  ·  NV` else `{magnification}×`)
+		else ""
 	if scope then
 		scope.Visible = magnification > 0
 	end

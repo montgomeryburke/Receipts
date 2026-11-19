@@ -28,6 +28,7 @@ local Shot = require(Shared:WaitForChild("Shot"))
 
 local Hud = require(script.Parent:WaitForChild("Hud"))
 local Feel = require(script.Parent:WaitForChild("Feel"))
+local Visuals = require(script.Parent:WaitForChild("Visuals"))
 
 local player = Players.LocalPlayer
 
@@ -413,6 +414,16 @@ local function applyZoom()
 		end
 		player.CameraMode = Enum.CameraMode.Classic
 		Hud.SetZoom(0)
+		--[[
+			Everything that only applies down the sight, undone together.
+
+			Night vision goes with the scope rather than persisting. A green
+			screen you cannot turn off, because you unscoped while it was
+			on, would be an annoying bug and nobody would guess the cause.
+		]]
+		Visuals.SetNightVision(false)
+		Hud.SetNightVision(false)
+		UserInputService.MouseDeltaSensitivity = 1
 		-- Back to walking pace.
 		Remotes.Event("SetScoped"):FireServer(false)
 		return
@@ -433,6 +444,18 @@ local function applyZoom()
 	end
 	player.CameraMode = Enum.CameraMode.LockFirstPerson
 	Hud.SetZoom(magnification)
+
+	--[[
+		Finer mouse the further in you are.
+
+		At 50x, one pixel of mouse movement sweeps the target from one side
+		of the lens to the other, which is why a long scope feels unusable
+		rather than powerful. This single line is what makes the top
+		magnification worth having.
+	]]
+	local sensitivity = Config.Visuals.ScopedSensitivity
+	UserInputService.MouseDeltaSensitivity =
+		sensitivity[math.clamp(zoomStage + 1, 1, #sensitivity)] or 1
 	--[[
 		Scoped, you move at a fraction of walking pace.
 
@@ -1077,6 +1100,21 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		return
 	end
 
+	--[[
+		Night vision, down the sight only.
+
+		Deliberately not available unscoped: a permanently green world would
+		be a cheat rather than a feature, and the point of it is that it is
+		something the scope gives you.
+	]]
+	if input.KeyCode == Enum.KeyCode.N then
+		if zoomStage >= 1 then
+			Visuals.SetNightVision(not Visuals.NightVisionOn())
+			Hud.SetNightVision(Visuals.NightVisionOn())
+		end
+		return
+	end
+
 	if input.KeyCode == Enum.KeyCode.R then
 		Remotes.Event("Reload"):FireServer()
 	elseif input.KeyCode == Enum.KeyCode.F then
@@ -1600,6 +1638,27 @@ end
 function Controls.SetCarryingBowling(on: boolean)
 	carryingBowling = on
 	refreshActionBar()
+end
+
+--[[
+	For tests: put a named weapon in your hands, and read the zoom.
+
+	Exposed rather than reached into because the scope's behaviour -- how
+	fine the mouse gets, whether night vision is available -- is only
+	meaningful with a scoped weapon equipped, and a test cannot otherwise
+	get there.
+]]
+function Controls.EquipForTests(name: string)
+	equipped = name
+	clearZoom()
+end
+
+function Controls.ZoomStageForTests(): number
+	return zoomStage
+end
+
+function Controls.ClearZoomForTests()
+	clearZoom()
 end
 
 --[[ For tests: which context owns the keys right now. ]]
