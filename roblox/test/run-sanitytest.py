@@ -388,6 +388,10 @@ print("Per-player tables:")
 --[[LEAKCHECK]]
 
 print("")
+print("Floating labels:")
+--[[LABELCHECK]]
+
+print("")
 print("The harness itself:")
 
 do
@@ -752,6 +756,55 @@ def unswept_player_tables():
     return offenders
 
 
+# ----------------------------------------------------------------------------
+# Which floating labels have no draw distance?
+#
+# A BillboardGui with no MaxDistance renders at any range. On a 2000-stud map
+# that is three problems at once: clutter that buries whatever the player
+# actually needs to read, a mild wallhack when AlwaysOnTop is also set, and a
+# GUI drawn for every one of them that nobody can act on.
+#
+# The pickup label was the one that mattered -- about seventy-five of them,
+# all AlwaysOnTop, none with a distance, so every pickup on the map drew its
+# name through buildings from your spawn. Six of the eight modules that make
+# billboards already set one, which is exactly the shape of rule worth
+# pinning: it was the convention, and the convention had two holes in it.
+#
+# Read from the source because a label nobody looks at in a test is still a
+# label every player looks at.
+BILLBOARD = re.compile(r'Instance\.new\(\s*"BillboardGui"\s*\)')
+
+
+def labels_without_distance():
+    offenders = []
+    for folder in ("server", "client", "shared"):
+        base = os.path.join(SRC, folder)
+        if not os.path.isdir(base):
+            continue
+        for root, _dirs, names in os.walk(base):
+            for name in sorted(names):
+                if not name.endswith(".luau"):
+                    continue
+                with open(os.path.join(root, name), encoding="utf-8") as handle:
+                    body = handle.read()
+                made = len(BILLBOARD.findall(body))
+                if made == 0:
+                    continue
+                ranged = len(re.findall(r"\.MaxDistance\s*=", body))
+                if ranged < made:
+                    offenders.append("%s (%d of %d)" % (name[:-5], ranged, made))
+    return offenders
+
+
+UNRANGED_LABELS = labels_without_distance()
+LABEL_CHECK = (
+    'check("every floating label has a draw distance", %s, %s)'
+    % (
+        "true" if not UNRANGED_LABELS else "false",
+        '""' if not UNRANGED_LABELS else '"' + ", ".join(UNRANGED_LABELS) + '"',
+    )
+)
+
 UNSWEPT = unswept_player_tables()
 LEAK_CHECK = (
     'check("every per-player table on the server is emptied again", %s, %s)'
@@ -860,6 +913,7 @@ harness = (
     .replace("--[[LIGHTINGCHECK]]", LIGHTING_CHECK)
     .replace("--[[DELAYCHECK]]", DELAY_CHECK)
     .replace("--[[LEAKCHECK]]", LEAK_CHECK)
+    .replace("--[[LABELCHECK]]", LABEL_CHECK)
     .replace("--[[STUBS]]", read(HERE, "stubs.luau"))
     .replace("--[[CONFIG]]", strip(read(SRC, "shared", "Config.luau")))
     .replace("--[[SOUND]]", strip(read(SRC, "shared", "Sound.luau")))

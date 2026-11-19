@@ -405,6 +405,21 @@ end
 	are the useful new part — 2x is close enough to line up a headshot across
 	a room without losing track of where you are.
 ]]
+--[[
+	Is the boost key down, and what should the lens be with no sight up?
+
+	Declared above BOTH the things that tween the field of view, because
+	they have to agree on where "not zoomed" is. applyZoom used to tween
+	back to defaultFov flat, so scoping and unscoping while boosting threw
+	the wide lens away and left you at walking FOV at full speed -- with
+	nothing to put it back until you let go of shift and pressed it again.
+]]
+local turboHeld = false
+
+local function restingFov(): number
+	return if turboHeld then Config.Visuals.TurboFieldOfView else defaultFov
+end
+
 local function applyZoom()
 	local cam = getCamera()
 	local spec = arsenal[effectiveWeaponName()]
@@ -413,7 +428,9 @@ local function applyZoom()
 	if zoomStage < 1 or (not levels and not (spec and spec.ZoomFov)) then
 		zoomStage = 0
 		if cam then
-			TweenService:Create(cam, TweenInfo.new(0.12), { FieldOfView = defaultFov }):Play()
+			-- Back to whatever "not zoomed" means right now, which is the
+			-- wide lens if the boost is still held.
+			TweenService:Create(cam, TweenInfo.new(0.12), { FieldOfView = restingFov() }):Play()
 		end
 		player.CameraMode = Enum.CameraMode.Classic
 		Hud.SetZoom(0)
@@ -471,6 +488,56 @@ local function applyZoom()
 		server cannot work out for itself.
 	]]
 	Remotes.Event("SetScoped"):FireServer(magnification)
+end
+
+--[[
+	The lens widens on turbo.
+
+	A speed boost you cannot feel is a number. Widening the field of view
+	pulls the edges of the screen past you faster than the middle, which is
+	the whole reason speed reads as speed -- the same trick as the base 75
+	being wider than Roblox's 70, applied where it matters most.
+
+	Refuses while you are zoomed, and that is the point of it being one
+	function rather than two lines at each shift edge: the scope tweens the
+	FOV too, so a turbo kick landing mid-scope would fight it and leave the
+	lens at whichever value happened to finish last. Scoped, the sight wins;
+	the tracking is kept so unscoping hands back the right one.
+]]
+local function applyTurboLens()
+	local cam = getCamera()
+	if not cam then
+		return
+	end
+	if zoomStage > 0 then
+		-- Down the sight the scope owns the lens. applyZoom will put it
+		-- back where it belongs when you unscope.
+		return
+	end
+	TweenService:Create(
+		cam,
+		TweenInfo.new(Config.Visuals.TurboFovSeconds),
+		{ FieldOfView = restingFov() }
+	):Play()
+end
+
+--[[ For tests: is the wide lens being asked for? ]]
+function Controls.TurboLensForTests(): boolean
+	return turboHeld
+end
+
+--[[
+	For tests: the field of view this module would settle the lens at.
+
+	Asserted on instead of the camera's own property because the lens is
+	reached through a tween, and a test cannot wait a quarter of a second of
+	wall clock for one to finish. What was wrong here was the DECISION --
+	applyZoom tweening flat to the base value and throwing away the wide
+	lens -- so the decision is the thing worth pinning. The same reasoning
+	as the scope test asserting on the zoom stage rather than on the lens.
+]]
+function Controls.RestingFovForTests(): number
+	return restingFov()
 end
 
 --[[ Right click: next magnification, then back out to hipfire. ]]
@@ -1008,6 +1075,8 @@ local function onInputBegan(input: InputObject, processed: boolean)
 		-- Same key whether you are driving or on foot: go faster.
 		Remotes.Event("SetTurbo"):FireServer(true)
 		Hud.SetTurbo(true)
+		turboHeld = true
+		applyTurboLens()
 		return
 	end
 
@@ -1171,6 +1240,8 @@ local function onInputEnded(input: InputObject)
 	elseif input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
 		Remotes.Event("SetTurbo"):FireServer(false)
 		Hud.SetTurbo(false)
+		turboHeld = false
+		applyTurboLens()
 	end
 end
 
@@ -1477,6 +1548,10 @@ local function buildTouchButton()
 	turbo.MouseButton1Up:Connect(function()
 		Remotes.Event("SetTurbo"):FireServer(false)
 		Hud.SetTurbo(false)
+		-- The lens has to come back too, or losing focus mid-boost leaves
+		-- you looking through a wide-angle for the rest of the life.
+		turboHeld = false
+		applyTurboLens()
 	end)
 
 	-- Bail out of a vehicle or a rocket. Deploys the parachute, same as the
@@ -1563,6 +1638,10 @@ function Controls.Start()
 		firing = false
 		Remotes.Event("SetTurbo"):FireServer(false)
 		Hud.SetTurbo(false)
+		-- The lens has to come back too, or losing focus mid-boost leaves
+		-- you looking through a wide-angle for the rest of the life.
+		turboHeld = false
+		applyTurboLens()
 	end)
 	RunService.Heartbeat:Connect(onHeartbeat)
 

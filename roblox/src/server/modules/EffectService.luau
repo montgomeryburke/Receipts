@@ -91,10 +91,13 @@ local function spawnDonkey(position: Vector3)
 		Util.Weld(head, earPart)
 	end
 
+	-- A landmark, so it stays on top and carries a long way: being able to
+	-- see the enormous animal from across the map is the point of it.
 	local billboard = Instance.new("BillboardGui")
 	billboard.Size = UDim2.fromScale(10, 3)
 	billboard.StudsOffset = Vector3.new(0, 5, 0)
 	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = Config.Visuals.LandmarkLabelDistance
 	billboard.Parent = head
 
 	local label = Instance.new("TextLabel")
@@ -157,6 +160,7 @@ local function spawnUnicorn(position: Vector3)
 	billboard.Size = UDim2.fromScale(12, 3)
 	billboard.StudsOffset = Vector3.new(0, 6, 0)
 	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = Config.Visuals.LandmarkLabelDistance
 	billboard.Parent = body
 
 	local label = Instance.new("TextLabel")
@@ -185,9 +189,11 @@ local function spawnCat(position: Vector3)
 		Parent = workspace,
 	})
 
+	-- Scenery you read in passing, not through a building.
 	local billboard = Instance.new("BillboardGui")
 	billboard.Size = UDim2.fromScale(14, 6)
-	billboard.AlwaysOnTop = true
+	billboard.AlwaysOnTop = false
+	billboard.MaxDistance = Config.Visuals.PropLabelDistance
 	billboard.Parent = sign
 
 	local label = Instance.new("TextLabel")

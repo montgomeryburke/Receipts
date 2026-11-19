@@ -1237,6 +1237,44 @@ Config.Visuals = {
 	OutlineTransparency = 0.15,
 
 	--[[
+		How far away a floating label is still worth drawing.
+
+		Every BillboardGui in the game was given a draw distance except two,
+		and the one that mattered was the pickup label: about seventy-five
+		of them, all AlwaysOnTop, none with a MaxDistance. So every pickup
+		on a two-thousand stud map drew its name THROUGH buildings at any
+		range. That is three things at once -- clutter that buries the
+		things you actually need to read, a mild wallhack that maps the
+		whole arena's loot from your spawn, and seventy-five GUIs being
+		rendered that nobody can act on.
+
+		Three distances rather than one, because the labels are not doing
+		the same job. A pickup's name you need when you are close enough to
+		walk into it. A sign is scenery you read in passing. A giant animal
+		is a landmark, and the whole point of a landmark is that you can
+		see it from across the map.
+	]]
+	PickupLabelDistance = 180,
+	PropLabelDistance = 260,
+	LandmarkLabelDistance = 700,
+
+	--[[
+		How much wider the lens goes on turbo.
+
+		A speed boost you cannot feel is a number. Widening the field of
+		view pulls the edges of the screen past you faster than the middle,
+		which is the entire reason speed reads as speed -- it is the same
+		trick as the base 75 being wider than Roblox's 70, just applied
+		when it matters most.
+
+		Small on purpose. A big FOV swing is nauseating, and it also makes
+		things look further away exactly when you most need to judge how
+		close you are to a wall.
+	]]
+	TurboFieldOfView = 88,
+	TurboFovSeconds = 0.25,
+
+	--[[
 		Night vision, down the scope only.
 
 		Parented to the CAMERA rather than to Lighting, which is not a
@@ -1983,6 +2021,11 @@ export type ConfigType = {
 		NightVisionBrightness: number,
 		NightVisionContrast: number,
 		ScopedSensitivity: { { upTo: number, factor: number } },
+		PickupLabelDistance: number,
+		PropLabelDistance: number,
+		LandmarkLabelDistance: number,
+		TurboFieldOfView: number,
+		TurboFovSeconds: number,
 	},
 	Carnival: {
 		BalloonPoints: number, BalloonClearBonus: number,

@@ -423,6 +423,33 @@ do
 	check("and leaves the list again",
 		PickupService.WaitingForTests() == 0,
 		string.format("%d waiting", PickupService.WaitingForTests()))
+
+	--[[
+		And its label does not shout across the whole map.
+
+		It had neither a draw distance nor occlusion, so about seventy-five
+		pickup names rendered THROUGH buildings at any range: clutter that
+		buries whatever you actually need to read, and a mild wallhack that
+		maps the arena's loot from your spawn.
+
+		AlwaysOnTop off is the same judgement the player outlines make with
+		their Occluded depth mode -- knowing a thing is there is
+		information, and information through a wall is a different game.
+	]]
+	local label = pad:FindFirstChildOfClass("BillboardGui")
+	check("the pickup has a label", label ~= nil)
+	if label then
+		check("it fades out at a sensible range",
+			label._props.MaxDistance == Config.Visuals.PickupLabelDistance,
+			tostring(label._props.MaxDistance))
+		check("and does not draw through walls",
+			label._props.AlwaysOnTop == false,
+			tostring(label._props.AlwaysOnTop))
+		-- Close enough to walk into, not across the arena.
+		check("the range is near, not map-wide",
+			Config.Visuals.PickupLabelDistance < 400,
+			string.format("%d studs", Config.Visuals.PickupLabelDistance))
+	end
 end
 
 DUMP("")

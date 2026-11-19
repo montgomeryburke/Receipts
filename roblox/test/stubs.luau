@@ -715,9 +715,53 @@ end
 Instance = { new = function(class) return newInstance(class) end }
 
 workspace = newInstance("Workspace")
+--[[
+	Services, made once and kept.
+
+	They used to be made fresh on every call, so two `game:GetService(...)`
+	calls for the same service handed back two different objects -- and
+	anything one of them was set up with was invisible to the other.
+
+	TweenService gets a real Create. There was none at all: the client code
+	tweens the field of view for the scope and for the boost, and with no
+	Create those calls either threw inside a pcall-guarded path or were
+	skipped, which meant every assertion about where the lens ended up was
+	passing without testing anything. A tween here applies its goal
+	IMMEDIATELY rather than over time -- a test cannot wait a quarter of a
+	second of wall clock, and what matters is that the right target was
+	asked for.
+]]
+local SERVICES = {}
+
+local function fitOutService(name, svc)
+	if name ~= "TweenService" then
+		return
+	end
+	rawget(svc, "_props").Create = function(_, target, _info, goals)
+		local done = anySignal()
+		return {
+			Play = function()
+				for key, value in goals do
+					target[key] = value
+				end
+				done._fire()
+			end,
+			Cancel = function() end,
+			Pause = function() end,
+			Completed = done,
+		}
+	end
+end
+
 game = {
 	GetService = function(_, name)
+		local existing = SERVICES[name]
+		if existing then
+			return existing
+		end
 		local svc = newInstance(name)
+		fitOutService(name, svc)
+		SERVICES[name] = svc
 		return svc
 	end,
 }

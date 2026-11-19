@@ -213,7 +213,38 @@ service("RunService", {
 })
 service("Teams", {})
 service("Debris", { AddItem = function() end })
-service("TweenService", { Create = function() return { Play = function() end, Completed = signal() } end })
+--[[
+	TweenService, which actually applies what it is asked to.
+
+	Play used to be an empty function, so every tween in the game was a
+	no-op here -- and this is the registration BOTH suites end up using,
+	which meant every assertion about where a tween left a property was
+	passing without testing anything at all. The scope's field of view, the
+	death overlay's fade, the tracer, the muzzle flash: all of them.
+
+	The goal is applied IMMEDIATELY rather than over time. A test cannot
+	wait a quarter of a second of wall clock for an animation, and what
+	matters is that the right target was asked for -- not the interpolation,
+	which is Roblox's job and not this game's.
+]]
+service("TweenService", {
+	Create = function(_, target, _info, goals)
+		local done = signal()
+		return {
+			Play = function()
+				if target and goals then
+					for key, value in goals do
+						target[key] = value
+					end
+				end
+				done._fire()
+			end,
+			Cancel = function() end,
+			Pause = function() end,
+			Completed = done,
+		}
+	end,
+})
 service("MarketplaceService", {
 	UserOwnsGamePassAsync = function() return false end,
 })

@@ -180,10 +180,26 @@ local function createPickup(kind: string, position: Vector3, parent: Folder, wea
 		Parent = parent,
 	})
 
+	--[[
+		The label, close up and not through walls.
+
+		It had neither a draw distance nor occlusion, which on a map this
+		size meant about seventy-five pickup names rendering THROUGH
+		buildings at any range. Three problems in one: clutter that buries
+		whatever you actually need to read, a mild wallhack that maps the
+		arena's loot from your spawn, and seventy-five GUIs drawn that
+		nobody could act on.
+
+		AlwaysOnTop off is the same judgement the player outlines make with
+		their Occluded depth mode: knowing a thing is there is information,
+		and information through a wall is a different game. The pickup part
+		itself is Neon, so it is not hard to spot once you can see it.
+	]]
 	local billboard = Instance.new("BillboardGui")
 	billboard.Size = UDim2.fromScale(8, 2)
 	billboard.StudsOffset = Vector3.new(0, 4, 0)
-	billboard.AlwaysOnTop = true
+	billboard.AlwaysOnTop = false
+	billboard.MaxDistance = Config.Visuals.PickupLabelDistance
 	billboard.Parent = part
 
 	local label = Instance.new("TextLabel")
