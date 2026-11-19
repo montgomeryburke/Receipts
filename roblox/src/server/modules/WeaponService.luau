@@ -665,6 +665,82 @@ local function handleMelee(player: Player)
 	if now < state.nextMeleeAt then
 		return
 	end
+
+	--[[
+		A fresh body in reach: kick it instead of swinging.
+
+		Checked BEFORE the swing because there is no situation where you
+		would rather swing at a corpse than kick it, so the same key doing
+		the right thing by context beats a second binding nobody remembers.
+		A swing at a live opponent is unchanged.
+
+		It does no damage whatsoever. They are already dead; the point is
+		the shove and the message, not a contribution to killing them.
+	]]
+	local freshest: Player? = nil
+	local freshestPart: BasePart? = nil
+	local closest = Config.Kick.Range
+	for _, other in Players:GetPlayers() do
+		if other == player then
+			continue
+		end
+		local wentDown = DamageService.WentDownAt(other)
+		if not wentDown or now - wentDown > Config.Kick.DeathWindow then
+			continue
+		end
+		local body = other.Character
+		local bodyRoot = body and body:FindFirstChild("HumanoidRootPart")
+		if not bodyRoot or not bodyRoot:IsA("BasePart") then
+			continue
+		end
+		local distance = (bodyRoot.Position - root.Position).Magnitude
+		if distance < closest then
+			closest = distance
+			freshest = other
+			freshestPart = bodyRoot
+		end
+	end
+
+	if freshest and freshestPart then
+		state.nextMeleeAt = now + Config.Kick.Cooldown
+
+		-- Turn to face them, so the kick reads as deliberate.
+		local toward = Vector3.new(
+			freshestPart.Position.X,
+			root.Position.Y,
+			freshestPart.Position.Z
+		)
+		if (toward - root.Position).Magnitude > 0.1 then
+			root.CFrame = CFrame.lookAt(root.Position, toward)
+		end
+
+		local away = freshestPart.Position - root.Position
+		local flat = Vector3.new(away.X, 0, away.Z)
+		if flat.Magnitude > 0.01 then
+			freshestPart.AssemblyLinearVelocity = flat.Unit * Config.Kick.Force
+				+ Vector3.new(0, Config.Kick.Lift, 0)
+		end
+
+		Sound.At("MeleeHit", root.Position, 0.8)
+		PlayerState.AwardPoints(player, Config.Kick.Points, "a cheap shot")
+
+		--[[
+			Told about it, which is most of the joke.
+
+			A shove nobody notices is just physics. The one being kicked is
+			the audience.
+		]]
+		Remotes.Event("Notify"):FireClient(freshest, `{player.DisplayName} kicked you while you were down`)
+		Remotes.Event("KillFeed"):FireAllClients(
+			`{player.DisplayName} kicked {freshest.DisplayName} while they were down`,
+			false
+		)
+
+		-- Once per body. Otherwise a corpse is a five-second points faucet.
+		DamageService.ClearDeathRecord(freshest)
+		return
+	end
+
 	state.nextMeleeAt = now + Config.Melee.Cooldown
 
 	Sound.At("MeleeSwing", root.Position)
@@ -881,6 +957,11 @@ end
 --[[ Unused for now, but kept so the origin check has a home when we tighten it. ]]
 function WeaponService.MaxOriginDrift(): number
 	return MAX_ORIGIN_DRIFT
+end
+
+--[[ For tests: swing, or kick, exactly as the remote would. ]]
+function WeaponService.MeleeForTests(player: Player)
+	handleMelee(player)
 end
 
 return WeaponService

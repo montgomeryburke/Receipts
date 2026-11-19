@@ -108,7 +108,26 @@ function DamageService.ApplyDamage(
 end
 
 --[[ Book-keeping for a death: keys to the killer, a tally for both. ]]
+--[[
+	When each player last went down, and where.
+
+	Kept here because this is where a death is known about, and read by the
+	melee code to decide whether the thing in front of you is a fresh body
+	worth kicking. A short-lived fact about a player, in the module that
+	owns facts about players being hurt.
+]]
+local diedAt: { [Player]: number } = {}
+
+function DamageService.WentDownAt(victim: Player): number?
+	return diedAt[victim]
+end
+
+function DamageService.ClearDeathRecord(victim: Player)
+	diedAt[victim] = nil
+end
+
 function DamageService.HandleDeath(victim: Player, killer: Player?, cause: string)
+	diedAt[victim] = os.clock()
 	if victim.Parent then
 		local victimState = PlayerState.Get(victim)
 		victimState.deaths += 1

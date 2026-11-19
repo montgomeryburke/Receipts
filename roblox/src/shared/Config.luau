@@ -1029,6 +1029,14 @@ Config.Help = {
 		keywords = { "drive", "car", "truck", "vehicle", "stuck", "winch", "mud", "diff", "4wd", "gear" },
 	},
 	{
+		question = "Can I kick someone I just dropped?",
+		answer = "Yes. Stand next to somebody who went down in the last few seconds "
+			.. "and press Q -- the melee key kicks them instead of swinging. It does "
+			.. "no damage at all and they get told about it, which is the whole "
+			.. "point.",
+		keywords = { "kick", "dead", "body", "corpse", "shove", "melee", "taunt", "low" },
+	},
+	{
 		question = "What are the blinking metal discs?",
 		answer = "Land mines. Step or drive on one and it goes off, then throws a "
 			.. "fireball into the sky that explodes again wherever it comes down -- "
@@ -1211,6 +1219,35 @@ Config.Riding = {
 	ShoveRange = 14,
 	ShoveForce = 55,
 	ShoveLift = 16,
+}
+
+--[[
+	Kicking somebody who has just gone down.
+
+	Entirely cosmetic and entirely the point. It does no damage, cannot
+	finish anyone off and gives no advantage -- it exists because standing
+	over somebody you just dropped and giving them a shove is a thing people
+	do in shooters, and because it is funny.
+
+	It is on the MELEE key rather than a key of its own. There is no
+	situation where you would rather swing at a corpse than kick it, so the
+	same key doing the right thing by context is better than a binding
+	nobody remembers. A swing at a live opponent is still a swing.
+
+	The window is short on purpose. Five seconds is long enough to walk over
+	and do it, and short enough that bodies lying around the map are not a
+	permanent invitation -- which would make it tedious rather than funny.
+]]
+Config.Kick = {
+	Range = 11,
+	DeathWindow = 5,
+	Cooldown = 1.2,
+	-- The shove. Sideways and up, so they tumble rather than slide.
+	Force = 28,
+	Lift = 18,
+	-- Worth a couple of points, because it is a flourish and not an
+	-- achievement. Enough that you notice; not enough to farm.
+	Points = 5,
 }
 
 Config.Movement = {
@@ -1655,6 +1692,10 @@ export type ConfigType = {
 	},
 	GrenadeKeyWeapon: string,
 	WeaponsAlwaysAvailable: boolean,
+	Kick: {
+		Range: number, DeathWindow: number, Cooldown: number,
+		Force: number, Lift: number, Points: number,
+	},
 	Movement: { JumpPower: number, HeadshotMultiplier: number, ScopedSpeedFactor: number },
 	Help: { { question: string, answer: string, keywords: { string } } },
 	Medals: { [string]: { name: string, points: number, sound: string } },

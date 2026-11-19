@@ -646,6 +646,140 @@ do
 end
 
 DUMP("")
+DUMP("The cheap shot:")
+do
+	--[[
+		Kicking somebody who has just gone down.
+
+		Entirely cosmetic and entirely the point: no damage, no advantage,
+		it exists because standing over somebody you just dropped and giving
+		them a shove is a thing people do, and because it is funny. On the
+		MELEE key rather than its own, because there is no situation where
+		you would rather swing at a corpse than kick it.
+	]]
+	MatchService.SetPhaseForTests("Playing")
+	PlayerState.Reset(killer, false)
+	PlayerState.Reset(prey, false)
+
+	--[[
+		Stating this block's own preconditions.
+
+		Two earlier sections leave state behind that silently breaks a melee
+		swing: the hockey section puts prey on killer's team to prove you
+		cannot fight a team-mate, and friendly fire is off -- and another
+		stubs workspace:Raycast to return a hit, which the swing reads as a
+		wall between them. Both are correct game behaviour, so the fix is
+		for this block to say what it needs rather than to inherit whatever
+		the last one wanted.
+	]]
+	local redTeam = Instance.new("Team")
+	redTeam._props.Name = "KickRed"
+	local blueTeam = Instance.new("Team")
+	blueTeam._props.Name = "KickBlue"
+	killer._props.Team = redTeam
+	prey._props.Team = blueTeam
+	rawget(workspace, "_props").Raycast = function()
+		return nil
+	end
+	-- And past spawn protection, which Reset grants and which correctly
+	-- refuses all damage while it lasts.
+	ADVANCE(Config.Combat.SpawnProtection + 0.5)
+
+	local kickerRoot = killer._props.Character:FindFirstChild("HumanoidRootPart")
+	local victimRoot = prey._props.Character:FindFirstChild("HumanoidRootPart")
+	local victimHumanoid = prey._props.Character:FindFirstChildOfClass("Humanoid")
+	local kickerHumanoid = killer._props.Character:FindFirstChildOfClass("Humanoid")
+
+	kickerHumanoid._props.Health = 100
+	kickerHumanoid._props.SeatPart = nil
+	kickerRoot._props.CFrame = CFrame.new(0, 3, 0)
+	-- In FRONT of the kicker: Roblox's forward is -Z, and a melee swing
+	-- correctly refuses to hit somebody standing behind you. (The kick
+	-- turns to face its target, which is why putting them behind still
+	-- kicked fine and only the swing missed.)
+	victimRoot._props.CFrame = CFrame.new(0, 3, -6)
+	victimHumanoid._props.Health = 100
+
+	-- A living opponent in reach is a SWING, not a kick. The kick must not
+	-- quietly replace the melee.
+	DamageService.ClearDeathRecord(prey)
+	local healthBefore = victimHumanoid._props.Health
+	WeaponService.MeleeForTests(killer)
+	check("melee still swings at the living", victimHumanoid._props.Health < healthBefore,
+		string.format("%.0f -> %.0f health", healthBefore, victimHumanoid._props.Health))
+
+	--[[
+		Now they are down, and recently.
+
+		HandleDeath is what records the moment, so the kick reads the same
+		fact the kill feed does rather than keeping its own.
+	]]
+	victimHumanoid._props.Health = 0
+	DamageService.HandleDeath(prey, killer, "Rifle")
+	RUN_SPAWNED()
+	check("going down is recorded", DamageService.WentDownAt(prey) ~= nil, "")
+
+	ADVANCE(Config.Kick.Cooldown + 0.1)
+	FIRED = {}
+	victimRoot._props.AssemblyLinearVelocity = Vector3.new()
+	local pointsBefore = PlayerState.Get(killer).points
+	WeaponService.MeleeForTests(killer)
+	RUN_SPAWNED()
+
+	check("the melee key kicks a fresh body",
+		victimRoot._props.AssemblyLinearVelocity.Magnitude > 0,
+		string.format("%.0f studs/sec", victimRoot._props.AssemblyLinearVelocity.Magnitude))
+	check("and it throws them upward, not along the floor",
+		victimRoot._props.AssemblyLinearVelocity.Y > 0,
+		string.format("%.0f vertical", victimRoot._props.AssemblyLinearVelocity.Y))
+
+	-- They are TOLD. A shove nobody notices is just physics; the one being
+	-- kicked is the audience.
+	local told = false
+	for _, call in FIRED_TO("Notify") do
+		if call.player == prey then
+			told = true
+		end
+	end
+	check("the victim is told about it", told, "")
+	check("it is worth a couple of points, not a kill",
+		PlayerState.Get(killer).points == pointsBefore + Config.Kick.Points,
+		string.format("%d points", PlayerState.Get(killer).points - pointsBefore))
+
+	--[[
+		Once per body.
+
+		Otherwise a corpse is a five-second points faucet, which turns a
+		flourish into a farm.
+	]]
+	ADVANCE(Config.Kick.Cooldown + 0.1)
+	local afterFirst = PlayerState.Get(killer).points
+	WeaponService.MeleeForTests(killer)
+	RUN_SPAWNED()
+	check("a body can only be kicked once",
+		PlayerState.Get(killer).points == afterFirst,
+		string.format("%d more points", PlayerState.Get(killer).points - afterFirst))
+
+	--[[
+		And the window closes.
+
+		Five seconds is long enough to walk over and do it, short enough
+		that bodies lying around the map are not a permanent invitation --
+		which would make it tedious rather than funny.
+	]]
+	DamageService.HandleDeath(prey, killer, "Rifle")
+	RUN_SPAWNED()
+	ADVANCE(Config.Kick.DeathWindow + 1)
+	local afterWindow = PlayerState.Get(killer).points
+	victimRoot._props.AssemblyLinearVelocity = Vector3.new()
+	WeaponService.MeleeForTests(killer)
+	RUN_SPAWNED()
+	check("an old body is not kickable",
+		PlayerState.Get(killer).points == afterWindow,
+		string.format("%d more points", PlayerState.Get(killer).points - afterWindow))
+end
+
+DUMP("")
 DUMP("Basketball:")
 do
 	--[[
