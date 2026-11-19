@@ -1274,6 +1274,83 @@ do
 			string.format("%d of %d chained", chained, #neighbours))
 	end
 
+	--[[
+		Land mines.
+
+		The blinking light is what makes these fair rather than cruel: a
+		mine you cannot see is a random death, and a mine with a red light
+		on it is a thing you drove over anyway. The fireball is what keeps
+		them interesting once the map is learned -- the mine is predictable
+		and the second blast is not.
+	]]
+	check("there are mines on the map", FireService.MineCount() > 0,
+		string.format("%d armed", FireService.MineCount()))
+
+	local mine = FireService.MinesForTests()[1]
+	check("a mine has a warning light", mine ~= nil and mine.led ~= nil, "")
+
+	if mine then
+		--[[
+			The light blinks from the SHARED heartbeat.
+
+			The pasted version gave every mine its own while-loop in its own
+			thread: twenty mines is then twenty threads waking twice a
+			second forever to toggle a colour. One shared flip looks
+			identical and costs nothing.
+		]]
+		local first = mine.led._props.Color
+		ADVANCE(Config.Fire.MineBlinkSeconds + 0.01)
+		FireService.StepForTests()
+		local second = mine.led._props.Color
+		check("the light blinks", first ~= second,
+			string.format("%.2f -> %.2f red", first.R, second.R))
+
+		--[[
+			The ground it sits on must not set it off.
+
+			A mine rests on terrain and usually beside a kerb, and both touch
+			it constantly. Only something that MOVED into it counts -- which
+			is exactly the set of things that should trigger a mine.
+		]]
+		local floor = Instance.new("Part")
+		floor._props.Anchored = true
+		mine.body._props.Touched._fire(floor)
+		check("the ground it rests on does not set it off", mine.armed,
+			tostring(mine.armed))
+
+		-- A player walking into it does.
+		local armedBefore = FireService.MineCount()
+		local root = prey._props.Character:FindFirstChild("HumanoidRootPart")
+		root._props.Anchored = false
+		mine.body._props.Touched._fire(root)
+		check("stepping on one sets it off", not mine.armed, tostring(mine.armed))
+		check("and it leaves the minefield", FireService.MineCount() < armedBefore,
+			string.format("%d of %d left", FireService.MineCount(), armedBefore))
+
+		--[[
+			The fireball comes down on a timer and explodes again.
+
+			Checked by flushing the delayed queue: the second blast is the
+			whole point of a mine here, and without it this is just a
+			slightly louder landmine.
+		]]
+		local scorchBefore = 0
+		for _, child in workspace:GetChildren() do
+			if child._props.Name == "Scorch" then
+				scorchBefore += 1
+			end
+		end
+		RUN_DELAYED()
+		local scorchAfter = 0
+		for _, child in workspace:GetChildren() do
+			if child._props.Name == "Scorch" then
+				scorchAfter += 1
+			end
+		end
+		check("the fireball lands and burns the ground", scorchAfter > scorchBefore,
+			string.format("%d scorch marks", scorchAfter))
+	end
+
 	FireService.Clear()
 	check("clearing takes the petrol with it",
 		FireService.PuddleCount() == 0 and FireService.CanCount() == 0,

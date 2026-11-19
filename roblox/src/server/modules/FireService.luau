@@ -58,8 +58,18 @@ type Can = {
 	gone: boolean,
 }
 
+type Mine = {
+	body: BasePart,
+	led: BasePart,
+	home: Vector3,
+	armed: boolean,
+}
+
 local puddles: { Puddle } = {}
 local cans: { Can } = {}
+local mines: { Mine } = {}
+local nextBlinkAt = 0
+local blinkOn = false
 local holder: Model? = nil
 
 -- Who is carrying a can, and how much is left in it.
@@ -132,6 +142,102 @@ local function spawnCan(at: Vector3, parent: Instance): Can
 	end)
 
 	return record
+end
+
+--[[
+	Launch a fireball into the sky, which explodes again where it lands.
+
+	The second blast is the whole idea: a mine you can see and step round is
+	a hazard you learn, and a mine that throws a second explosion somewhere
+	unpredictable is a hazard that keeps mattering after you have learned
+	it. It also means a mine going off is a thing the whole map notices
+	rather than a private accident.
+]]
+local function launchFireball(from: Vector3, by: Player?)
+	local ball = Util.Part({
+		Name = "Fireball",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(3.5, 3.5, 3.5),
+		CFrame = CFrame.new(from + Vector3.new(0, 4, 0)),
+		Color = Color3.fromRGB(255, 110, 20),
+		Material = Enum.Material.Neon,
+		Anchored = false,
+		-- Nothing should be able to shoot it down or stand on it: it is an
+		-- event in flight, not an object.
+		CanCollide = false,
+		CanQuery = false,
+		Parent = workspace,
+	})
+
+	local fire = Instance.new("Fire")
+	fire.Size = 10
+	fire.Heat = 20
+	fire.Color = Color3.fromRGB(255, 140, 20)
+	fire.SecondaryColor = Color3.fromRGB(255, 40, 0)
+	fire.Parent = ball
+
+	local glow = Instance.new("PointLight")
+	glow.Color = Color3.fromRGB(255, 120, 30)
+	glow.Range = 28
+	glow.Brightness = 4
+	glow.Parent = ball
+
+	-- A random direction, so where the second blast lands cannot be learned.
+	local angle = math.random() * math.pi * 2
+	local across = Config.Fire.FireballSpread * (0.5 + math.random() * 0.5)
+	ball.AssemblyLinearVelocity = Vector3.new(
+		math.cos(angle) * across,
+		Config.Fire.FireballLift,
+		math.sin(angle) * across
+	)
+
+	--[[
+		It comes down on a TIMER, not on contact.
+
+		Touched would be the obvious choice and is wrong here: the ball
+		leaves the ground inside a blast that is still expanding, so it
+		fires immediately against whatever it was launched from. A flight
+		time is both predictable to tune and impossible to trigger early.
+	]]
+	task.delay(Config.Fire.FireballFlightSeconds, function()
+		if not ball.Parent then
+			return
+		end
+		local landed = ball.Position
+		ball:Destroy()
+
+		DamageService.Explode(
+			landed,
+			Config.Fire.FireballBlastRadius,
+			Config.Fire.FireballBlastDamage,
+			by,
+			Config.Fire.CanVehicleMultiplier,
+			false,
+			"a fireball"
+		)
+
+		-- A patch of burning ground where it came down, which is a brief
+		-- area to avoid rather than just a noise.
+		local scorch = Util.Part({
+			Name = "Scorch",
+			Size = Vector3.new(10, 0.2, 10),
+			CFrame = CFrame.new(landed),
+			Color = Color3.fromRGB(26, 22, 18),
+			Material = Enum.Material.Ground,
+			Anchored = true,
+			CanCollide = false,
+			CanQuery = false,
+			Parent = workspace,
+		})
+		local groundFire = Instance.new("Fire")
+		groundFire.Size = 12
+		groundFire.Heat = 15
+		groundFire.Parent = scorch
+		Debris:AddItem(scorch, Config.Fire.ScorchSeconds)
+	end)
+
+	-- A failsafe, in case it leaves the map before the timer comes due.
+	Debris:AddItem(ball, Config.Fire.FireballFlightSeconds + 6)
 end
 
 --[[
@@ -381,9 +487,132 @@ function FireService.RegisterHit(part: BasePart, attacker: Player?): boolean
 	return false
 end
 
+--[[ A mine goes off. ]]
+function FireService.Detonate_Mine(mine: Mine, by: Player?)
+	if not mine.armed or not mine.body.Parent then
+		return
+	end
+	mine.armed = false
+
+	local at = mine.body.Position
+	mine.body:Destroy()
+	if mine.led.Parent then
+		mine.led:Destroy()
+	end
+
+	DamageService.Explode(
+		at,
+		Config.Fire.MineBlastRadius,
+		Config.Fire.MineBlastDamage,
+		by,
+		Config.Fire.CanVehicleMultiplier,
+		false,
+		"a land mine"
+	)
+
+	-- Anything poured nearby goes up with it.
+	for _, puddle in puddles do
+		if not puddle.burning and puddle.part.Parent then
+			if (puddle.part.Position - at).Magnitude <= Config.Fire.MineBlastRadius then
+				FireService.Ignite(puddle, by)
+			end
+		end
+	end
+
+	launchFireball(at, by)
+
+	-- And it comes back, because a minefield that empties out stops being
+	-- a thing you have to think about.
+	task.delay(Config.Fire.MineRespawnSeconds, function()
+		if holder and holder.Parent then
+			FireService.PlaceMine(mine.home)
+		end
+	end)
+end
+
+--[[
+	Arm a mine at a spot.
+
+	The blinking light is the entire reason this is fair. A mine you cannot
+	see is a random death; a mine with a red light on it is a thing you
+	drove over anyway, which is a different feeling and a better one.
+]]
+function FireService.PlaceMine(at: Vector3): Mine?
+	if not holder then
+		return nil
+	end
+
+	local body = Util.Part({
+		Name = "LandMine",
+		Shape = Enum.PartType.Cylinder,
+		-- A cylinder lies on its side by default, so it is rotated flat.
+		Size = Vector3.new(0.45, 2.6, 2.6),
+		CFrame = CFrame.new(at + Vector3.new(0, 0.3, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(55, 65, 50),
+		Material = Enum.Material.Metal,
+		Anchored = true,
+		Parent = holder,
+	})
+
+	local led = Util.Part({
+		Name = "MineLED",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(0.5, 0.5, 0.5),
+		CFrame = CFrame.new(at + Vector3.new(0, 0.7, 0)),
+		Color = Color3.fromRGB(255, 30, 30),
+		Material = Enum.Material.Neon,
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = holder,
+	})
+
+	local mine: Mine = { body = body, led = led, home = at, armed = true }
+	table.insert(mines, mine)
+
+	body.Touched:Connect(function(hit: BasePart)
+		--[[
+			Anchored things do not set it off.
+
+			The ground the mine is sitting on touches it constantly, and so
+			does every wall and kerb beside it. Only something that MOVED
+			into it counts, which is exactly the set of things that should
+			trigger a mine: people and vehicles.
+		]]
+		if hit.Anchored then
+			return
+		end
+		FireService.Detonate_Mine(mine, Players:GetPlayerFromCharacter(hit.Parent))
+	end)
+
+	return mine
+end
+
 --[[ Standing in fire hurts, repeatedly, until you move. ]]
 local function burnStep()
 	local now = os.clock()
+
+	--[[
+		Blink every armed mine, from the one loop that already runs.
+
+		The obvious implementation is a while-loop per mine in its own
+		thread, which is what the pasted script did. Twenty mines is then
+		twenty threads waking twice a second forever, to toggle a colour.
+		One shared flip costs nothing and looks identical.
+	]]
+	if now >= nextBlinkAt then
+		nextBlinkAt = now + Config.Fire.MineBlinkSeconds
+		blinkOn = not blinkOn
+		local shade = if blinkOn then Color3.fromRGB(255, 30, 30) else Color3.fromRGB(80, 10, 10)
+		for index = #mines, 1, -1 do
+			local mine = mines[index]
+			if not mine.body.Parent then
+				table.remove(mines, index)
+			elseif mine.armed and mine.led.Parent then
+				mine.led.Color = shade
+			end
+		end
+	end
 
 	--[[
 		Charged once per character per TICK, across every puddle.
@@ -469,7 +698,9 @@ function FireService.Build(mapSize: number)
 	FireService.Clear()
 
 	local model = Instance.new("Model")
-	model.Name = "GasCans"
+	-- Cans and mines both live here, so the name is the category rather
+	-- than one of its members.
+	model.Name = "Hazards"
 	holder = model
 
 	--[[
@@ -502,6 +733,24 @@ function FireService.Build(mapSize: number)
 		end
 	end
 
+	--[[
+		Mines on a wider ring than the cans.
+
+		Further out on purpose: a mine near a spawn is a death you had no
+		part in, and the point of them is the moment you decide to drive
+		over one anyway.
+	]]
+	local mineRadius = mapSize * Config.Fire.MineRingFactor
+	for index = 1, Config.Fire.Mines do
+		-- Offset half a step from the can ring so a mine and a can cluster
+		-- are never in the same place, which would be one hazard wearing
+		-- another's warning light.
+		local angle = ((index - 0.5) / Config.Fire.Mines) * math.pi * 2
+		FireService.PlaceMine(
+			Vector3.new(math.cos(angle) * mineRadius, 0, math.sin(angle) * mineRadius)
+		)
+	end
+
 	model.Parent = workspace
 	return model
 end
@@ -514,6 +763,7 @@ function FireService.Clear()
 	end
 	table.clear(puddles)
 	table.clear(cans)
+	table.clear(mines)
 	table.clear(fuel)
 	table.clear(lastPourAt)
 	if holder then
@@ -559,6 +809,20 @@ function FireService.BurningCount(): number
 		end
 	end
 	return count
+end
+
+function FireService.MineCount(): number
+	local count = 0
+	for _, mine in mines do
+		if mine.armed then
+			count += 1
+		end
+	end
+	return count
+end
+
+function FireService.MinesForTests(): { any }
+	return mines
 end
 
 function FireService.CanCount(): number

@@ -1029,6 +1029,14 @@ Config.Help = {
 		keywords = { "drive", "car", "truck", "vehicle", "stuck", "winch", "mud", "diff", "4wd", "gear" },
 	},
 	{
+		question = "What are the blinking metal discs?",
+		answer = "Land mines. Step or drive on one and it goes off, then throws a "
+			.. "fireball into the sky that explodes again wherever it comes down -- "
+			.. "so the second bang is somewhere nobody can predict. The red light "
+			.. "blinking on top is your warning.",
+		keywords = { "mine", "mines", "landmine", "disc", "blinking", "fireball", "explode", "bomb" },
+	},
+	{
 		question = "How do I play basketball?",
 		answer = "Walk into the ball to pick it up, then HOLD F to wind up and let go "
 			.. "to shoot -- a tap drops it at your feet and a full charge sails over, "
@@ -1165,6 +1173,35 @@ Config.Fire = {
 	ChainDelay = 0.15,
 	-- A cluster of cans must not recurse forever.
 	MaxChainDepth = 6,
+
+	--[[
+		Land mines.
+
+		The blinking light is what makes these fair rather than cruel. A
+		mine you cannot see is a random death; a mine with a red light on it
+		is a thing you drove over anyway, which is a completely different
+		feeling and a much better one.
+
+		The fireball is the reason they stay interesting after you have
+		learned where they are: the mine is predictable and the second blast
+		is not, so the hazard does not stop mattering once the map is known.
+	]]
+	Mines = 8,
+	MineRingFactor = 0.4,
+	MineBlinkSeconds = 0.45,
+	MineBlastRadius = 22,
+	MineBlastDamage = 85,
+	MineRespawnSeconds = 20,
+
+	FireballLift = 120,
+	FireballSpread = 65,
+	-- It comes down on a timer, not on contact: the ball leaves the ground
+	-- inside a blast that is still expanding, so a contact trigger fires
+	-- instantly against whatever launched it.
+	FireballFlightSeconds = 3.2,
+	FireballBlastRadius = 18,
+	FireballBlastDamage = 60,
+	ScorchSeconds = 5,
 }
 
 Config.Riding = {
@@ -1632,6 +1669,11 @@ export type ConfigType = {
 		CanBlastRadius: number, CanBlastDamage: number,
 		CanVehicleMultiplier: number, CanChainRadius: number,
 		ChainDelay: number, MaxChainDepth: number,
+		Mines: number, MineRingFactor: number, MineBlinkSeconds: number,
+		MineBlastRadius: number, MineBlastDamage: number, MineRespawnSeconds: number,
+		FireballLift: number, FireballSpread: number,
+		FireballFlightSeconds: number, FireballBlastRadius: number,
+		FireballBlastDamage: number, ScorchSeconds: number,
 	},
 	Riding: {
 		BoostSeconds: number, BoostMultiplier: number,
