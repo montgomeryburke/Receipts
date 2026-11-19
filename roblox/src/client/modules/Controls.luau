@@ -689,6 +689,20 @@ local CONTEXT_BINDINGS: { [string]: { [Enum.KeyCode]: Binding } } = {
 				Remotes.Event("ToggleDiffLock"):FireServer()
 			end,
 		},
+		[Enum.KeyCode.LeftControl] = {
+			label = "HANDBRAKE",
+			when = function()
+				return vehicleHas("HasHandbrake")
+			end,
+			-- Held, like a real one. A toggled handbrake would be a
+			-- parking brake, and this is for cornering.
+			down = function()
+				Remotes.Event("SetHandbrake"):FireServer(true)
+			end,
+			up = function()
+				Remotes.Event("SetHandbrake"):FireServer(false)
+			end,
+		},
 		[Enum.KeyCode.C] = {
 			label = "WINCH",
 			when = function()
@@ -855,6 +869,7 @@ local KEY_LABELS: { [Enum.KeyCode]: string } = {
 	[Enum.KeyCode.F] = "F",
 	[Enum.KeyCode.C] = "C",
 	[Enum.KeyCode.X] = "X",
+	[Enum.KeyCode.LeftControl] = "CTRL",
 }
 
 --[[

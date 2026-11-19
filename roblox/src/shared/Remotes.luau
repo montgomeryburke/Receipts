@@ -27,6 +27,8 @@ local EVENT_NAMES = {
 	"ToggleDiffLock",
 	"ToggleWinch",
 	"ReelWinch",
+	-- The Warthog's handbrake, for throwing the back end round.
+	"SetHandbrake",
 	-- The shove-and-boost shared by skis, snowboard, tube and bike.
 	"ShoveBoost",
 	-- A held tool's second action: lighting a poured gas trail, so far.

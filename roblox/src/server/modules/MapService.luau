@@ -1046,7 +1046,7 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 	-- respawn on these same pads a while after they are wrecked.
 	local vehiclePads = {}
 	local bigVehicles = {
-		"Tank", "Plane", "TurretTruck", "TurretTruck",
+		"Tank", "Plane", "Warthog", "Warthog",
 		-- Rideable rockets, several of them, because they are the best thing
 		-- on the map and one was never enough.
 		"Torpedo", "Torpedo", "Torpedo", "Torpedo",

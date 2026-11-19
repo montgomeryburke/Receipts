@@ -496,6 +496,18 @@ Config.Driving = {
 	DiffLockGripBias = 1.7,
 	DiffLockTorqueBias = 1.25,
 
+	--[[
+		Four-wheel steering, and the handbrake.
+
+		The rear factor is well under one on purpose: a one-to-one
+		counter-steer makes a vehicle crab sideways rather than turn, which
+		feels broken rather than agile. A third is enough to pivot it about
+		its middle and turn inside its own length.
+	]]
+	RearSteerFactor = 0.34,
+	-- A handbrake takes most of the rear grip away. That IS the manoeuvre.
+	HandbrakeGripFactor = 0.3,
+
 	-- The winch: hook to anything anchored and reel yourself out.
 	WinchRange = 70,
 	WinchReelSpeed = 14,
@@ -1223,7 +1235,7 @@ Config.CarTiers = {
 	so there is always one to grab.
 ]]
 Config.Vehicles = {
-	TurretTruck = {
+	Warthog = {
 		DisplayName = "Turret Truck",
 		-- Two seats: one drives, one spins the 50 cal on the back.
 		Seats = 2,
@@ -1562,6 +1574,7 @@ export type ConfigType = {
 		Modes: { { id: string, label: string, speedBias: number, torqueBias: number, allWheel: boolean } },
 		StartingMode: number,
 		MudGripFactor: number, DiffLockGripBias: number, DiffLockTorqueBias: number,
+		RearSteerFactor: number, HandbrakeGripFactor: number,
 		WinchRange: number, WinchReelSpeed: number, WinchMinLength: number,
 	},
 	Wildlife: {

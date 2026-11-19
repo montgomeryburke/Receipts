@@ -180,7 +180,13 @@ end
 	Rigged from code pasted in by the project owner, adapted to this
 	module's own part names and tuning.
 ]]
-local function addWheel(model: Model, chassis: BasePart, offset: Vector3, isFront: boolean)
+local function addWheel(
+	model: Model,
+	chassis: BasePart,
+	offset: Vector3,
+	isFront: boolean,
+	rearSteers: boolean?
+)
 	local driving = Config.Driving
 	local radius = WHEEL_DIAMETER * 0.5
 
@@ -250,15 +256,30 @@ local function addWheel(model: Model, chassis: BasePart, offset: Vector3, isFron
 	knuckleMount.Parent = knuckle
 
 	local slider = Instance.new("CylindricalConstraint")
-	slider.Name = if isFront then "SteerSlider" else "Slider"
+	--[[
+		Named for what it DOES, not for where it is.
+
+		A rear slider on a four-wheel-steer chassis is a steering servo, so
+		calling it a plain Slider would make the name lie -- and the rig
+		test counts steering by name, so the name is load-bearing.
+	]]
+	slider.Name = if isFront or rearSteers then "SteerSlider" else "Slider"
 	slider.Attachment0 = chassisMount
 	slider.Attachment1 = knuckleMount
 	slider.LimitsEnabled = true
 	slider.LowerLimit = driving.SuspensionHeight - driving.SuspensionTravel
 	slider.UpperLimit = driving.SuspensionHeight + driving.SuspensionTravel * 0.5
 
-	if isFront then
-		-- The front slider is also the steering servo.
+	if isFront or rearSteers then
+		--[[
+			The slider is also the steering servo.
+
+			Rear wheels get one only on a four-wheel-steer chassis. That is
+			the Warthog's whole signature: the rears turn the OTHER way, so
+			it pivots about its middle instead of swinging its tail, and it
+			can turn inside its own length. Giving it to everything would
+			make every car handle like a forklift.
+		]]
 		slider.AngularActuatorType = Enum.ActuatorType.Servo
 		slider.ServoMaxTorque = driving.SteerTorque
 		slider.AngularSpeed = driving.SteerSpeed
@@ -322,7 +343,8 @@ local function buildChassis(
 	bodySize: Vector3,
 	color: Color3,
 	wheelbase: number,
-	track: number
+	track: number,
+	rearSteers: boolean?
 ): (Model, BasePart, { any })
 	local model = Instance.new("Model")
 	model.Name = name
@@ -413,7 +435,7 @@ local function buildChassis(
 		Vector3.new(halfTrack, axleDrop, halfBase),
 	} do
 		-- Negative Z is the nose, so those two steer.
-		table.insert(wheels, addWheel(model, chassis, corner, corner.Z < 0))
+		table.insert(wheels, addWheel(model, chassis, corner, corner.Z < 0, rearSteers))
 	end
 
 	return model, chassis, wheels
@@ -851,42 +873,132 @@ function VehicleService.SpawnCar(
 	return model
 end
 
---[[ The turret truck: one player drives, another works the 50 cal on the back. ]]
-function VehicleService.SpawnTurretTruck(position: Vector3): Model
-	local spec = Config.Vehicles.TurretTruck
+--[[
+	The Warthog: three seats, four-wheel steering and a chaingun.
+
+	Grown out of the old turret truck rather than added beside it, because
+	the turret truck already had the hard parts -- a driver, a gunner, a
+	yawing turret -- and a second vehicle with the same job would have meant
+	two of everything to keep in step.
+
+	Three things make it a Warthog and not a jeep with a gun:
+
+	- The REARS steer, the other way. It pivots about its middle instead of
+	  swinging its tail, so it turns inside its own length. This is the
+	  thing people remember about driving one.
+	- A handbrake that drops the rear grip, so the back end can be thrown
+	  round a corner on purpose. Drifting a Warthog with somebody on the gun
+	  is the whole fantasy.
+	- A flip prompt. A Warthog on its roof is the single most common way one
+	  stops being useful, and walking up and righting it is both the
+	  traditional answer and better than waiting for a respawn.
+]]
+function VehicleService.SpawnWarthog(position: Vector3): Model
+	local spec = Config.Vehicles.Warthog
 
 	local model, chassis, wheels = buildChassis(
-		"TurretTruck",
+		"Warthog",
 		position,
 		Vector3.new(12, CHASSIS_HEIGHT, 24),
 		spec.Color,
 		18,
-		12
+		12,
+		-- Four-wheel steer.
+		true
 	)
 	local seat = addDriverSeat(chassis, model, Vector3.new(0, CHASSIS_HEIGHT * 0.5 + 0.5, -6))
 	local drum, barrel, gunnerSeat, yaw =
 		addTurret(chassis, model, Vector3.new(0, CHASSIS_HEIGHT * 0.5 + 2, 6), 8, spec.Color)
 
+	--[[
+		The third seat.
+
+		Not a gun and not a wheel -- just somewhere to sit and shoot your
+		own rifle out of. That is the one that makes a Warthog a squad
+		vehicle rather than a two-player toy, and it costs nothing because
+		everybody always has a gun here.
+	]]
+	--[[
+		A plain Seat, not a VehicleSeat with its numbers zeroed.
+
+		My first version was a VehicleSeat with MaxSpeed, Torque and
+		TurnSpeed set to zero, which works but only because those three
+		happen to be zero -- a second driver by accident is one typo away.
+		A Seat cannot steer by construction, which is the same guarantee
+		without depending on anything. It is also what the gunner's seat
+		already is, so the two match.
+	]]
+	local passengerSeat = addPassengerSeat(
+		chassis,
+		model,
+		Vector3.new(4.2, CHASSIS_HEIGHT * 0.5 + 0.5, -6),
+		"PassengerSeat"
+	)
+
 	bindSeat(seat, model, "Driver")
 	bindSeat(gunnerSeat, model, "Gunner")
+	bindSeat(passengerSeat, model, "Passenger")
 
-	addVehicleLabel(chassis, "Turret Truck · 2 seats", Color3.fromRGB(180, 230, 140))
+	--[[
+		Righting it when it ends up on its roof.
+
+		Only offered when it is actually upside down, so there is no prompt
+		cluttering a vehicle that is the right way up -- and no way to use
+		it as a free teleport-the-car button.
+	]]
+	local flip = Instance.new("ProximityPrompt")
+	flip.Name = "FlipPrompt"
+	flip.ActionText = "Flip it back"
+	flip.ObjectText = "Warthog"
+	flip.HoldDuration = 0.6
+	flip.MaxActivationDistance = 14
+	flip.Enabled = false
+	flip.Parent = chassis
+
+	flip.Triggered:Connect(function()
+		local upright = chassis.CFrame.UpVector:Dot(Vector3.new(0, 1, 0))
+		if upright > 0.4 then
+			return
+		end
+		-- Set back on its wheels, keeping which way it was pointing, and
+		-- lifted clear of the ground so it does not spawn inside it.
+		local look = chassis.CFrame.LookVector
+		local flat = Vector3.new(look.X, 0, look.Z)
+		if flat.Magnitude < 0.01 then
+			flat = Vector3.new(0, 0, -1)
+		end
+		chassis.CFrame = CFrame.lookAt(
+			chassis.Position + Vector3.new(0, 5, 0),
+			chassis.Position + Vector3.new(0, 5, 0) + flat.Unit
+		)
+		chassis.AssemblyLinearVelocity = Vector3.new()
+		chassis.AssemblyAngularVelocity = Vector3.new()
+		Sound.At("MeleeHit", chassis.Position, 0.7)
+	end)
+
+	addVehicleLabel(chassis, "Warthog · 3 seats", Color3.fromRGB(180, 230, 140))
 
 	model:SetAttribute("Health", spec.Health)
 	model:SetAttribute("MaxHealth", spec.Health)
-	model:SetAttribute("VehicleKind", "TurretTruck")
+	model:SetAttribute("VehicleKind", "Warthog")
 	model:SetAttribute("MountedWeapon", spec.MountedWeapon)
+	-- Advertised so the action bar offers the handbrake, and only here.
+	model:SetAttribute("HasHandbrake", true)
 
 	model.Parent = workspace
 	active[model] = {
 		wheels = wheels,
-		kind = "TurretTruck",
+		kind = "Warthog",
 		chassis = chassis,
 		seat = seat,
 		gunnerSeat = gunnerSeat,
+		passengerSeat = passengerSeat,
 		turretDrum = drum,
 		barrel = barrel,
 		turretYaw = yaw,
+		flipPrompt = flip,
+		rearSteer = true,
+		handbrake = false,
 		maxSpeed = spec.MaxSpeed,
 		torque = spec.Torque,
 		turnSpeed = spec.TurnSpeed,
@@ -1739,8 +1851,8 @@ function VehicleService.SpawnBike(position: Vector3): Model
 end
 
 function VehicleService.SpawnKind(kind: string, position: Vector3): Model?
-	if kind == "TurretTruck" then
-		return VehicleService.SpawnTurretTruck(position)
+	if kind == "Warthog" then
+		return VehicleService.SpawnWarthog(position)
 	elseif kind == "Tank" then
 		return VehicleService.SpawnTank(position)
 	elseif kind == "Plane" then
@@ -1902,6 +2014,15 @@ function VehicleService.ToggleWinch(player: Player)
 	model:SetAttribute("WinchAttached", true)
 	Remotes.Event("Notify"):FireClient(player, `WINCH HOOKED — HOLD X TO REEL`)
 	Sound.At("Pickup", chassis.Position, 0.6)
+end
+
+--[[ Pull the handbrake, on something fitted with one. ]]
+function VehicleService.SetHandbrake(player: Player, on: boolean)
+	local model, state = drivenBy(player)
+	if not model or not state or model:GetAttribute("HasHandbrake") ~= true then
+		return
+	end
+	state.handbrake = on == true
 end
 
 function VehicleService.ReelWinch(player: Player, on: boolean)
@@ -2122,6 +2243,10 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	if state.diffLocked then
 		grip *= driving.DiffLockGripBias
 	end
+	if state.handbrake then
+		-- Grip goes, which is what a handbrake turn IS.
+		grip *= driving.HandbrakeGripFactor
+	end
 	if state.wheelGrip ~= grip then
 		state.wheelGrip = grip
 		for _, wheel in state.wheels do
@@ -2146,11 +2271,28 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	local targetAngle = -steer * lock
 
 	for _, wheel in state.wheels do
-		if not wheel.front or not wheel.slider then
+		if not wheel.slider then
 			continue
 		end
 		local inner = (steer > 0 and wheel.home.X > 0) or (steer < 0 and wheel.home.X < 0)
-		wheel.slider.TargetAngle = targetAngle * (if inner then 1.15 else 1)
+		if wheel.front then
+			wheel.slider.TargetAngle = targetAngle * (if inner then 1.15 else 1)
+		elseif state.rearSteer then
+			--[[
+				The rears, the other way.
+
+				Negative, so the back wheels point opposite the fronts and
+				the whole thing pivots about its middle rather than swinging
+				its tail. Reduced, because a one-to-one counter-steer makes
+				it crab sideways rather than turn.
+
+				Not applied under handbrake: the point of the handbrake is
+				to let the back end go, and a rear axle still steering
+				precisely would fight that.
+			]]
+			local factor = if state.handbrake then 0 else driving.RearSteerFactor
+			wheel.slider.TargetAngle = -targetAngle * factor
+		end
 	end
 
 	--[[
@@ -2182,7 +2324,17 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 		-- uses all four, because brakes are not the drivetrain.
 		local driven = mode == nil or mode.allWheel or not wheel.front
 
-		if braking then
+		if state.handbrake and not wheel.front then
+			--[[
+				The handbrake locks the REAR only.
+
+				Locking all four is just a brake. Locking the rears while
+				the fronts still turn and still have grip is what throws the
+				back end round, which is the entire manoeuvre.
+			]]
+			axle.AngularVelocity = 0
+			axle.MotorMaxTorque = driving.BrakeTorque
+		elseif braking then
 			axle.AngularVelocity = 0
 			axle.MotorMaxTorque = driving.BrakeTorque
 		elseif driven and math.abs(throttle) > 0.05 then
@@ -2198,6 +2350,21 @@ local function driveWheeled(model: Model, state: any, deltaTime: number)
 	end
 
 	stepWinch(state, deltaTime)
+
+	--[[
+		Offer the flip only when it is actually on its roof.
+
+		Otherwise there is a prompt hanging off every upright vehicle, and a
+		free "put my car where I am standing" button.
+	]]
+	local prompt = state.flipPrompt
+	if prompt then
+		local upright = chassis.CFrame.UpVector:Dot(Vector3.new(0, 1, 0))
+		local wanted = upright < 0.4
+		if prompt.Enabled ~= wanted then
+			prompt.Enabled = wanted
+		end
+	end
 
 	-- Kept for anything that still asks, and for the engine note below.
 	state.currentSpeed = roadSpeed

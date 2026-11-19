@@ -845,6 +845,10 @@ function WeaponService.Start()
 		VehicleService.ShoveBoost(player)
 	end)
 
+	Remotes.Event("SetHandbrake").OnServerEvent:Connect(function(player, on)
+		VehicleService.SetHandbrake(player, on == true)
+	end)
+
 	-- The client asks once at join for the full gun list, so the weapon wheel
 	-- can build itself without every gun being hard-coded twice.
 	Remotes.Function("GetArsenal").OnServerInvoke = function(_player)
