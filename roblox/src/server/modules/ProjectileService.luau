@@ -182,6 +182,17 @@ local function detonate(projectile: Projectile, position: Vector3, scale: number
 	end
 end
 
+--[[
+	One cast filter for every projectile in flight, reused each frame.
+
+	Declared above the first function that touches it, because a local
+	referenced from a function defined earlier in the file is not an upvalue
+	-- it compiles to a global lookup and reads nil at runtime.
+]]
+local travelParams = RaycastParams.new()
+travelParams.FilterType = Enum.RaycastFilterType.Exclude
+travelParams.IgnoreWater = true
+
 --[[ Direct damage to whatever the projectile physically ran into. ]]
 local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 	local spec = projectile.spec
@@ -285,7 +296,18 @@ local function stepProjectile(projectile: Projectile, deltaTime: number)
 	end
 
 	local remainingTravel = projectile.velocity * deltaTime
-	local params = Util.RayParams(projectile.ignore)
+	-- Reused, not allocated. A rocket salvo and a minigun burst can easily
+	-- put thirty projectiles in the air at once, and a fresh RaycastParams
+	-- for each of them on every frame is nine hundred userdata objects a
+	-- second for the collector to clean up -- to describe a filter that
+	-- changes only when the projectile does.
+	--
+	-- Safe because the assignment and the cast below have nothing between
+	-- them that yields, and the inner piercing loop reuses the same filter
+	-- deliberately: a bullet should not start ignoring different things
+	-- halfway through one frame of travel.
+	local params = travelParams
+	params.FilterDescendantsInstances = projectile.ignore
 
 	-- Up to a handful of casts per frame, one per thing pierced.
 	for _ = 1, 10 do

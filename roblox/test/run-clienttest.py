@@ -144,6 +144,10 @@ local Config = Config
 {strip(read(SRC, 'client', 'modules', 'Visuals.luau'))}
 end)()
 
+local Props = (function()
+{strip(read(SRC, 'client', 'modules', 'Props.luau'))}
+end)()
+
 local Shot = (function()
 {strip(read(SRC, 'shared', 'Shot.luau'))}
 end)()
@@ -212,6 +216,106 @@ if INPUT_CONNECTIONS < 2 then
 	DUMP("  ^ INPUT NOT WIRED — firing and E would do nothing")
 	failures += 1
 end
+DUMP("")
+DUMP("Pickups spin on the client that is looking at them:")
+do
+	--[[
+		THE CLAIM: a spinning pickup does not need the server.
+
+		It was being spun on the server, one CFrame write per pickup per
+		frame. Seventy-five pickups at sixty hertz is four and a half
+		thousand property writes a second, and a CFrame write on a part in
+		workspace replicates to every client -- so the server spent a slice
+		of every frame telling twenty machines about a rotation computed
+		from nothing but the clock and identical on all of them.
+
+		The thing to be careful about is that moving an animation off the
+		server is only free if it still happens. A pickup that stopped
+		turning would look broken in exactly the way nobody reports, so
+		this checks that it moves, and that it comes back to the spot the
+		server put it rather than drifting away from it.
+	]]
+	Props.ResetForTests()
+
+	local folder = Instance.new("Folder")
+	folder._props.Name = "Pickups"
+	local home = Vector3.new(120, 8, -40)
+	local pad = Instance.new("Part")
+	pad._props.Name = "Pickup_Shield"
+	pad._props.CFrame = CFrame.new(home)
+	pad.Parent = folder
+	folder.Parent = workspace
+
+	local ok, err = pcall(Props.Start)
+	check("pickup animation starts up", ok, ok and "" or tostring(err))
+	check("and it found the pickup the server placed",
+		Props.CountForTests() == 1, tostring(Props.CountForTests()))
+
+	local stepped = rawget(RunService, "_props").RenderStepped
+	local before = pad._props.CFrame
+	stepped._fire(1 / 60)
+	ADVANCE(0.3)
+	stepped._fire(1 / 60)
+	local after = pad._props.CFrame
+
+	check("it actually turns",
+		(after.LookVector - before.LookVector).Magnitude > 0.001,
+		string.format("%.3f of rotation", (after.LookVector - before.LookVector).Magnitude))
+
+	--[[
+		And it turns on the spot.
+
+		The home position is read once, when the pickup appears, and the
+		spin is applied around it -- so a long round cannot walk a pickup
+		off its pad one frame at a time, which is what reading the part's
+		own position each frame would do.
+	]]
+		--[[
+			All three axes, not two.
+
+			Checking only X and Z passed with the position read back from the
+			part each frame instead of from the remembered home -- which adds
+			the bob to the previous bob, over and over, and walks the pickup
+			straight up into the sky. The rotation is about Y, so the one
+			axis that moves is the one a horizontal drift test cannot see.
+		]]
+	local expected = home + Vector3.new(0, math.sin(os.clock() * 2) * 0.8, 0)
+	local drift = after.Position - expected
+	check("without wandering off its pad", drift.Magnitude < 0.01,
+		string.format("%.4f studs from %s", drift.Magnitude, tostring(expected)))
+
+	-- A new round replaces the whole folder; nothing from the old one is
+	-- left being animated.
+	--[[
+		Two ways the set goes away, and they need different handling.
+
+		Destroying the folder nils Parent on every descendant, so each
+		pickup's own ChildRemoved fires and it is forgotten one at a time.
+		MOVING the folder out of workspace fires workspace's ChildRemoved
+		and nothing else -- the children are still in it, still parented, so
+		the per-child path never runs and without the folder-level clear
+		they would be animated forever.
+	]]
+	folder.Parent = nil
+	check("taking the folder out of the world clears the set",
+		Props.CountForTests() == 0, tostring(Props.CountForTests()))
+
+	-- And again by destroying it, which is what a round change does.
+	folder.Parent = workspace
+	local replacement = Instance.new("Part")
+	replacement._props.Name = "Pickup_Shield"
+	replacement._props.CFrame = CFrame.new(home)
+	replacement.Parent = folder
+	-- Two: the first pad is still in the folder -- only the folder left the
+	-- world, not its contents -- so re-attaching rescans and finds both.
+	check("a pickup arriving later is picked up too",
+		Props.CountForTests() == 2, tostring(Props.CountForTests()))
+
+	folder:Destroy()
+	check("and a new round clears the old set", Props.CountForTests() == 0,
+		tostring(Props.CountForTests()))
+end
+
 if Controls.EquippedName() == "" then
 	DUMP("  ^ NO WEAPON EQUIPPED")
 	failures += 1

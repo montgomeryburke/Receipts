@@ -32,6 +32,9 @@ type Pickup = {
 }
 
 local pickups: { Pickup } = {}
+-- Only the ones counting down to their return. Kept apart from `pickups` so
+-- the per-frame loop walks what it has work for rather than the whole map.
+local waiting: { Pickup } = {}
 local container: Folder?
 
 local function colourFor(kind: string, weapon: string?): Color3
@@ -233,6 +236,10 @@ local function createPickup(kind: string, position: Vector3, parent: Folder, wea
 		pickup.availableAt = os.clock() + Config.Pickups.RespawnDelay
 		part.Transparency = 1
 		billboard.Enabled = false
+		-- Into the short list the frame loop actually walks.
+		if not table.find(waiting, pickup) then
+			table.insert(waiting, pickup)
+		end
 
 		grant(player, kind, weapon)
 	end)
@@ -254,28 +261,55 @@ function PickupService.Build(pads: { { position: Vector3, kind: string, weapon: 
 	end
 end
 
+--[[
+	How many pickups the per-frame loop has to look at, for the tests.
+
+	The point of the split is that this is nearly always zero while the map
+	holds seventy-odd pickups, so it is the number worth asserting on.
+]]
+function PickupService.WaitingForTests(): number
+	return #waiting
+end
+
+function PickupService.AllForTests(): { any }
+	return pickups
+end
+
 function PickupService.Clear()
 	if container then
 		container:Destroy()
 		container = nil
 	end
 	table.clear(pickups)
+	table.clear(waiting)
 end
 
---[[ Spin them, bob them, and bring back the ones whose timer is up. ]]
+--[[
+	Bring back the ones whose timer is up.
+
+	The spin and the bob used to be here too, one CFrame write per pickup
+	per frame: about seventy-five pickups at sixty hertz is four and a half
+	thousand property writes a second, every one of them replicated to every
+	client, to describe an animation computed from nothing but the clock and
+	identical on all of them. It lives on the client now (Props), and what
+	is left here is the part that is genuinely state.
+
+	Which also means this loop has nothing to do most of the time, so it
+	walks a list of the pickups actually waiting rather than all of them.
+	Twenty players picking things up keeps a handful in here; the other
+	seventy cost nothing.
+]]
 local function step()
+	if #waiting == 0 then
+		return
+	end
 	local now = os.clock()
-	local spin = CFrame.Angles(0, now * 1.5, 0)
-	local bob = math.sin(now * 2) * 0.8
-
-	for _, pickup in pickups do
+	for index = #waiting, 1, -1 do
+		local pickup = waiting[index]
 		if not pickup.part.Parent then
-			continue
-		end
-
-		pickup.part.CFrame = CFrame.new(pickup.position + Vector3.new(0, bob, 0)) * spin
-
-		if not pickup.available and now >= pickup.availableAt then
+			table.remove(waiting, index)
+		elseif now >= pickup.availableAt then
+			table.remove(waiting, index)
 			pickup.available = true
 			pickup.part.Transparency = 0
 			local billboard = pickup.part:FindFirstChildOfClass("BillboardGui")

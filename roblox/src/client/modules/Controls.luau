@@ -40,6 +40,9 @@ local Controls = {}
 local controlsStarted = false
 local inFight = false
 local lastAimSentAt = 0
+-- Where the turret was last told to point, so an unchanged aim is not
+-- sent again. Cleared when you leave the seat.
+local lastAimSent: Vector3? = nil
 local lastLockCheckAt = 0
 
 type ArsenalEntry = {
@@ -1226,7 +1229,16 @@ local function onHeartbeat()
 		clearZoom()
 	end
 
-	if humanoid and humanoid.SeatPart and humanoid.SeatPart.Name == "GunnerSeat" and now - lastAimSentAt >= 0.05 then
+	local gunning = humanoid ~= nil
+		and humanoid.SeatPart ~= nil
+		and humanoid.SeatPart.Name == "GunnerSeat"
+	if not gunning then
+		-- Out of the seat, so the next shot from one starts fresh rather
+		-- than being suppressed for matching where the last turret pointed.
+		lastAimSent = nil
+	end
+
+	if gunning and now - lastAimSentAt >= 0.05 then
 		lastAimSentAt = now
 		local cam = getCamera()
 		local origin = shotOrigin()
@@ -1238,7 +1250,21 @@ local function onHeartbeat()
 					aim = delta.Unit
 				end
 			end
-			Remotes.Event("SetAimDirection"):FireServer(origin + aim * 300)
+			--[[
+				Only when it has actually moved.
+
+				The 20 Hz throttle above stops a packet a frame, but a gunner
+				holding still on a target still sent twenty identical ones a
+				second, each of them a remote call the server has to unpack
+				and a turret write it has to replicate. Two studs at three
+				hundred is under half a degree, which no turret can show and
+				no player can see.
+			]]
+			local target = origin + aim * 300
+			if not lastAimSent or (target - lastAimSent).Magnitude > 2 then
+				lastAimSent = target
+				Remotes.Event("SetAimDirection"):FireServer(target)
+			end
 		end
 	end
 end

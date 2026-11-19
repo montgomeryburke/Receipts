@@ -361,6 +361,71 @@ do
 end
 
 DUMP("")
+DUMP("The pickup loop only looks at pickups that need looking at:")
+do
+	--[[
+		THE CLAIM: the server spends every frame on seventy-five pickups to
+		find the handful that have anything to do.
+
+		It did, and worse: it also wrote a CFrame to each of them, one per
+		pickup per frame, to spin them. Four and a half thousand property
+		writes a second, every one replicated to twenty clients, describing
+		a rotation computed from nothing but the clock and identical on all
+		of them. The spin is on the client now, and what is left here is
+		availability -- which is real state, and event-driven.
+
+		So the frame loop walks the pickups actually counting down rather
+		than the whole map. With twenty players that is a handful; the rest
+		cost nothing at all.
+	]]
+	PickupService.Build({
+		{ position = Vector3.new(0, 0, 0), kind = "Shield" },
+		{ position = Vector3.new(30, 0, 0), kind = "Shield" },
+		{ position = Vector3.new(60, 0, 0), kind = "Health" },
+	})
+	check("the map has pickups on it", #PickupService.AllForTests() == 3,
+		string.format("%d", #PickupService.AllForTests()))
+	check("and none of them needs the frame loop yet",
+		PickupService.WaitingForTests() == 0,
+		string.format("%d waiting", PickupService.WaitingForTests()))
+
+	--[[
+		The spin is gone from the server.
+
+		Checked by looking at the part rather than at the loop: a frame with
+		nothing waiting must not move anything, because every one of those
+		moves was a packet to twenty machines.
+	]]
+	local pad = PickupService.AllForTests()[1].part
+	local before = pad._props.CFrame
+	for _ = 1, 10 do
+		ADVANCE(1 / 60)
+		RunService.Heartbeat._fire(1 / 60)
+	end
+	check("and the server does not move them any more",
+		pad._props.CFrame == before, "unchanged")
+
+	-- Walk into one. Now there is something to count down.
+	local touched = pad._props.Touched
+	local root = killer._props.Character:FindFirstChild("HumanoidRootPart")
+	touched._fire(root)
+	RUN_SPAWNED()
+	check("taking one puts it in the loop's list",
+		PickupService.WaitingForTests() == 1,
+		string.format("%d waiting", PickupService.WaitingForTests()))
+
+	-- And it comes back, which is the thing the loop is for.
+	ADVANCE(Config.Pickups.RespawnDelay + 0.1)
+	RunService.Heartbeat._fire(1 / 60)
+	check("it comes back when its timer is up",
+		PickupService.AllForTests()[1].available == true,
+		tostring(PickupService.AllForTests()[1].available))
+	check("and leaves the list again",
+		PickupService.WaitingForTests() == 0,
+		string.format("%d waiting", PickupService.WaitingForTests()))
+end
+
+DUMP("")
 DUMP("Nothing from the last round lands in this one:")
 do
 	--[[

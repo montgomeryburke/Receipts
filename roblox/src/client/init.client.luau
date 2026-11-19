@@ -19,6 +19,7 @@ local Hud = require(modules:WaitForChild("Hud"))
 local Controls = require(modules:WaitForChild("Controls"))
 local Feel = require(modules:WaitForChild("Feel"))
 local Radar = require(modules:WaitForChild("Radar"))
+local Props = require(modules:WaitForChild("Props"))
 local Visuals = require(modules:WaitForChild("Visuals"))
 
 local player = Players.LocalPlayer
@@ -47,6 +48,10 @@ end
 
 if not pcall(Visuals.Start) then
 	warn("[Nuclear Mud Arena] Player outlines failed to start.")
+end
+
+if not pcall(Props.Start) then
+	warn("[Nuclear Mud Arena] Pickup animation failed to start.")
 end
 
 if not pcall(Radar.Start) then

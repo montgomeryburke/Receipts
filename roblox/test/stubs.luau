@@ -309,81 +309,6 @@ STATS = { created = 0, byClass = {}, parts = {} }
 -- Tests that exercise team assignment register their players here.
 PLAYERS_FOR_TEAMS = {}
 
-local Inst = {}
-Inst.__index = function(self, k)
-	-- Properties win over class methods, so a harness can override
-	-- WaitForChild the way a real instance's own children would.
-	local props = rawget(self, "_props")
-	if props and props[k] ~= nil then return props[k] end
-
-	-- Position and Orientation are derived from CFrame on a real BasePart.
-	-- Without this, code as ordinary as `head.Position` reads nil and the
-	-- whole path silently bails — which is exactly how a working feature
-	-- can look broken in a test.
-	if k == "Position" and props and props.CFrame then
-		return props.CFrame.Position
-	end
-	if k == "CFrame" and props and props.Position then
-		return CFrame.new(props.Position)
-	end
-
-	return rawget(Inst, k)
-end
-Inst.__newindex = function(self, k, v)
-	if k == "Parent" then
-		-- Roblox locks Parent once an instance is destroyed. Allowing a
-		-- destroyed instance back into the world let a test resurrect
-		-- something the real engine would refuse, and hid stale-reference
-		-- bugs where code hangs on to a thing after cleaning it up.
-		if rawget(self, "_destroyed") and v ~= nil then
-			error(
-				`The Parent property of {tostring(rawget(self, "_props").Name or rawget(self, "_class"))}`
-					.. " is locked, current parent: NULL",
-				2
-			)
-		end
-		local old = rawget(self, "_parent")
-		if old then
-			for i, c in old._children do
-				if c == self then table.remove(old._children, i) break end
-			end
-		end
-		rawset(self, "_parent", v)
-		-- Readable as well as writable. Without this, code that checks
-		-- `instance.Parent` to see whether something still exists sees nil
-		-- for everything, and silently skips it.
-		rawget(self, "_props").Parent = v
-		if v and v._children then table.insert(v._children, self) end
-		return
-	end
-	self._props[k] = v
-end
-
--- A Humanoid needs the methods game code actually calls on it, or damage
--- silently blows up inside the test rather than being measured.
-local function fitOutHumanoid(inst)
-	local props = rawget(inst, "_props")
-	props.Health = props.Health or 100
-	props.MaxHealth = props.MaxHealth or 100
-	props.WalkSpeed = props.WalkSpeed or 16
-	props.TakeDamage = function(self, amount)
-		local p = rawget(self, "_props")
-		p.Health = math.max(0, p.Health - amount)
-	end
-	props.MoveTo = function() end
-	props.Move = function() end
-end
-
---[[
-	A signal, for harnesses that do not load serverstubs.
-
-	The instance stand-ins below hand out signals for things like
-	ProximityPrompt.Triggered. They used to write `SIGNAL and SIGNAL() or nil`,
-	and SIGNAL is defined in serverstubs -- so in the map harness, which
-	loads only this file, every one of those came out nil and any builder
-	that wired up a prompt threw. Silently, because nil is a perfectly good
-	value right up until something calls :Connect on it.
-]]
 local function localSignal()
 	local handlers = {}
 	local function disconnect(fn)
@@ -427,6 +352,124 @@ local function anySignal()
 	end
 	return localSignal()
 end
+
+--[[
+	Signals an instance only has if somebody asks for them.
+
+	Built on first read rather than on construction: every Part in a 5000
+	part map would otherwise carry two signal tables nothing ever touches.
+]]
+local LAZY_SIGNALS = { ChildAdded = true, ChildRemoved = true, Destroying = true }
+
+local Inst = {}
+Inst.__index = function(self, k)
+	-- Properties win over class methods, so a harness can override
+	-- WaitForChild the way a real instance's own children would.
+	local props = rawget(self, "_props")
+	if props and props[k] ~= nil then return props[k] end
+
+	-- Position and Orientation are derived from CFrame on a real BasePart.
+	-- Without this, code as ordinary as `head.Position` reads nil and the
+	-- whole path silently bails — which is exactly how a working feature
+	-- can look broken in a test.
+	if k == "Position" and props and props.CFrame then
+		return props.CFrame.Position
+	end
+	if k == "CFrame" and props and props.Position then
+		return CFrame.new(props.Position)
+	end
+
+	-- Signals every real instance has. Made on first read, so a 5000-part
+	-- map does not carry two unused signal tables per part.
+	if LAZY_SIGNALS[k] and props then
+		local made = anySignal()
+		props[k] = made
+		return made
+	end
+
+	return rawget(Inst, k)
+end
+
+Inst.__newindex = function(self, k, v)
+	if k == "Parent" then
+		-- Roblox locks Parent once an instance is destroyed. Allowing a
+		-- destroyed instance back into the world let a test resurrect
+		-- something the real engine would refuse, and hid stale-reference
+		-- bugs where code hangs on to a thing after cleaning it up.
+		if rawget(self, "_destroyed") and v ~= nil then
+			error(
+				`The Parent property of {tostring(rawget(self, "_props").Name or rawget(self, "_class"))}`
+					.. " is locked, current parent: NULL",
+				2
+			)
+		end
+		local old = rawget(self, "_parent")
+		if old then
+			for i, c in old._children do
+				if c == self then table.remove(old._children, i) break end
+			end
+		end
+		rawset(self, "_parent", v)
+		-- Readable as well as writable. Without this, code that checks
+		-- `instance.Parent` to see whether something still exists sees nil
+		-- for everything, and silently skips it.
+		rawget(self, "_props").Parent = v
+		if v and v._children then table.insert(v._children, self) end
+		--[[
+			ChildAdded and ChildRemoved actually fire.
+
+			These did not exist here at all, which meant any code that
+			watches a folder for things appearing -- the obvious shape for a
+			client that animates whatever the server replicates to it --
+			could not be tested, and reading `.ChildAdded` handed back nil.
+			A nil indexed for Connect throws, so the feature looked broken
+			in the harness while being correct in the game.
+
+			Fired AFTER the child list is updated, as the real engine does,
+			so a handler that walks GetChildren sees the new arrival.
+		]]
+		if old then
+			local leaving = rawget(old, "_props").ChildRemoved
+			if leaving then
+				leaving._fire(self)
+			end
+		end
+		if v then
+			local arriving = rawget(v, "_props").ChildAdded
+			if arriving then
+				arriving._fire(self)
+			end
+		end
+		return
+	end
+	self._props[k] = v
+end
+
+-- A Humanoid needs the methods game code actually calls on it, or damage
+-- silently blows up inside the test rather than being measured.
+local function fitOutHumanoid(inst)
+	local props = rawget(inst, "_props")
+	props.Health = props.Health or 100
+	props.MaxHealth = props.MaxHealth or 100
+	props.WalkSpeed = props.WalkSpeed or 16
+	props.TakeDamage = function(self, amount)
+		local p = rawget(self, "_props")
+		p.Health = math.max(0, p.Health - amount)
+	end
+	props.MoveTo = function() end
+	props.Move = function() end
+end
+
+--[[
+	A signal, for harnesses that do not load serverstubs.
+
+	The instance stand-ins below hand out signals for things like
+	ProximityPrompt.Triggered. They used to write `SIGNAL and SIGNAL() or nil`,
+	and SIGNAL is defined in serverstubs -- so in the map harness, which
+	loads only this file, every one of those came out nil and any builder
+	that wired up a prompt threw. Silently, because nil is a perfectly good
+	value right up until something calls :Connect on it.
+]]
 
 local function newInstance(class)
 	STATS.created += 1
@@ -547,6 +590,20 @@ function Inst:Destroy()
 		return
 	end
 	rawset(self, "_destroyed", true)
+
+	--[[
+		Destroying fires first, before anything is taken apart.
+
+		Roblox fires it on the way out, while the instance can still be read,
+		and VehicleService's respawn hangs off it -- so without this a car
+		that was wrecked never came back, and that was invisible here because
+		reading `.Destroying` used to hand back nil and throw before any
+		listener could be attached at all.
+	]]
+	local dying = rawget(self, "_props").Destroying
+	if dying then
+		dying._fire()
+	end
 
 	self.Parent = nil
 

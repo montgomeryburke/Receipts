@@ -375,6 +375,71 @@ do
 end
 
 do
+	--[[
+		ChildAdded, ChildRemoved and Destroying fire.
+
+		None of the three existed here. Reading `.ChildAdded` handed back
+		nil, and indexing nil for Connect throws -- so any code that watches
+		a container for things appearing, or hangs a respawn off a thing
+		going away, could not be tested at all, and the feature looked
+		broken in the harness while being correct in the game. The vehicle
+		respawn hangs off Destroying, which means that for as long as this
+		was missing, nothing here had ever exercised it.
+	]]
+	local folder = Instance.new("Folder")
+	local arrived, left = 0, 0
+	folder.ChildAdded:Connect(function()
+		arrived += 1
+	end)
+	folder.ChildRemoved:Connect(function()
+		left += 1
+	end)
+
+	local child = Instance.new("Part")
+	child.Parent = folder
+	check("parenting a child fires ChildAdded", arrived == 1, string.format("%d", arrived))
+
+	-- A handler that walks GetChildren has to see the new arrival, so this
+	-- fires after the list is updated, as the real engine does.
+	local sawItListed = false
+	folder.ChildAdded:Connect(function(added)
+		for _, listed in folder:GetChildren() do
+			if listed == added then
+				sawItListed = true
+			end
+		end
+	end)
+	local second = Instance.new("Part")
+	second.Parent = folder
+	check("and the child is already listed when it does", sawItListed, "")
+
+	child.Parent = nil
+	check("unparenting fires ChildRemoved", left == 1, string.format("%d", left))
+
+	-- Destroying a child takes it out of its parent the same way.
+	second:Destroy()
+	check("and so does destroying one", left == 2, string.format("%d", left))
+
+	local dying = 0
+	local doomed = Instance.new("Part")
+	doomed.Parent = folder
+	doomed.Destroying:Connect(function()
+		dying += 1
+	end)
+	doomed:Destroy()
+	check("Destroying fires on the way out", dying == 1, string.format("%d", dying))
+
+	-- And only the once, because Destroy is idempotent.
+	doomed:Destroy()
+	check("and only once", dying == 1, string.format("%d", dying))
+
+	-- Asking twice gives the same signal, or a connection made before the
+	-- second read would never hear anything.
+	local once = folder.ChildAdded
+	check("the signals are stable across reads", folder.ChildAdded == once, "")
+end
+
+do
 	-- A destroyed part's handlers must stop firing. A Touched that still
 	-- works after Destroy makes a test pass that the real game would fail,
 	-- which is the one thing a harness must never do.

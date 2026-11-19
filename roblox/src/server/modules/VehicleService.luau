@@ -51,6 +51,21 @@ local suspensionParams = RaycastParams.new()
 suspensionParams.FilterType = Enum.RaycastFilterType.Exclude
 local groundParams = RaycastParams.new()
 groundParams.FilterType = Enum.RaycastFilterType.Exclude
+--[[
+	And one for the ridden gear: tubes, skis, the torpedo, a parachute.
+
+	Each of those allocated a fresh RaycastParams every frame, which at
+	twenty riders is twenty userdata objects a frame for the garbage
+	collector to deal with -- and the two above already demonstrate the
+	alternative, in this same file.
+
+	Safe to share because every use is set-then-cast with nothing in
+	between: Luau is single-threaded and none of these yield between
+	assigning the filter and firing the ray. That is the whole condition,
+	and it is the thing to re-check before reusing this somewhere new.
+]]
+local riderParams = RaycastParams.new()
+riderParams.FilterType = Enum.RaycastFilterType.Exclude
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
@@ -2420,8 +2435,7 @@ local function driveTube(model: Model, state: any, deltaTime: number)
 		then Vector3.new(0, -seat.Steer * 1.9, 0)
 		else Vector3.new()
 
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
+	local params = riderParams
 	local occupantCharacter = if seat.Occupant then seat.Occupant.Parent else nil
 	params.FilterDescendantsInstances = if occupantCharacter
 		then { model, occupantCharacter }
@@ -2672,8 +2686,7 @@ local function driveSkis(model: Model, state: any, deltaTime: number)
 	end
 	turn.AngularVelocity = Vector3.new(0, -steer * (state.carveRate or SKI_CARVE_RATE), 0)
 
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
+	local params = riderParams
 	params.FilterDescendantsInstances = if character then { model, character } else { model }
 
 	local ground = workspace:Raycast(board.Position, Vector3.new(0, -6, 0), params)
@@ -2835,8 +2848,7 @@ local function driveTorpedo(model: Model, state: any, deltaTime: number)
 	-- Far enough ahead to cover a frame of travel plus the shell itself.
 	local reach = runSpeed * math.max(deltaTime, 1 / 60) + 11
 
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
+	local params = riderParams
 	-- Not itself, and not the person riding it.
 	local rider = seat.Occupant
 	local riderCharacter = if rider then rider.Parent else nil
@@ -3041,10 +3053,8 @@ function VehicleService.Eject(player: Player)
 			if not root.Parent or not canopy.Parent then
 				break
 			end
-			local params = RaycastParams.new()
-			params.FilterType = Enum.RaycastFilterType.Exclude
-			params.FilterDescendantsInstances = { character }
-			local ground = workspace:Raycast(root.Position, Vector3.new(0, -8, 0), params)
+			riderParams.FilterDescendantsInstances = { character }
+			local ground = workspace:Raycast(root.Position, Vector3.new(0, -8, 0), riderParams)
 			if ground and os.clock() - opened > 1.2 then
 				break
 			end
