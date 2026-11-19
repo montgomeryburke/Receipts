@@ -28,6 +28,7 @@
 #    --local-port N       plain-HTTP port Apache uses behind Funnel / a proxy (default 8090)
 #    --llm-url URL        your own AI model server (e.g. Ollama: http://192.168.1.50:11434) made reachable at
 #                         <NAS address>/.llm/ behind the same login, for Project Assistant's free local jobs
+#                         (remembered for later runs; --no-llm removes it)
 #    --email ADDR         optional, given to Let's Encrypt
 #    --acme-server URL    certificate authority (default Let's Encrypt); e.g. Let's Encrypt staging for a dry run
 #    --yes                don't ask questions; use defaults
@@ -48,6 +49,7 @@ DUCKDNS_TOKEN=""
 PORT="443"
 LOCAL_PORT="8090"
 LLM_URL=""
+NO_LLM=0
 PUBLIC_URL=""
 ASSUME_YES=0
 UNINSTALL=0
@@ -75,7 +77,7 @@ warn() { printf '\033[1;33m !\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m ✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 usage() {
-  if [[ -f "$0" ]]; then sed -n '2,37p' "$0" | sed 's/^# \{0,2\}//'; else echo "See the comments at the top of setup-webdav.sh for options."; fi
+  if [[ -f "$0" ]]; then sed -n '2,38p' "$0" | sed 's/^# \{0,2\}//'; else echo "See the comments at the top of setup-webdav.sh for options."; fi
   exit "${1:-0}"
 }
 
@@ -91,6 +93,7 @@ while [[ $# -gt 0 ]]; do
     --port) PORT="${2:?}"; shift 2 ;;
     --local-port) LOCAL_PORT="${2:?}"; shift 2 ;;
     --llm-url) LLM_URL="${2:?}"; shift 2 ;;
+    --no-llm) NO_LLM=1; shift ;;
     --public-url) PUBLIC_URL="${2:?}"; shift 2 ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
@@ -437,11 +440,17 @@ PUBLIC_URL="${PUBLIC_URL%/}/"
 # ----------------------------------------------------------------------------- 6. Apache site
 say "Writing the web server configuration"
 LLM_LOCATION=""
+# The local model address is remembered, so re-running the script (e.g. for a new password) keeps it.
+if [[ $NO_LLM -eq 1 ]]; then rm -f "$STATE_DIR/llm-url"; LLM_URL=""; fi
+if [[ -z "$LLM_URL" && $NO_LLM -eq 0 && -f "$STATE_DIR/llm-url" ]]; then LLM_URL="$(cat "$STATE_DIR/llm-url")"; fi
 if [[ -n "$LLM_URL" ]]; then
-  [[ "$LLM_URL" =~ ^https?://[A-Za-z0-9.:-]+(/.*)?$ ]] || die "--llm-url must look like http://192.168.1.50:11434"
+  [[ "$LLM_URL" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$ ]] || die "--llm-url must look like http://192.168.1.50:11434"
+  printf '%s' "$LLM_URL" > "$STATE_DIR/llm-url"
   a2enmod -q proxy proxy_http >/dev/null
+  if [[ "$LLM_URL" == https://* ]]; then a2enmod -q ssl >/dev/null; LLM_SSL="    SSLProxyEngine On"; else LLM_SSL=""; fi
   # The local model, behind the same login as the files. The NAS password is not passed on to the model server.
   LLM_LOCATION=$(cat <<EOF
+$LLM_SSL
     <Location "/.llm/">
         Dav Off
         AuthType Basic

@@ -39,7 +39,8 @@ export function zipStore(files) {
   return new Blob([...parts, ...central, end], { type: 'application/zip' });
 }
 
-const x = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
+// Characters XML 1.0 doesn't allow (control characters, U+FFFE/U+FFFF, lone surrogates) are dropped.
+const x = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '');
 const run = (text, { bold = false, italic = false } = {}) => `<w:r>${bold || italic ? `<w:rPr>${bold ? '<w:b/>' : ''}${italic ? '<w:i/>' : ''}</w:rPr>` : ''}<w:t xml:space="preserve">${x(text)}</w:t></w:r>`;
 
 /** Builds the document body from blocks: {h1|h2|title|p|bullet: text} or {table: {head: [...], rows: [[...]]}}. */
@@ -55,7 +56,9 @@ function body(blocks) {
       const cell = (t, head) => `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p>${run(t, { bold: head })}</w:p></w:tc>`;
       const border = '<w:tblBorders><w:top w:val="single" w:sz="4" w:color="999999"/><w:left w:val="single" w:sz="4" w:color="999999"/><w:bottom w:val="single" w:sz="4" w:color="999999"/><w:right w:val="single" w:sz="4" w:color="999999"/><w:insideH w:val="single" w:sz="4" w:color="999999"/><w:insideV w:val="single" w:sz="4" w:color="999999"/></w:tblBorders>';
       const rows = [`<w:tr>${b.table.head.map((h) => cell(h, true)).join('')}</w:tr>`, ...b.table.rows.map((r) => `<w:tr>${r.map((c) => cell(c, false)).join('')}</w:tr>`)];
-      return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>${border}</w:tblPr>${rows.join('')}</w:tbl><w:p/>`;
+      const cols = b.table.head.length || 1;
+      const grid = `<w:tblGrid>${Array.from({ length: cols }, () => `<w:gridCol w:w="${Math.floor(10080 / cols)}"/>`).join('')}</w:tblGrid>`;
+      return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>${border}</w:tblPr>${grid}${rows.join('')}</w:tbl><w:p/>`;
     }
     return `<w:p>${run(b.p ?? '')}</w:p>`;
   }).join('');

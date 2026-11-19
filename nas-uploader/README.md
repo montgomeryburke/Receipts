@@ -290,7 +290,11 @@ its project, so later drafts, meeting prompts and the chat find it. To add many 
 search for the project number or a person (or open a folder), then side panel → **Files → 📥 Index the emails listed
 in Outlook** — it reads each one and files it, with no AI cost. Which project an email belongs to: the project
 number or name in it, or the **people** and **keywords** you give each project in **Settings → Project emails** (or
-tell the chat: "Dana Lee and @arcticfresh.ca are on the Alert Bridge project").
+tell the chat: "Dana Lee and @arcticfresh.ca are on the Alert Bridge project"). The project number written in an
+email always wins over people and keywords. Each Outlook conversation is kept as one document (its newest message
+holds the whole chain). Emails read this way count as already seen, so the new-mail scan never drafts replies to
+them; **Stop** ends a long run, and drafting from the open email waits until it's done. **Settings → Rebuild index**
+keeps the indexed emails and saved meetings (they can't be read again from a folder).
 
 **Outlook's `.ost` file** (the offline copy of your mailbox) can't be used: Outlook keeps it locked, Chrome can't read
 that folder, and the format Outlook 2013 and later use for it isn't readable by open tools. Everything in it is your
@@ -319,7 +323,7 @@ Click **🎙 Meeting** in the side panel. A small window opens:
    you something useful — from your files when they have it, otherwise marked *general knowledge*.
    **📝 Minutes** writes the minutes so far (attendees, purpose, each topic with what was said and decided, action
    items, next meeting) and saves them as **Word** and text next to the transcript; at **Stop and save** the final
-   minutes are saved too.
+   minutes are saved too. A meeting longer than about an hour is read part by part, so the minutes cover the start.
 5. **Stop and save**: the transcript, prompts, your private questions and (with a key) a summary with decisions
    and action items are saved to `/Meetings/<project>/` on the NAS (also every minute while it runs), and the key
    facts are remembered for that project.
@@ -428,16 +432,21 @@ checks that look-ups work with your key and model.
 **Background tasks & cost** (Settings). Every job that runs by itself and calls Claude or Gemini has a switch and its
 cost: drafting new emails, the second check, double look-ups, automatic meeting prompts, look-ups in meetings,
 minutes, Gemini transcription, the thinking effort for drafts, and a daily limit. **💰 Saver** turns everything down
-to "only when I click"; **⚖ Balanced** and **🎯 Best accuracy** turn it up. Spending is shown for today and the month,
+to "only when I click" (minutes too: **📝 Minutes** still works); **⚖ Balanced** and **🎯 Best accuracy** turn it
+up. Out of the box, drafting replies to new mail on its own and double look-ups are off — switch them on here. Spending is shown for today and the month,
 by feature (drafts, checks, meetings, research…), estimated from the token counts.
 
 **Local model on the HP (free).** If you run a model on the HP — for example Ollama in the "llm" container — the
 assistant can use it for the cheap jobs: priority lists, invoice summaries and the second check. Make Ollama listen
 on the network in that container (`systemctl edit ollama`, add `Environment="OLLAMA_HOST=0.0.0.0"`, restart it, and
-`ollama pull qwen2.5:7b`), then re-run the NAS setup script with `--llm-url http://<llm container address>:11434`.
+`ollama pull qwen2.5:7b`), then re-run the NAS setup script with `--llm-url http://<llm container address>:11434`
+(it's remembered when you re-run the script later, e.g. for a new password; `--no-llm` removes it). Ollama reads only
+2–4k tokens at once unless you also add `Environment="OLLAMA_CONTEXT_LENGTH=16384"`; Settings → Local model → **It can
+read** (24,000 characters by default) must stay below that — longer jobs go to Claude or Gemini instead.
 It becomes reachable at `<your NAS address>/.llm/` behind the NAS login, from work too (your NAS password is not
-passed on to the model). In Settings → AI → **Local model**, enter that address and the model name, click **Test**,
-and tick what it should do.
+passed on to the model). In Settings → AI → **Local model**, enter that address and the model name, choose **Login:
+the NAS login** (it uses the NAS login from Settings → NAS, only for the NAS's own https address), click **Test**,
+and tick what it should do. Work done by the local model isn't sent to the cloud for a second check.
 
 Paste a Claude (Anthropic) and/or Gemini key in **Settings → AI provider**; they stay in this browser profile and
 go only to that provider. Claude uses `claude-opus-5-5` at low effort by default (Settings lets you pick Sonnet or

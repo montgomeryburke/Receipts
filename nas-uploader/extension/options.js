@@ -30,7 +30,7 @@ function flashSaved() {
 
 // ---------------------------------------------------------------- simple fields
 
-const NUMERIC = new Set(['snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'meetingMinGapSec', 'dailyBudgetUsd', 'maxThreadChars']);
+const NUMERIC = new Set(['localContextChars', 'snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'meetingMinGapSec', 'dailyBudgetUsd', 'maxThreadChars']);
 const NULLABLE = new Set(['priceInPerM', 'priceOutPerM']);
 
 function readField(el) {
@@ -110,7 +110,7 @@ async function renderSpend() {
 }
 
 const PRESETS = {
-  saver: { processOnOpen: false, autoScan: false, emailEffort: 'low', refinePass: false, crossCheck: false, crossCheckRevise: false, dualLookUp: false, meetingPrompts: 'manual', meetingWebLookup: false, meetingSummary: true, meetingStt: 'whisper', effort: 'low' },
+  saver: { processOnOpen: false, autoScan: false, emailEffort: 'low', refinePass: false, crossCheck: false, crossCheckRevise: false, dualLookUp: false, meetingPrompts: 'manual', meetingWebLookup: false, meetingSummary: false, meetingStt: 'whisper', effort: 'low' },
   balanced: { processOnOpen: true, autoScan: false, emailEffort: 'medium', refinePass: true, crossCheck: true, crossCheckRevise: true, dualLookUp: false, meetingPrompts: 'auto', meetingWebLookup: true, meetingSummary: true, meetingStt: 'whisper', effort: 'low' },
   best: { processOnOpen: true, autoScan: true, emailEffort: 'high', refinePass: true, crossCheck: true, crossCheckRevise: true, dualLookUp: true, meetingPrompts: 'auto', meetingWebLookup: true, meetingSummary: true, effort: 'medium' },
 };
@@ -132,6 +132,7 @@ async function renderAccuracy() {
   const one = s.anthropicKey ? 'Claude' : s.geminiKey ? 'Gemini' : '';
   $('xcState').textContent = s.crossCheck === false ? 'The second check is off: only the free checks run.'
     : both ? '✓ Both keys are set: Claude and Gemini check each other.'
+      : one && s.localFor?.check && s.localUrl && s.localModel ? `✓ One key: your local model on the HP checks ${one}'s work (free; a long check goes to a separate ${one} review).`
       : one ? `✓ One key: a second, separate ${one} review checks its work. Add the other provider's key to have Claude and Gemini check each other (more independent).`
         : 'No AI key yet: only the free checks run.';
   let st = null;
@@ -532,9 +533,10 @@ $('addHint').addEventListener('click', async () => {
 // ---------------------------------------------------------------- data
 
 $('rebuildIndex').addEventListener('click', async () => {
-  if (!confirm('Throw away the index and read every file again? Your files are not touched.')) return;
-  await clear('files', 'chunks', 'terms');
-  for (const k of ['indexStats', 'deadChunks', 'indexStatus', 'deepApplied', 'projects']) await kvSet(k, null);
+  if (!confirm('Throw away the index and read every file again? Your files are not touched. Indexed Outlook emails and saved meetings are kept.')) return;
+  const { resetIndex } = await import('./lib/index.js');
+  await resetIndex();
+  for (const k of ['indexStatus', 'deepApplied']) await kvSet(k, null);
   const res = await engine('index.run');
   toast(res?.error || 'Rebuilding the index…');
 });
@@ -580,7 +582,7 @@ $('instList').addEventListener('click', async (e) => {
 
 // ---------------------------------------------------------------- export / import (moving to another computer)
 
-const SECRET = new Set(['anthropicKey', 'geminiKey']);
+const SECRET = new Set(['anthropicKey', 'geminiKey', 'localKey']);
 
 $('exportSetup').addEventListener('click', async () => {
   const s = await getSettings();

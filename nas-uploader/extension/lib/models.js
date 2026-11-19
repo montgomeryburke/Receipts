@@ -15,7 +15,9 @@ function geminiInfo(name) {
 function claudeInfo(name) {
   const fam = /opus/.test(name) ? 0 : /sonnet/.test(name) ? 1 : /haiku/.test(name) ? 2 : /fable/.test(name) ? 0 : 3;
   const what = ['best quality', 'balanced, costs less', 'fastest, cheapest', ''][fam];
-  const v = Number((/(\d+)(?:-(\d))?(?:-\d{8})?$/.exec(name.replace(/^claude-[a-z]+-/, '')) || [])[0]?.replace('-', '.')) || 0;
+  // "claude-opus-4-5-20251101", "claude-3-5-sonnet-20241022", "claude-sonnet-5-5": the version, not the date.
+  const nums = name.replace(/-\d{8}$/, '').match(/\d+/g) || [];
+  const v = Number(nums.slice(0, 2).join('.')) || 0;
   return { version: v, family: fam, preview: false, label: `${name}${what ? ` — ${what}` : ''}` };
 }
 

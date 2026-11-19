@@ -2351,6 +2351,87 @@ test('email chain parsing: Outlook (EN/FR), "Original Message" and "On … wrote
   eq(r.thread, 3, 'threadOf keeps all three');
 });
 
+test('email details: short replies, *bold* and Spanish headers, delivery tickets, dates as Outlook writes them, project number beats people, CSV safe, one document per conversation, rebuild keeps emails, ticks stick', async () => {
+  const b = await launch();
+  const page = await b.open('sidepanel.html');
+  const r = await page.evaluate(async () => {
+    const { splitThread, threadOf, cleanEmailBody, parseMailDate, isoDay, localDay } = await import('./lib/text.js');
+    const out = {};
+    // A one-word reply above the quoted question: the question is history, not the newest message.
+    const short = 'Approved.\n\nFrom: John <john@x.ca>\nSent: Tuesday, November 10, 2026 3:12 PM\nTo: Me\nSubject: Pour\n\nCan we pour Friday?\n\nFrom: Bob <bob@x.ca>\nSent: Monday, November 9, 2026 1:00 PM\nTo: John\nSubject: Pour\n\nIs the rebar inspected?';
+    const s1 = splitThread(short);
+    out.short = [s1.latest.trim(), s1.earlier.length, s1.earlier[0].text, cleanEmailBody(short)];
+    // A "From: … Date: …" pair inside a message isn't a quote; "*From:*" plain-text headers are.
+    const ticket = 'Thanks, see below.\n\nDelivery ticket:\nFrom: north gate\nDate: Nov 10\nthe crew saw two trucks.\n\n*From:* Ann <ann@x.ca>\n*Sent:* mar. 2026-11-17 09:00\n*To:* Me\n*Subject:* trucks\n\nHow many trucks came?';
+    const s2 = splitThread(ticket);
+    out.ticket = [/north gate/.test(s2.latest), s2.earlier.length, s2.earlier[0].from, s2.earlier[0].text];
+    // Spanish quote inside an English one; a quoted "Yes." is kept.
+    const es = 'Ok.\n\nOn Fri, Nov 6, 2026 at 4:00 PM Arctic Fresh <\npm@x.ca> wrote:\n> Yes.\n>\n> El vie, 6 nov 2026 a las 15:00, Juan <j@x.ca> escribió:\n>> ¿Listo?';
+    out.es = threadOf({ body: es }).map((m) => [m.from, m.text]);
+    const now = new Date(2026, 10, 18, 12, 0).getTime();
+    const d = (x) => localDay(parseMailDate(x, now));
+    out.dates = ['mar. 2026-11-10 15:12', 'Tuesday, November 10, 2026 3:12 PM', '10 novembre 2026 à 15 h 12', 'Mon 11/9', 'Yesterday 3:12 PM', 'Thu 12/24', 'garbage', '10.11.2026'].map(d);
+    out.iso = [isoDay('12/15/2026', now), isoDay('December 1, 2026', now), isoDay('net 30', now)];
+    // Projects: the number written in the email beats two people listed for another project; "dan" ≠ jordan@….
+    const { kvSet, saveSettings, getAll, kvGet } = await import('./lib/db.js');
+    await kvSet('projects', ['Riverside/25-0010 Riverside School', 'Arena/26-0200 Arena Roof']);
+    await saveSettings({ projectMail: { 'Arena/26-0200 Arena Roof': { people: 'john@x.ca, mary@x.ca, dan', keywords: '' } }, anthropicKey: '', geminiKey: '', localUrl: '' });
+    const { detectProjects } = await import('./lib/projects.js');
+    out.proj = [
+      (await detectProjects('RE: 25-0010 Riverside School pour', { people: ['John <john@x.ca>', 'mary@x.ca'] }))[0],
+      (await detectProjects('Roof drains', { people: ['John <john@x.ca>', 'mary@x.ca'] }))[0],
+      (await detectProjects('Hello', { people: ['jordan@city.ca'] }))[0] || '',
+    ];
+    // CSV: a formula from an email stays text.
+    const { invoiceCsv } = await import('./lib/todo.js');
+    out.csv = invoiceCsv({ invoices: [{ party: '=HYPERLINK("http://x")', direction: 'to pay', invoice_number: '1', project: '', invoice_date: '', amount: '-$50.00', due_date: '', status: 'received', verified: true, notes: '' }] }).split('\r\n')[1];
+    // One document per Outlook conversation: the newer message replaces it, an older one doesn't.
+    const { indexEmail } = await import('./lib/mailindex.js');
+    const e = { convId: 'AAQkAD/conv+1==', from: 'Dana <dana@client.ca>', subject: 'RE: 25-0010 deck pour', body: 'Pour on the 18th.\n\nFrom: Me\nSent: Monday, November 9, 2026 1:00 PM\nTo: Dana\nSubject: deck pour\n\nWhen is the pour?' };
+    await indexEmail({ ...e, id: 'm1', receivedAt: 'Tue 2026-11-10 3:12 PM' });
+    await indexEmail({ ...e, id: 'm2', receivedAt: 'Wed 2026-11-11 9:00 AM', body: `Confirmed.\n\n${e.body}` });
+    const kept = await indexEmail({ ...e, id: 'm0', receivedAt: 'Mon 2026-11-09 1:00 PM', body: 'When is the pour?' });
+    const mails = (await getAll('files')).filter((f) => f.folderId === 'mail');
+    out.conv = [mails.length, mails[0]?.path, kept.kept === true, mails[0]?.brief?.latest];
+    // Rebuild keeps the indexed emails (they can't be read again from a folder) and they are still found.
+    const { resetIndex, search } = await import('./lib/index.js');
+    await resetIndex();
+    const hits = await search('deck pour confirmed', { k: 3 });
+    out.rebuild = [(await getAll('files')).filter((f) => f.folderId === 'mail').length, hits.some((h) => /Emails\//.test(h.path))];
+    // Your own task ticked done is done in your list too (it doesn't come back).
+    const { addOwnTask, priorityList, setDone } = await import('./lib/todo.js');
+    await addOwnTask('Renew the WorkSafe certificate', '2026-11-30');
+    const l1 = await priorityList();
+    const it = l1.items.find((i) => /WorkSafe/.test(i.title));
+    await setDone(it.id, true);
+    const own = await kvGet('tasks:own');
+    const l2 = await priorityList();
+    out.tick = [it.key.startsWith('t:'), own[0].done, l2.items.some((i) => /WorkSafe/.test(i.title) && !i.done)];
+    return out;
+  });
+  eq(r.short[0], 'Approved.', 'short reply is the newest message');
+  eq(r.short[1], 2, 'both earlier messages found');
+  eq(r.short[2], 'Can we pour Friday?', "the question is John's earlier message");
+  eq(r.short[3], 'Approved.', 'cleanEmailBody keeps only the reply');
+  eq(r.ticket[0], true, 'the delivery ticket stays in the newest message');
+  eq(r.ticket[1], 1, 'one quoted message');
+  eq(r.ticket[2], 'Ann <ann@x.ca>', '*From:* header read');
+  eq(r.ticket[3], 'How many trucks came?', 'its text');
+  eq(JSON.stringify(r.es), JSON.stringify([['Arctic Fresh <pm@x.ca>', 'Yes.'], ['Juan <j@x.ca>', '¿Listo?']]), 'two-line "On … wrote:", Spanish quote, short "Yes." kept');
+  eq(r.dates.join(' '), '2026-11-10 2026-11-10 2026-11-10 2026-11-09 2026-11-17 2025-12-24  2026-11-10', 'dates (French "mar." is Tuesday; no year → latest past; unreadable → unknown)');
+  eq(r.iso.join('|'), '2026-12-15|2026-12-01|', 'due dates as YYYY-MM-DD for comparisons');
+  eq(r.proj.join('|'), 'Riverside/25-0010 Riverside School|Arena/26-0200 Arena Roof|', 'project number wins; people count; "dan" is not jordan');
+  assert(r.csv.startsWith(`"'=HYPERLINK`) && r.csv.includes(`"'-$50.00"`), 'CSV cells that would be formulas are text: ' + r.csv);
+  eq(r.conv[0], 1, 'one document for the conversation');
+  assert(/^Emails\/2026-11-11 RE_? ?25-0010 deck pour \[c[0-9a-z]{6}\]\.eml$/.test(r.conv[1]) || /2026-11-11/.test(r.conv[1]), 'named by the newest message: ' + r.conv[1]);
+  eq(r.conv[2], true, 'an older message of it is skipped');
+  assert(/^Confirmed\./.test(r.conv[3]), 'brief holds the newest message: ' + r.conv[3]);
+  eq(r.rebuild[0], 1, 'rebuild keeps the email');
+  eq(r.rebuild[1], true, 'and it is still found');
+  eq(r.tick.join('|'), 'true|true|false', 'own task ticked done stays done');
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
 test('meeting: 🔎 Research (web, key points, links, checked), Ask now always helps, private "look up…" searches the web, 📝 Minutes saved as Word and text', async () => {
   const ai = global.mockAI;
   ai.reset();

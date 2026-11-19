@@ -104,6 +104,7 @@ function renderChips() {
   const ai = status.ai || {};
   if (ai.paused) c.push(chip('AI stopped', 'bad', 'No Claude or Gemini calls are made until you click Resume AI'));
   if (ai.crossCheckMode === 'both') c.push(chip('Cross-check on', 'ok', 'Claude and Gemini check each other: drafts, meeting prompts, answers, summaries and agent results'));
+  else if (ai.crossCheckMode === 'local') c.push(chip('Second check on (local)', 'ok', 'Your local model on the HP checks drafts, meeting prompts, answers, summaries and agent results (free).'));
   else if (ai.crossCheckMode === 'self') c.push(chip('Second check on', 'ok', 'One key: a second, separate review by the same AI checks drafts, meeting prompts, answers, summaries and agent results. Add the other key to have Claude and Gemini check each other.'));
   if (ai.dailyBudgetUsd) c.push(chip(`AI today ${money(ai.spentToday)} of ${money(ai.dailyBudgetUsd)}`, ai.spentToday >= ai.dailyBudgetUsd ? 'bad' : ai.spentToday >= 0.8 * ai.dailyBudgetUsd ? 'warn' : '', 'Estimated from the token counts; the daily limit is in Settings → Accuracy & safety'));
   else if (ai.spentToday) c.push(chip(`AI today ${money(ai.spentToday)}`, '', 'Estimated from the token counts'));
@@ -849,6 +850,7 @@ $('ownTaskForm').addEventListener('submit', async (e) => {
 
 function renderInvoices(rep) {
   if (!rep) { $('invOut').innerHTML = ''; return; }
+  $('invOut').dataset.month = rep.month;
   const rows = rep.invoices.map((i) => `<tr class="${i.status === 'overdue' ? 'overdue' : ''}"><td>${esc(i.party)}${i.direction === 'to collect' ? ' <span class="pill info">to collect</span>' : ''}</td><td class="mono">${esc(i.invoice_number)}</td><td>${esc(i.amount)}</td><td>${esc(i.due_date)}</td><td><span class="pill ${i.status === 'paid' ? 'ok' : i.status === 'overdue' ? 'bad' : ''}">${esc(i.status)}</span>${i.verified ? '' : ' <span class="pill warn" title="The amount or number wasn\'t found in the email — check it">check</span>'}</td><td class="small">${esc(i.notes)}</td></tr>`).join('');
   const check = rep.check?.issues?.length ? `<div class="check warn small">⚠ The second check found: ${rep.check.issues.map((x) => esc(`${x.claim} — ${x.problem}`)).join('; ')}</div>` : rep.check?.verdict === 'ok' ? '<div class="check ok small">✓ Checked again against the emails.</div>' : '';
   $('invOut').innerHTML = `<div class="small">${esc(rep.summary)}</div>${rows ? `<table class="inv"><thead><tr><th>Party</th><th>Invoice</th><th>Amount</th><th>Due</th><th>Status</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table>` : ''}${check}
@@ -870,7 +872,7 @@ $('invOut').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-inv]');
   if (!b) return;
   const { invoiceCsv, invoiceWord } = await import('./lib/todo.js');
-  const rep = await kvGet(`invoices:${$('invMonth').value}`);
+  const rep = await kvGet(`invoices:${$('invOut').dataset.month || $('invMonth').value}`);
   if (!rep) return;
   const blob = b.dataset.inv === 'csv' ? new Blob(['\ufeff' + invoiceCsv(rep)], { type: 'text/csv' }) : invoiceWord(rep);
   const a = document.createElement('a');
@@ -879,9 +881,10 @@ $('invOut').addEventListener('click', async (e) => {
   a.click();
 });
 (() => {
+  // Last month (from the 1st, so Dec 31 gives November).
   const d = new Date();
-  d.setMonth(d.getMonth() - 1);
-  $('invMonth').value = d.toISOString().slice(0, 7);
+  const last = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  $('invMonth').value = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}`;
 })();
 engine('todo.last').then((r) => { if (r && !r.error) renderPriorities(r); }).catch(() => {});
 
@@ -891,6 +894,11 @@ $('mailIndexBtn').addEventListener('click', async () => {
   if (r?.error) { $('mailIndexMsg').textContent = r.error; return; }
   $('mailIndexMsg').textContent = `Reading the ${r.listed}+ emails listed in Outlook… (keep the Outlook tab open; you can keep working elsewhere)`;
   $('mailIndexBtn').disabled = true;
+  $('mailIndexStop').hidden = false;
+});
+$('mailIndexStop').addEventListener('click', async () => {
+  await bg('outlook.stopIndex');
+  $('mailIndexStop').hidden = true;
 });
 
 $('reconnectBtn').addEventListener('click', async () => {
@@ -1214,7 +1222,8 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
   if (msg.type === 'mailIndexDone') {
     $('mailIndexBtn').disabled = false;
-    $('mailIndexMsg').textContent = `Done: ${msg.indexed} email${msg.indexed === 1 ? '' : 's'} indexed with their whole chains${msg.failed ? `, ${msg.failed} couldn't be read` : ''}. They're filed under their projects and used for drafts.`;
+    $('mailIndexStop').hidden = true;
+    $('mailIndexMsg').textContent = `${msg.stopped ? 'Stopped' : 'Done'}: ${msg.indexed} email${msg.indexed === 1 ? '' : 's'} indexed with their whole chains${msg.failed ? `, ${msg.failed} couldn't be read` : ''}. They're filed under their projects and used for drafts.`;
     refreshSoon(500);
     return false;
   }

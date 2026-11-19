@@ -23,7 +23,7 @@ export async function detectProjects(text, { people = [] } = {}) {
     const name = p.split('/').pop();
     const code = (name.match(/^[A-Za-z]{0,4}[-_ ]?\d[\w.-]{1,}/) || [])[0];
     if (code && code.length >= 3 && hasPhrase(lower, code.toLowerCase())) {
-      add(p, 3);
+      add(p, 10); // the project number written in it beats people and keywords
       continue;
     }
     const toks = tokenize(name).filter((t) => !/^\d+$/.test(t));
@@ -34,10 +34,10 @@ export async function detectProjects(text, { people = [] } = {}) {
   }
   for (const [p, r] of Object.entries(rules)) {
     for (const kw of splitList(r.keywords)) if (kw.length >= 3 && hasPhrase(lower, kw.toLowerCase())) add(p, 2);
-    for (const person of splitList(r.people)) {
-      const x = person.toLowerCase().trim();
-      if (x.length >= 3 && who.some((w) => w.includes(x))) add(p, 2.5);
-    }
+    // People count once per project (two people on the email don't outweigh a keyword), matched as whole words or
+    // addresses: "dan" is Dan Smith or dan@x.ca, not jordan@city.ca.
+    const listed = splitList(r.people).map((x) => x.toLowerCase().trim()).filter((x) => x.length >= 3);
+    if (listed.some((x) => who.some((w) => hasPhrase(w, x)))) add(p, 2.5);
   }
   return [...score].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([p]) => p);
 }

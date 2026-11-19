@@ -170,6 +170,7 @@ const handlers = {
   'outlook.insert': (m) => toOutlook({ type: 'insertDraft', text: m.text, convId: m.convId, itemId: m.itemId }),
   'outlook.scanNow': () => toOutlook({ type: 'scanNow' }),
   'outlook.indexListed': (m) => toOutlook({ type: 'indexListed', max: m.max || 300 }),
+  'outlook.stopIndex': () => toOutlook({ type: 'stopIndexListed' }),
   'outlook.diagnose': () => toOutlook({ type: 'diagnose' }),
   badge: async (m) => {
     await chrome.action.setBadgeBackgroundColor({ color: '#b45309' });

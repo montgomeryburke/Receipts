@@ -5,7 +5,7 @@
 // BM25 term weights precomputed at index time (length-normalised), so a
 // query only reads the posting lists of its own terms.
 
-import { tx, reqP, txDone, kvGet, kvSet } from './db.js';
+import { tx, reqP, txDone, kvGet, kvSet, getAll, clear } from './db.js';
 import { tokenize, termFreqs } from './text.js';
 
 export const INDEX_VERSION = 1;
@@ -23,7 +23,11 @@ export class IndexWriter {
   constructor() {
     this.pending = new Map();      // term -> flat [id, impact, ...]
     this.pendingEntries = 0;
-    this.ready = loadState().then((s) => Object.assign(this, s));
+    this.ready = loadState().then((s) => {
+      Object.assign(this, s);
+      this.base = { ...s.stats };
+      this.baseDead = new Set(s.dead);
+    });
   }
 
   avgdl() {
@@ -109,14 +113,35 @@ export class IndexWriter {
   async finish() {
     await this.ready;
     await this.flush();
-    this.stats.n = Math.max(0, this.stats.n);
-    this.stats.totalLen = Math.max(0, this.stats.totalLen);
-    await kvSet('indexStats', this.stats);
-    if (this.dead.size > 2000 && this.dead.size > this.stats.n * 0.25) {
-      await compact(this.dead);
-      this.dead.clear();
+    // Other writers (the folder index, emails, a meeting window) may have changed the totals meanwhile: this
+    // writer's changes are added to the stored values, in one transaction, instead of overwriting them.
+    const dn = this.stats.n - this.base.n;
+    const dl = this.stats.totalLen - this.base.totalLen;
+    const newDead = [...this.dead].filter((id) => !this.baseDead.has(id));
+    const t = await tx(['kv'], 'readwrite');
+    const st = t.objectStore('kv');
+    const cur = (await reqP(st.get('indexStats'))) || { n: 0, totalLen: 0 };
+    const stats = { ...cur, n: Math.max(0, (cur.n || 0) + dn), totalLen: Math.max(0, (cur.totalLen || 0) + dl) };
+    const dead = new Set((await reqP(st.get('deadChunks'))) || []);
+    for (const id of newDead) dead.add(id);
+    st.put(stats, 'indexStats');
+    st.put([...dead], 'deadChunks');
+    await txDone(t);
+    if (dead.size > 2000 && dead.size > stats.n * 0.25) {
+      await compact(dead);
+      const t2 = await tx(['kv'], 'readwrite');
+      const st2 = t2.objectStore('kv');
+      const now = new Set((await reqP(st2.get('deadChunks'))) || []);
+      for (const id of dead) now.delete(id);
+      st2.put([...now], 'deadChunks');
+      await txDone(t2);
+      dead.clear();
+      for (const id of now) dead.add(id);
     }
-    await kvSet('deadChunks', [...this.dead]);
+    this.stats = stats;
+    this.dead = dead;
+    this.base = { ...stats };
+    this.baseDead = new Set(dead);
   }
 }
 
@@ -276,4 +301,26 @@ export async function indexSummary() {
   const stats = (await kvGet('indexStats')) || { n: 0, totalLen: 0 };
   const status = (await kvGet('indexStatus')) || null;
   return { chunks: stats.n, status };
+}
+
+/**
+ * Empties the index for a rebuild, keeping the documents that can't be read again from a folder: indexed Outlook
+ * emails and saved meetings (folderId 'mail' / 'meeting'). Returns how many were kept.
+ */
+export async function resetIndex(keep = ['mail', 'meeting']) {
+  const kept = [];
+  for (const r of (await getAll('files')).filter((f) => keep.includes(f.folderId))) {
+    const t = await tx(['chunks']);
+    const cs = t.objectStore('chunks');
+    const chunks = (await Promise.all((r.chunkIds || []).map((id) => reqP(cs.get(id))))).filter(Boolean).sort((a, b) => a.ord - b.ord);
+    const { chunkIds, v, ...rec } = r;
+    kept.push({ rec, chunks: chunks.map((c) => ({ text: c.text, page: c.page || 0 })) });
+  }
+  await clear('files', 'chunks', 'terms');
+  await kvSet('indexStats', null);
+  await kvSet('deadChunks', null);
+  const w = new IndexWriter();
+  for (const { rec, chunks } of kept) if (chunks.length) await w.addFile(rec, chunks);
+  await w.finish();
+  return kept.length;
 }

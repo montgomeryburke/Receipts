@@ -95,6 +95,10 @@ async function ensureContext() {
 }
 
 async function listen(kind) {
+  if (state.stopping) {
+    toast('Still saving the last meeting — one moment.');
+    return;
+  }
   state.settings = await getSettings();
   try {
     await ensureContext();
@@ -160,6 +164,9 @@ async function startSession() {
   state.prompts = [];
   state.answers = [];
   state.summary = null;
+  state.minutes = null;
+  state.minutesFinal = false;
+  state.minutesBase = '';
   state.savedPath = '';
   state.cost = 0;
   state.errors = [];
@@ -237,8 +244,23 @@ function renderRecording() {
 }
 
 async function stopAndSave() {
-  if (!state.listening) return;
+  if (!state.listening || state.stopping) return;
+  state.stopping = true;
   $('btnStop').disabled = true;
+  // No new meeting can start until this one is saved.
+  $('btnApp').disabled = true;
+  $('btnTab').disabled = true;
+  const stt = state.stt;
+  try {
+    await finishMeeting(stt);
+  } finally {
+    state.stopping = false;
+    $('btnApp').disabled = false;
+    $('btnTab').disabled = false;
+  }
+}
+
+async function finishMeeting(stt) {
   if (state.recording) await stopRecording();
   state.them?.stop();
   stopMic();
@@ -262,8 +284,8 @@ async function stopAndSave() {
   }
   await save(true);
   if (state.summary) await makeMinutes({ final: true });
-  state.stt?.stop();
-  state.stt = null;
+  stt?.stop();
+  if (state.stt === stt) state.stt = null;
   $('clock').hidden = true;
   setStatus(state.savedPath ? `Saved to the NAS: ${state.savedPath}` : 'Stopped. (Not saved to the NAS — see the message below.)');
   renderSummary();
@@ -532,8 +554,30 @@ function downloadMinutes(m, kind) {
 }
 
 /** Minutes so far (button), or the final minutes at Stop and save. Saved to the NAS next to the transcript. */
-async function makeMinutes({ final = false } = {}) {
+async function makeMinutes(opts = {}) {
+  // One run at a time (clicking twice, or Stop and save while minutes are being written, waits for it).
+  if (state.minutesRun) {
+    await state.minutesRun.catch(() => {});
+    if (!opts.final) return state.minutes;
+  }
+  $('btnMinutes').disabled = true;
+  state.minutesRun = writeMinutes(opts);
+  try {
+    return await state.minutesRun;
+  } finally {
+    state.minutesRun = null;
+    $('btnMinutes').disabled = false;
+  }
+}
+
+async function writeMinutes({ final = false } = {}) {
   let m = final ? state.summary : null;
+  if (!final && state.minutesFinal) {
+    // The meeting has ended and its final minutes are saved: no new call for the same transcript.
+    toast('The final minutes are saved next to the transcript.');
+    renderPrompts();
+    return state.minutes;
+  }
   if (!m) {
     if (state.aiPaused) {
       toast('AI is stopped. Click ▶ Resume AI first.');
@@ -556,7 +600,9 @@ async function makeMinutes({ final = false } = {}) {
     }
     state.cost += m.cost || 0;
     renderCost();
+    if (state.minutesFinal) return state.minutes; // the meeting ended meanwhile: the final minutes stay
   }
+  if (final) state.minutesFinal = true;
   const card = state.prompts.find((p) => p.kind === 'minutes') || { id: 'minutes', kind: 'minutes', at: Date.now(), pinned: true };
   Object.assign(card, { minutes: m, final, at: Date.now() });
   if (!state.prompts.includes(card)) state.prompts.unshift(card);
@@ -567,6 +613,11 @@ async function makeMinutes({ final = false } = {}) {
     await writeTextFile(client, `${base} — Minutes.md`, minutesMarkdown(m));
     await ensureDir(client, base.slice(0, base.lastIndexOf('/')) || '/');
     await client.upload(`${base} — Minutes.docx`, minutesWord(m));
+    // Minutes saved earlier under another name (before the title or the project was known) are replaced.
+    if (state.minutesBase && state.minutesBase !== base) {
+      for (const ext of ['md', 'docx']) await client.remove(`${state.minutesBase} — Minutes.${ext}`, { ignoreMissing: true }).catch(() => {});
+    }
+    state.minutesBase = base;
     card.savedTo = `${base} — Minutes.docx`;
   } catch (err) {
     state.errors.push(`minutes: ${err.message}`);
@@ -611,7 +662,8 @@ function researchCardHtml(c, i) {
   if (c.error) return `<div class="card research" data-i="${i}"><div class="err">Research failed: ${esc(c.error)}</div></div>`;
   const check = c.check ? (c.check.error ? `<div class="chk warn small">Not double-checked: ${esc(c.check.error)}</div>`
     : c.check.verdict === 'ok' ? `<div class="chk ok small" data-check="ok">✓ ${c.check.self ? `A second ${AI_NAME[c.check.by]} search` : AI_NAME[c.check.by]} checked these points on the web.</div>`
-      : c.check.verdict === 'issues' ? `<div class="chk warn small" data-check="issues">⚠ ${c.check.self ? `A second ${AI_NAME[c.check.by]} search` : AI_NAME[c.check.by]} disagrees:<ul class="plain">${c.check.issues.map((x) => `<li><b>${esc(x.claim)}</b> — ${esc(x.problem)}</li>`).join('')}</ul></div>` : '') : '';
+      : c.check.verdict === 'issues' ? `<div class="chk warn small" data-check="issues">⚠ ${c.check.self ? `A second ${AI_NAME[c.check.by]} search` : AI_NAME[c.check.by]} disagrees:<ul class="plain">${c.check.issues.map((x) => `<li><b>${esc(x.claim)}</b> — ${esc(x.problem)}</li>`).join('')}</ul></div>`
+        : `<div class="chk small muted" data-check="unclear">The second search couldn't confirm these points — check the links before relying on them.</div>`) : '';
   return `<div class="card research ${c.pinned ? 'pinned' : ''}" data-i="${i}">
     <div class="small muted">🔎 Research${c.topic ? `: ${esc(c.topic)}` : ''}</div>
     <ul class="points">${(c.points || []).map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
@@ -638,7 +690,7 @@ function promptCardHtml(c, i) {
   const fresh = Date.now() - c.at < 15000;
   const sug = (c.suggestions || []).map((s) => {
     const general = !(s.sources || []).length && /^general knowledge/i.test(s.why || '');
-    return `<div class="say">${esc(s.say)}</div><div class="why">${general ? '<span class="tag" title="Not from your files — check it">general knowledge</span> ' : ''}${esc(String(s.why || '').replace(/^general knowledge:\s*/i, ''))}</div>${(s.sources || []).map(sourceHtml).join('')}`;
+    return `<div class="say">${esc(s.say)}</div><div class="why">${general ? '<span class="tag" title="Not from your files — check it">general knowledge</span> ' : ''}${esc(general ? String(s.why || '').replace(/^general knowledge:\s*/i, '') : s.why)}</div>${(s.sources || []).map(sourceHtml).join('')}`;
   }).join('<hr class="sep">');
   return `<div class="card ${fresh ? 'new' : ''} ${c.pinned ? 'pinned' : ''}" data-i="${i}">
     ${c.topic ? `<div class="small muted">${esc(c.topic)}</div>` : ''}${sug}${checkHtml(c.check)}${webHtml(c.web)}

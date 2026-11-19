@@ -97,6 +97,15 @@ export async function count(store) {
 // ---- key/value helpers ----
 
 export const kvGet = (key) => get('kv', key);
+
+/** Adds `delta` to a number in kv inside one read-write transaction (pages and the engine can't lose updates). */
+export async function kvAdd(key, delta) {
+  const t = await tx(['kv'], 'readwrite');
+  const st = t.objectStore('kv');
+  const cur = await reqP(st.get(key));
+  st.put(Math.round(((Number(cur) || 0) + delta) * 1e5) / 1e5, key);
+  return txDone(t);
+}
 export const kvSet = (key, value) => put('kv', value, key);
 
 // ---- settings ----
@@ -122,7 +131,8 @@ export const DEFAULT_SETTINGS = {
   localModel: '',                     // e.g. qwen2.5:7b
   localAuth: 'nas',                   // 'nas' = send the NAS login | 'key' = localKey as a bearer token | 'none'
   localKey: '',
-  localFor: { priorities: true, invoices: false, check: true },                    // {[project]: {people, keywords}} — what files an email under a project
+  localFor: { priorities: true, invoices: false, check: true },
+  localContextChars: 24000,           // what the local model can read at once (Ollama: raise OLLAMA_CONTEXT_LENGTH)                    // {[project]: {people, keywords}} — what files an email under a project
   emailEffort: 'medium',              // thinking effort for email drafts (complete, professional replies)
   refinePass: true,                   // one extra local search + call when info is missing
   priceInPerM: null,                  // override estimated price, USD per 1M input tokens
@@ -154,7 +164,7 @@ export const DEFAULT_SETTINGS = {
   deepIndexFile: '/.assistant/deep-index.jsonl.gz',
 
   processOnOpen: true,
-  autoScan: true,
+  autoScan: false,
   autoScanOnlyWhenIdle: true,
   ignoreSenders: 'noreply, no-reply, donotreply, do-not-reply, notifications@, newsletter, mailer-daemon, postmaster@',
   ignoreSubjects: 'unsubscribe, out of office, automatic reply, undeliverable, delivery status notification',
@@ -168,7 +178,7 @@ export const DEFAULT_SETTINGS = {
   // Accuracy and safety
   crossCheck: true,                   // a second check of drafts, prompts, answers, summaries, agent results: the other AI (both keys) or a separate review (one key)
   crossCheckRevise: true,             // …and a draft it finds problems in is revised once by the first AI
-  dualLookUp: true,                   // standards looked up online twice, independently (by both AIs with both keys), and compared
+  dualLookUp: false,                  // standards looked up online twice, independently (by both AIs with both keys), and compared
   selfCheckModel: '',                 // one key: model for the second review ('' = the same model)
   aiPaused: false,                    // the kill switch: no AI calls at all until resumed
   dailyBudgetUsd: 0,                  // stop AI calls for the day once this much is spent (0 = no limit)

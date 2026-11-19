@@ -69,6 +69,7 @@
           <datalist id="localModels"></datalist>
           <label class="field"><span>Login</span><select data-key="localAuth"><option value="nas">the NAS login (through the NAS address)</option><option value="key">an API key</option><option value="none">none (home network)</option></select></label>
           <label class="field"><span>API key (only for "an API key")</span><input type="password" data-key="localKey" autocomplete="off"></label>
+          <label class="field"><span>It can read (characters at once)</span><input type="number" min="4000" max="400000" step="1000" data-key="localContextChars" title="Ollama reads 2–4k tokens unless OLLAMA_CONTEXT_LENGTH is raised; 16384 tokens ≈ 60,000 characters"></label>
         </div>
         <div class="row small"><b>Use it for:</b>
           <label class="check"><input type="checkbox" data-local-for="priorities"> priority lists</label>
@@ -99,7 +100,7 @@
       <p class="small">Everything that runs by itself and calls Claude or Gemini (which costs money) is listed here, with a switch. Searching, indexing, project detection, the free transcription and the email index all run on this computer or the HP and cost nothing.</p>
       <div id="spendBox" class="spend small"></div>
       <div class="row"><span class="small"><b>Presets:</b></span>
-        <button type="button" data-preset="saver" title="Only what you click: no automatic drafts or prompts, no second check, free transcription, low effort">💰 Saver</button>
+        <button type="button" data-preset="saver" title="Only what you click: no automatic drafts, prompts or minutes, no second check, free transcription, low effort">💰 Saver</button>
         <button type="button" data-preset="balanced" title="Drafts when you open a new email, automatic meeting prompts, the second check on, medium effort for drafts">⚖ Balanced</button>
         <button type="button" data-preset="best" title="Everything on: automatic drafts, the second check and double look-ups, high effort for drafts">🎯 Best accuracy</button>
         <span id="presetOut" class="small muted"></span>

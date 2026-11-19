@@ -5,7 +5,7 @@
 //  - generateText: a plain call with an optional web lookup — meeting standards look-ups.
 
 import { Anthropic } from '../vendor/anthropic-sdk.mjs';
-import { getSettings, saveSettings, kvGet, kvSet } from './db.js';
+import { getSettings, saveSettings, kvGet, kvSet, kvAdd } from './db.js';
 import { nasCreds } from './nas.js';
 import { basicAuthHeader } from './util.js';
 
@@ -94,10 +94,9 @@ async function recordSpend(usage, model, settings) {
   const c = costOf(usage, model, settings);
   if (!c) return;
   try {
-    await kvSet(`spend:${today()}`, round5((await spentToday()) + c));
+    await kvAdd(`spend:${today()}`, c);
     const month = today().slice(0, 7);
-    const key = `spendtag:${month}:${settings?._tag || 'other'}`;
-    await kvSet(key, round5(((await kvGet(key)) || 0) + c));
+    await kvAdd(`spendtag:${month}:${settings?._tag || 'other'}`, c);
     const tags = new Set((await kvGet(`spendtags:${month}`)) || []);
     if (!tags.has(settings?._tag || 'other')) await kvSet(`spendtags:${month}`, [...tags, settings?._tag || 'other']);
   } catch {
@@ -151,10 +150,16 @@ export function priceFor(model, settings = {}) {
     const i = Number(settings.priceInPerM);
     return [i, Number(settings.priceOutPerM), i / 10];
   }
+  const m = String(model || '').replace(/^models\//, '');
   const key = Object.keys(PRICES)
-    .filter((k) => String(model || '').startsWith(k))
+    .filter((k) => m.startsWith(k))
     .sort((a, b) => b.length - a.length)[0];
-  return key ? PRICES[key] : null;
+  if (key) return PRICES[key];
+  // A model not in the table (a newer Gemini, one typed by hand) still counts: its family's price, or the dearest
+  // of its provider, so the spending panel and the daily limit never see it as free.
+  if (/^gemini/i.test(m)) return /pro/i.test(m) ? PRICES['gemini-3-pro'] : /lite/i.test(m) ? PRICES['gemini-2.5-flash-lite'] : /flash/i.test(m) ? PRICES['gemini-3-flash'] : PRICES['gemini-3-pro'];
+  if (/^claude/i.test(m)) return /haiku/i.test(m) ? PRICES['claude-haiku-4'] : /sonnet/i.test(m) ? PRICES['claude-sonnet-4'] : PRICES['claude-fable-5-1'];
+  return m ? PRICES['claude-fable-5-1'] : null;
 }
 
 export function costOf(usage, model, settings) {
@@ -167,6 +172,7 @@ export function costOf(usage, model, settings) {
 }
 
 export function activeModel(settings, provider = settings.provider) {
+  if (provider === 'local') return settings.localModel;
   return provider === 'gemini' ? settings.geminiModel : settings.anthropicModel;
 }
 
@@ -202,6 +208,7 @@ async function localHeaders(settings) {
     } catch {
       sameHost = false;
     }
+    if (sameHost && !c) throw new LLMError('config', 'The local model needs the NAS login: open "NAS files" once and enter the password (or tick "remember" there).');
     if (c && sameHost) h.authorization = basicAuthHeader(c.username, c.password);
   } else if (settings.localAuth === 'key' && settings.localKey) h.authorization = `Bearer ${settings.localKey}`;
   return h;
@@ -228,6 +235,7 @@ async function callLocal(settings, { system, parts, schema, maxTokens, signal })
     try {
       data = await httpJson(url, { method: 'POST', headers, body: JSON.stringify(body), signal: call.signal }, { retries: 1 });
     } catch (err) {
+      if (err.kind === 'auth') throw new LLMError('auth', `The local model refused the login (${err.status}): check Settings → AI → Local model (NAS login or API key).`, err.status);
       // Older servers don't know json_schema: ask for JSON in the prompt only.
       if (!schema || err.kind !== 'bad-request') throw err;
       delete body.response_format;
@@ -646,6 +654,7 @@ export async function callLLM(settings, request) {
  */
 export async function generateText(settings, { provider: p, system, prompt, web = false, effort, maxTokens = 2000, signal }) {
   const provider = p || settings.provider;
+  if (provider === 'local') throw new LLMError('config', 'The local model cannot search the web');
   if (!hasKey(settings, provider)) throw new LLMError('config', `No ${provider === 'gemini' ? 'Gemini' : 'Anthropic'} API key set`);
   if (provider === 'gemini') {
     const model = await resolveGeminiModel(settings);
@@ -707,6 +716,7 @@ export async function generateText(settings, { provider: p, system, prompt, web 
  */
 export async function runChat(settings, { provider: p, system, history, tools, effort, maxTokens = 4000, maxTurns = 12, onStep = () => {}, onText = () => {}, trim = null, signal }) {
   const provider = p || settings.provider;
+  if (provider === 'local') throw new LLMError('config', 'The chat and the agent need Claude or Gemini');
   if (!hasKey(settings, provider)) throw new LLMError('config', `No ${provider === 'gemini' ? 'Gemini' : 'Anthropic'} API key set`);
   const byName = new Map(tools.map((t) => [t.name, t]));
   const steps = [];

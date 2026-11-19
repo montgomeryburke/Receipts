@@ -13,7 +13,7 @@ import { callLLM, costOf, activeModel } from './llm.js';
 import { canCrossCheck, review, reviewBlock, unsupportedNumbers, providerName } from './crosscheck.js';
 import { cleanEmailBody, threadOf, emailId, tokenize, splitList, hashString, pageLabel } from './text.js';
 import { detectProjects } from './projects.js';
-import { indexEmail } from './mailindex.js';
+import { indexEmail, mailTag } from './mailindex.js';
 
 export { detectProjects, emailId, threadOf };
 import { matchRules, learnFromItem } from './teach.js';
@@ -138,7 +138,8 @@ export async function relatedEmails(item, settings) {
     if (terms.size) {
       archive = (await search(terms, {
         k: 4, charBudget: 4000, maxChunkChars: 1000, perFile: 2, boostPrefixes: item.projects,
-        pathFilter: (p) => /\.(pst|msg|eml)$/i.test(p) && p !== item.mailPath && !p.includes(`[${String(item.id).slice(-6)}]`),
+        // Not this email's own conversation (the model has it already).
+        pathFilter: (p) => /\.(pst|msg|eml)$/i.test(p) && p !== item.mailPath && !p.includes(`[${mailTag(item)}]`) && !p.includes(`[${String(item.id).slice(-6)}]`),
       }))
         .map((h) => ({ path: h.path, page: h.page, text: h.text }));
     }
@@ -488,9 +489,6 @@ export async function processEmail(email, { force = false, onChange = () => {} }
     if (await runReadyRequests(item, settings)) await redraftWithData(item, settings);
     await checkDraft(item, settings);
     await runAutoHooks(item, settings);
-    await indexEmail({ ...email, body: item.bodyRaw || email.body, conversation: item.conversation }, { projects: item.projects })
-      .then((r) => { item.mailPath = r.path; })
-      .catch((err) => log('warn', `mail index: ${err.message}`));
   } catch (err) {
     item.status = 'error';
     item.error = err.message || String(err);
@@ -501,6 +499,16 @@ export async function processEmail(email, { force = false, onChange = () => {} }
   item.processedAt = Date.now();
   await put('items', item);
   onChange(item);
+  // Then into the project index (the draft is saved first, so it is never lost while the index is busy).
+  if (item.bodyRaw || email.body) {
+    await indexEmail({ ...email, body: item.bodyRaw || email.body, conversation: item.conversation }, { projects: item.projects })
+      .then(async (r) => {
+        item.mailPath = r.path;
+        const fresh = await get('items', item.id);
+        if (fresh) await put('items', { ...fresh, mailPath: r.path });
+      })
+      .catch((err) => log('warn', `mail index: ${err.message}`));
+  }
   return item;
 }
 

@@ -95,14 +95,139 @@ export function chunkText(textOrPages, target = 1100) {
 
 // ---- email cleanup (saves tokens: drop quoted history, signatures, disclaimers) ----
 
+// A quoted earlier message starts with a header block (From + Sent/Date + To/Subject, in English, French,
+// Spanish or German; also "*From:*" in plain-text mail and "> "-quoted), "-----Original Message-----", or a
+// "On … wrote:" line. A lone "From: … Date: …" pair inside a message (a delivery ticket) is not a quote.
+const HB = (k) => String.raw`[ \t>]*\*{0,2}(?:${k})\*{0,2}[ \t]?:\*{0,2}`;
+const H_FROM = HB('From|De|Von');
+const H_SENT = HB('Sent|Date|Envoy[ée]|Enviado|Gesendet|Datum|Fecha');
+const H_TO = HB('To|[ÀA]|Para|An|Cc|Subject|Objet|Asunto|Betreff');
 const QUOTE_MARKERS = [
-  /^-{2,}\s*Original Message\s*-{2,}/im,
-  /^_{10,}\s*$/m,
-  /^From:\s.+\n(?:.*\n){0,3}?(?:Sent|Date):\s.+/im,
-  /^On .{6,120}\bwrote:\s*$/im,
-  /^De\s?:\s.+\n(?:.*\n){0,3}?(?:Envoy[ée]|Date)\s?:\s.+/im,
-  /^Le .{6,120}a écrit\s?:\s*$/im,
+  /^[ \t>]*-{2,}\s*(?:Original Message|Message d'origine|Mensaje original|Ursprüngliche Nachricht)\s*-{2,}/im,
+  new RegExp(String.raw`^[ \t>]*_{10,}[ \t]*\n${H_FROM}`, 'im'),
+  new RegExp(String.raw`^${H_FROM}.*\S.*\n(?:.*\n){0,3}?${H_SENT}.*\S.*\n(?:.*\n){0,3}?${H_TO}`, 'im'),
+  /^[ \t>]*On (?:.|\n(?!\s*\n)){6,240}?\bwrote:[ \t]*$/im,
+  /^[ \t>]*Le (?:.|\n(?!\s*\n)){6,240}?a écrit[ \t]?:[ \t]*$/im,
+  /^[ \t>]*El (?:.|\n(?!\s*\n)){6,240}?escribió[ \t]?:[ \t]*$/im,
+  /^[ \t>]*Am (?:.|\n(?!\s*\n)){6,240}?schrieb.{0,160}:[ \t]*$/im,
 ];
+
+// ---- dates as Outlook and mail clients write them ----
+
+const MONTHS = {
+  jan: 0, january: 0, janv: 0, janvier: 0, enero: 0, januar: 0,
+  feb: 1, february: 1, fev: 1, fevr: 1, fevrier: 1, febrero: 1, februar: 1,
+  mar: 2, march: 2, mars: 2, marzo: 2, marz: 2,
+  apr: 3, april: 3, avr: 3, avril: 3, abril: 3,
+  may: 4, mai: 4, mayo: 4,
+  jun: 5, june: 5, juin: 5, junio: 5, juni: 5,
+  jul: 6, july: 6, juil: 6, juillet: 6, julio: 6, juli: 6,
+  aug: 7, august: 7, aout: 7, agosto: 7,
+  sep: 8, sept: 8, september: 8, septembre: 8, septiembre: 8,
+  oct: 9, october: 9, octobre: 9, octubre: 9, okt: 9, oktober: 9,
+  nov: 10, november: 10, novembre: 10, noviembre: 10,
+  dec: 11, december: 11, decembre: 11, diciembre: 11, dez: 11, dezember: 11,
+};
+const WEEKDAY = /^\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thu(?:rs?)?|fri|sat|sun|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|lun|mar|mer|jeu|ven|sam|dim)\.?,?\s+/i;
+const plain = (w) => w.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\.$/, '');
+let dayFirstCache = null;
+/** Whether this computer writes numeric dates day first (25/11/2026) — Outlook uses the same order. */
+function dayFirst() {
+  if (dayFirstCache == null) {
+    try {
+      const parts = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'numeric', year: 'numeric' }).formatToParts(new Date(2026, 10, 25));
+      dayFirstCache = parts.findIndex((x) => x.type === 'day') < parts.findIndex((x) => x.type === 'month');
+    } catch {
+      dayFirstCache = false;
+    }
+  }
+  return dayFirstCache;
+}
+
+/**
+ * The time (ms, local) of a date as written in an email header or Outlook's list: "Tue 2026-11-10 3:12 PM",
+ * "mar. 2026-11-10 15:12", "Tuesday, November 10, 2026 3:12 PM", "10 novembre 2026 à 15 h 12", "11/10/2026",
+ * "Mon 11/9" (this year), "3:12 PM" (today), "Yesterday 3:12 PM". NaN when it can't be read for sure.
+ */
+export function parseMailDate(input, now = Date.now()) {
+  if (typeof input === 'number') return Number.isFinite(input) ? input : NaN;
+  let s = String(input || '').replace(/\s+/g, ' ').replace(/\b(at|à|um|a las)\b/gi, ' ').trim();
+  if (!s) return NaN;
+  // Machine dates with a time zone ("2026-10-05T09:00:00Z", "Wed, 11 Nov 2026 09:30:00 -0800"): exact as given.
+  if (/^\d{4}-\d{2}-\d{2}T\d/.test(s) || (/\b(19|20)\d{2}\b/.test(s) && /(?:[+-]\d{4}|\bGMT\b|\bUTC\b|\dZ)\s*$/.test(s))) {
+    const t = Date.parse(s);
+    if (!Number.isNaN(t)) return t;
+  }
+  const today = new Date(now);
+  let base = null;
+  const rel = /^(today|aujourd'hui|heute|hoy|yesterday|hier|gestern|ayer)\b/i.exec(s);
+  if (rel) {
+    base = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (/^(today|aujourd|heute|hoy)/i.test(rel[1]) ? 0 : 1));
+    s = s.slice(rel[0].length);
+  }
+  const tm = /(\d{1,2})\s?(?::|h)\s?(\d{2})(?::\d{2})?\s*(?:([AaPp])\.?\s?[Mm]\.?)?/.exec(s);
+  let hh = 0;
+  let mi = 0;
+  if (tm) {
+    hh = Number(tm[1]) % 24;
+    mi = Number(tm[2]);
+    if (tm[3]) hh = (hh % 12) + (/p/i.test(tm[3]) ? 12 : 0);
+    if (mi > 59) return NaN;
+  }
+  const rest = tm ? s.slice(0, tm.index) + ' ' + s.slice(tm.index + tm[0].length) : s;
+  // A weekday in front ("mar." is Tuesday in French, not March) — dropped only when a full date follows.
+  const wd = WEEKDAY.exec(rest);
+  const dateText = wd && /\d{4}[-/.]\d|\d[/.-]\d|\b[a-zA-Zéûä]{3,}\.?\s+\d|\d{1,2}(?:er)?\.?\s+[a-zA-Zéûä]{3,}/.test(rest.slice(wd[0].length)) ? rest.slice(wd[0].length) : rest;
+  let y;
+  let m;
+  let d;
+  let r;
+  if ((r = /(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(dateText))) [y, m, d] = [Number(r[1]), Number(r[2]) - 1, Number(r[3])];
+  else if ((r = /(\d{1,2})([/.-])(\d{1,2})[/.-](\d{2,4})\b/.exec(dateText))) {
+    const [a, b] = [Number(r[1]), Number(r[3])];
+    // 10.11.2026 (dots) is always day first; slashes follow this computer's order unless a number is over 12.
+    const df = a > 12 ? true : b > 12 ? false : r[2] === '.' ? true : dayFirst();
+    [d, m] = df ? [a, b - 1] : [b, a - 1];
+    y = Number(r[4]) < 100 ? 2000 + Number(r[4]) : Number(r[4]);
+  } else if ((r = /(\d{1,2})(?:er|st|nd|rd|th)?\.?\s+([a-zA-Zéûä]{3,})\.?,?(?:\s+(\d{4}))?/.exec(dateText)) && plain(r[2]) in MONTHS) {
+    [d, m, y] = [Number(r[1]), MONTHS[plain(r[2])], r[3] ? Number(r[3]) : null];
+  } else if ((r = /([a-zA-Zéûä]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b,?(?:\s+(\d{4}))?/.exec(dateText)) && plain(r[1]) in MONTHS) {
+    [m, d, y] = [MONTHS[plain(r[1])], Number(r[2]), r[3] ? Number(r[3]) : null];
+  } else if ((r = /(?:^|\s)(\d{1,2})\/(\d{1,2})(?:\s|$)/.exec(dateText))) {
+    const [a, b] = [Number(r[1]), Number(r[2])];
+    const df = a > 12 ? true : b > 12 ? false : dayFirst();
+    [d, m, y] = df ? [a, b - 1, null] : [b, a - 1, null];
+  } else if (base || (tm && !/\d/.test(rest))) {
+    const b = base || today;
+    return new Date(b.getFullYear(), b.getMonth(), b.getDate(), hh, mi).getTime();
+  } else if (/\b(19|20)\d{2}\b/.test(s)) {
+    const t = Date.parse(String(input));
+    return Number.isNaN(t) ? NaN : t;
+  } else return NaN;
+  if (!(m >= 0 && m <= 11 && d >= 1 && d <= 31)) return NaN;
+  if (y == null) {
+    // No year (Outlook's list for recent mail): the latest such date that isn't in the future.
+    y = today.getFullYear();
+    if (new Date(y, m, d).getTime() > now + 2 * 86400000) y -= 1;
+  }
+  const t = new Date(y, m, d, hh, mi);
+  return t.getMonth() === m ? t.getTime() : NaN;
+}
+
+/** YYYY-MM-DD in this computer's time zone ('' when unknown). */
+export function localDay(t) {
+  if (t == null || t === '' || Number.isNaN(Number(t))) return '';
+  const d = new Date(Number(t));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** A date as YYYY-MM-DD when it can be read for sure (for comparisons), else ''. */
+export function isoDay(s, now = Date.now()) {
+  const v = String(s || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const t = parseMailDate(v, now);
+  return Number.isNaN(t) ? '' : localDay(t);
+}
 
 const DISCLAIMER = /(this (e-?mail|message)( and any attachments)? (is|are|may be) (confidential|intended)|ce (courriel|message) (est|peut être) confidentiel|please consider the environment before printing|caution: this email originated from outside)/i;
 
@@ -112,7 +237,7 @@ export function cleanEmailBody(body, maxChars = 6000) {
   let cut = text.length;
   for (const re of QUOTE_MARKERS) {
     const m = re.exec(text);
-    if (m && m.index > 20 && m.index < cut) cut = m.index;
+    if (m && m.index < cut && text.slice(0, m.index).trim()) cut = m.index;
   }
   text = text.slice(0, cut);
   text = text.split('\n').filter((l) => !/^\s*>/.test(l)).join('\n');
@@ -127,14 +252,15 @@ export function cleanEmailBody(body, maxChars = 6000) {
 
 // ---- the whole email chain ----
 
+const HK = (k) => new RegExp(String.raw`^\s*\*{0,2}(${k})\*{0,2}\s*:\s*\*{0,2}\s*(.*)$`, 'i');
 const HEADER_KEYS = {
-  from: /^\s*\*?(from|de)\s*\*?\s*:\s*(.*)$/i,
-  date: /^\s*\*?(sent|date|envoy[ée]|re[çc]u)\s*\*?\s*:\s*(.*)$/i,
-  to: /^\s*\*?(to|[àa])\s*\*?\s*:\s*(.*)$/i,
-  cc: /^\s*\*?cc\s*\*?\s*:\s*(.*)$/i,
-  subject: /^\s*\*?(subject|objet)\s*\*?\s*:\s*(.*)$/i,
+  from: HK('from|de|von'),
+  date: HK('sent|date|envoy[ée]|re[çc]u|enviado|gesendet|datum|fecha'),
+  to: HK('to|[àa]|para|an'),
+  cc: HK('cc'),
+  subject: HK('subject|objet|asunto|betreff'),
 };
-const WROTE = /^\s*(?:On|Le)\s+(.{6,240}?)\s+(?:wrote|a écrit)\s?:\s*$/i;
+const WROTE = /^\s*(?:On|Le|El|Am)\s+(.{6,240}?)\s+(?:wrote|a écrit|escribió|schrieb\s*(.*?))\s?:\s*$/i;
 // "Fri, Nov 6, 2026 at 4:00 PM Arctic Fresh <pm@x.ca>" → date up to the time, then the sender.
 const WHEN_WHO = /^(.*?\d{1,2}[:h]\d{2}(?:\s*[AaPp]\.?\s?[Mm]\.?)?)\s*,?\s*(.+)$/;
 
@@ -155,7 +281,7 @@ function cleanQuoted(text, maxChars) {
 export function splitThread(body, { perMessage = 2500 } = {}) {
   const text = String(body || '').replace(/\r\n?/g, '\n').replace(/ /g, ' ');
   const starts = [];
-  for (const re of QUOTE_MARKERS) for (const m of text.matchAll(new RegExp(re.source, 'gim'))) if (m.index > 20) starts.push(m.index);
+  for (const re of QUOTE_MARKERS) for (const m of text.matchAll(new RegExp(re.source, 'gim'))) if (text.slice(0, m.index).trim()) starts.push(m.index);
   starts.sort((a, b) => a - b);
   const cuts = starts.filter((x, i) => i === 0 || x - starts[i - 1] > 4);
   const latest = cuts.length ? text.slice(0, cuts[0]) : text;
@@ -163,21 +289,32 @@ export function splitThread(body, { perMessage = 2500 } = {}) {
   cuts.forEach((start, i) => {
     const seg = text.slice(start, cuts[i + 1] ?? text.length);
     const lines = seg.split('\n');
+    const unq = (l) => String(l || '').replace(/^\s*(>\s?)+/, '');
     const msg = { from: '', date: '', to: '', subject: '' };
     let k = 0;
     // The header block: an optional "Original Message" / underline line, then From/Sent/To/Cc/Subject lines.
-    if (/^\s*(-{2,}\s*Original Message|_{10,})/i.test(lines[0])) k = 1;
-    const wrote = WROTE.exec(lines[k] || '');
+    if (/^\s*(-{2,}\s*(Original Message|Message d'origine|Mensaje original|Ursprüngliche Nachricht)|_{10,})/i.test(unq(lines[0]))) k = 1;
+    let wrote = WROTE.exec(unq(lines[k]));
+    let used = 1;
+    if (!wrote && /^\s*(On|Le|El|Am)\s/i.test(unq(lines[k]))) {
+      wrote = WROTE.exec(`${unq(lines[k])} ${unq(lines[k + 1])}`.replace(/<\s+/, '<'));
+      used = 2;
+    }
     if (wrote) {
       const inner = wrote[1].trim();
       const ww = WHEN_WHO.exec(inner);
       const c = inner.lastIndexOf(',');
-      msg.date = (ww ? ww[1] : c > 0 ? inner.slice(0, c) : '').trim();
-      msg.from = (ww ? ww[2] : c > 0 ? inner.slice(c + 1) : inner).trim();
-      k += 1;
+      if (wrote[2]) {
+        msg.date = inner;
+        msg.from = wrote[2].trim();
+      } else {
+        msg.date = (ww ? ww[1] : c > 0 ? inner.slice(0, c) : '').trim();
+        msg.from = (ww ? ww[2] : c > 0 ? inner.slice(c + 1) : inner).trim();
+      }
+      k += used;
     } else {
       for (let n = 0; k < lines.length && n < 10; k++, n++) {
-        const line = lines[k];
+        const line = unq(lines[k]);
         if (!line.trim()) {
           if (msg.from) {
             k++;
@@ -208,8 +345,12 @@ export function threadOf(email, settings = {}) {
   const all = [];
   const key = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 200);
   const add = (m) => {
-    const k = key(m.text);
-    if (k.length < 8 || seen.has(k)) return;
+    const t = key(m.text);
+    if (!t) return;
+    // Long messages are the same message wherever they were quoted; a short answer ("Yes.", "OK") only when the
+    // sender and date match too.
+    const k = t.length < 12 ? `${key(m.from)}|${key(m.date)}|${t}` : t;
+    if (seen.has(k)) return;
     seen.add(k);
     all.push(m);
   };
@@ -219,7 +360,7 @@ export function threadOf(email, settings = {}) {
     for (const q of splitThread(t.body).earlier) add(q);
   }
   // Newest first when the dates can be read; otherwise the order they were found in (already newest first).
-  const when = (m) => Date.parse(String(m.date).replace(/\bat\b/i, '')) || NaN;
+  const when = (m) => parseMailDate(m.date);
   if (all.length > 1 && all.every((m) => !Number.isNaN(when(m)))) all.sort((a, b) => when(b) - when(a));
   const out = [];
   let used = 0;

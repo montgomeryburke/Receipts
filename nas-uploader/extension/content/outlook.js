@@ -298,13 +298,17 @@
 
   const ui = (type, data) => chrome.runtime.sendMessage({ to: 'ui', type, ...data }).catch(() => {});
 
+  let stopIndex = false;
   async function indexListed(max) {
     busy = true;
+    stopIndex = false;
     const done = new Set();
+    // Emails opened here are history, not new mail: the new-mail scan must not draft replies to them later.
+    const seen = await loadSeen();
     let indexed = 0;
     let failed = 0;
     try {
-      for (let round = 0; round < 60 && done.size < max; round++) {
+      for (let round = 0; round < 60 && done.size < max && !stopIndex; round++) {
         const todo = qa('[role="option"][data-convid]').filter(visible).filter((li) => !done.has(li.getAttribute('data-convid')));
         if (!todo.length) {
           // Load more: scroll the message list, then look again.
@@ -316,9 +320,10 @@
           continue;
         }
         for (const li of todo) {
-          if (done.size >= max) break;
+          if (done.size >= max || stopIndex) break;
           const id = li.getAttribute('data-convid');
           done.add(id);
+          seen.add(id);
           const before = readOpenEmail();
           li.click();
           const opened = await waitFor(() => {
@@ -341,7 +346,8 @@
       }
     } finally {
       busy = false;
-      ui('mailIndexDone', { indexed, failed, seen: done.size });
+      await saveSeen(seen).catch(() => {});
+      ui('mailIndexDone', { indexed, failed, seen: done.size, stopped: stopIndex });
     }
   }
 
@@ -418,6 +424,16 @@
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || !msg.type) return false;
     if (msg.type === 'ping') { sendResponse({ ok: true, url: location.href }); return false; }
+    if ((msg.type === 'getOpenEmail' || msg.type === 'insertDraft') && busy) {
+      // The indexer or the new-mail scan is opening emails one after another: the open email isn't yours.
+      sendResponse({ ok: false, error: 'The assistant is reading emails in this Outlook tab (indexing or new-mail scan). Wait until it finishes, or click Stop in the side panel, then try again.' });
+      return false;
+    }
+    if (msg.type === 'stopIndexListed') {
+      stopIndex = true;
+      sendResponse({ ok: true });
+      return false;
+    }
     if (msg.type === 'getOpenEmail') {
       captureOpen(false).then((email) => sendResponse(email ? { email } : { error: 'No open message found in the reading pane.' }));
       return true;

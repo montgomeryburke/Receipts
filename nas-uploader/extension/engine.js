@@ -336,7 +336,7 @@ const handlers = {
   'llm.webtest': async (m) => {
     const settings = await getSettings();
     const provider = m.provider || settings.provider;
-    const r = await generateText(settings, { provider, web: true, effort: 'low', maxTokens: 300, system: 'Answer in one short sentence.', prompt: 'Search the web: what is the latest stable version of Google Chrome?' });
+    const r = await generateText({ ...settings, _tag: 'test' }, { provider, web: true, effort: 'low', maxTokens: 300, system: 'Answer in one short sentence.', prompt: 'Search the web: what is the latest stable version of Google Chrome?' });
     return { model: r.model, sources: r.sources.length, text: r.text.trim().slice(0, 140) };
   },
   'chat.send': async (m) => doChat(m.text || ''),

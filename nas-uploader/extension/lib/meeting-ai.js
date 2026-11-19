@@ -267,9 +267,15 @@ export async function makePrompt(entries, { projects = [], signal, manual = fals
       sourcesList: out.suggestions.flatMap((s) => s.sources),
     };
   }
-  if (out.lookup && settings.meetingWebLookup) out.web = await lookUp(out.lookup, settings, provider, signal).catch((err) => ({ error: err.message }));
+  // Automatic prompts look up only standards and codes, and only for a prompt that is shown (cost);
+  // "Ask now" may look up anything worth checking.
+  if (out.lookup && settings.meetingWebLookup && out.needed && (manual || STANDARD_RE.test(out.lookup))) {
+    out.web = await lookUp(out.lookup, settings, provider, signal).catch((err) => ({ error: err.message }));
+  }
   return out;
 }
+
+const STANDARD_RE = /\b(CSA|S6|S16|A23|TAC|MoTI|BCBC|NBC|AASHTO|ASTM|ACI|ISO|EN \d|code|clause|standard|specification|spec|regulation|bylaw|guideline|manual|test level|TL-\d)\b/i;
 
 /** A private question typed by the user. */
 export async function answerQuestion(question, entries, { projects = [], signal } = {}) {
@@ -308,7 +314,7 @@ export async function answerQuestion(question, entries, { projects = [], signal 
 
 const LOOKUP_SYSTEM = 'You search the web for someone in a work meeting (engineering and construction: standards and codes such as CSA S6, the BC MoTI Supplement to S6, the TAC Geometric Design Guide and provincial specifications; also products, suppliers, companies, regulations, prices and news). Answer in two to four sentences with the key facts and figures; quote the exact clause text when it matters, and name the source, its edition or date, and the clause number. Prefer official and primary sources. If sources disagree or you are not sure, say so. No preamble.';
 
-const WEB_ASK = /\b(look (it |this |that )?up|search|google|online|on the (web|internet)|internet|website|latest|current(ly)?|news|today'?s|price of|how much does|who is|what is the address)\b/i;
+const WEB_ASK = /\b(look (it |this |that |them )?up|search (the )?(web|internet|online)|web search|google|online|on the (web|internet)|internet|website)\b/i;
 
 const RESEARCH_SYSTEM = `You research a topic on the web for someone in a live work meeting (engineering and construction). Find what they need to know to contribute well: the key facts and figures, requirements of the relevant standards or regulations, common practice, risks or pitfalls, and anything recent. Prefer official and primary sources (standards bodies, governments, manufacturers); note dates and editions.
 Reply in exactly this form, nothing else:
@@ -319,12 +325,22 @@ ASK: <one good question the user could ask in the meeting>`;
 
 /** Parses the research reply: {topic, points[], ask}. */
 function parseResearch(text) {
-  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
-  const topic = (lines.find((l) => /^TOPIC\s*:/i.test(l)) || '').replace(/^TOPIC\s*:\s*/i, '');
-  const ask = (lines.find((l) => /^ASK\s*:/i.test(l)) || '').replace(/^ASK\s*:\s*/i, '');
-  const points = lines.filter((l) => /^([-*•]|\d+[.)])\s+/.test(l)).map((l) => l.replace(/^([-*•]|\d+[.)])\s+/, '')).slice(0, 8);
-  if (!points.length && lines.length) points.push(...lines.filter((l) => !/^(TOPIC|ASK)\s*:/i.test(l)).slice(0, 6));
-  return { topic, points, ask };
+  // Tolerant of markdown: "**TOPIC:**", "## TOPIC:", "- ASK:", a sentence glued before "TOPIC:".
+  const clean = (l) => l.replace(/\*\*|__/g, '').replace(/^[\s>#*_-]+/, '').trim();
+  const raw = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  let topic = '';
+  let ask = '';
+  const points = [];
+  for (const line of raw) {
+    const c = clean(line);
+    const t = /\bTOPIC\s*:\s*(.+)$/i.exec(c);
+    const a = /\bASK\s*:\s*(.+)$/i.exec(c);
+    if (t) topic = topic || t[1].trim();
+    else if (a) ask = ask || a[1].trim();
+    else if (/^([-*•]|\d+[.)])\s+/.test(line.replace(/\*\*/g, '').trim())) points.push(line.replace(/\*\*/g, '').trim().replace(/^([-*•]|\d+[.)])\s+/, ''));
+  }
+  if (!points.length) points.push(...raw.map(clean).filter((l) => l && !/\b(TOPIC|ASK)\s*:/i.test(l)).slice(0, 6));
+  return { topic, points: points.slice(0, 8), ask };
 }
 
 /**
@@ -355,8 +371,11 @@ export async function researchTopic(entries, { projects = [], topic = '', signal
         prompt: out.points.map((p, i) => `${i + 1}. ${p}`).join('\n'),
       });
       out.cost += costOf(v.usage, v.model, settings) || 0;
-      const wrong = v.text.split('\n').map((l) => l.trim()).filter((l) => /^WRONG\s*:/i.test(l)).map((l) => l.replace(/^WRONG\s*:\s*/i, ''));
-      out.check = { by: v.provider || checker, self, verdict: wrong.length ? 'issues' : /ALL OK/i.test(v.text) ? 'ok' : 'unclear', issues: wrong.map((w) => ({ claim: w.split(' — ')[0], problem: w.split(' — ').slice(1).join(' — ') || 'not supported', evidence: '', fix: '' })), sources: v.sources.slice(0, 4) };
+      const lines = v.text.split('\n').map((l) => l.replace(/\*\*|__/g, '').replace(/^[\s>#*_\-•]+|^\d+[.)]\s*/g, '').trim()).filter(Boolean);
+      const wrong = lines.filter((l) => /\bWRONG\s*:/i.test(l)).map((l) => l.replace(/^.*?\bWRONG\s*:\s*/i, ''));
+      // "ok" only when the whole reply is ALL OK — not a reply that also lists a wrong point.
+      const allOk = !wrong.length && lines.length === 1 && /^ALL OK\.?$/i.test(lines[0]);
+      out.check = { by: v.provider || checker, self, verdict: wrong.length ? 'issues' : allOk ? 'ok' : 'unclear', issues: wrong.map((w) => ({ claim: w.split(' — ')[0], problem: w.split(' — ').slice(1).join(' — ') || 'not supported', evidence: '', fix: '' })), sources: v.sources.slice(0, 4) };
     } catch (err) {
       if (err.kind === 'stopped' || err.kind === 'paused') throw err;
       out.check = { error: err.message };
@@ -382,12 +401,27 @@ export async function summarize(entries, { projects = [], signal, remember = tru
   const settings = { ...(await getSettings()), _tag: 'minutes' };
   const provider = providerFor(settings);
   if (!hasKey(settings, provider)) return null;
-  const full = transcriptWindow(entries, 60000);
-  if (full.split(/\s+/).length < 20) return null; // nothing worth a call
+  const whole = transcriptWindow(entries, 10_000_000);
+  if (whole.split(/\s+/).length < 20) return null; // nothing worth a call
+  // A long meeting (over ~75 minutes of speech) is read in parts: short notes from each part, then the minutes
+  // from the notes and the last part — so the beginning (attendees, purpose, early topics) isn't lost.
+  let full = whole;
+  let notesCost = 0;
+  if (whole.length > 60000) {
+    const chunks = [];
+    for (let i = 0; i < whole.length - 40000; i += 50000) chunks.push(whole.slice(i, i + 50000));
+    const notes = [];
+    for (const [n, chunk] of chunks.entries()) {
+      const r = await callLLM(settings, { provider, system: 'Make concise notes of this part of a work meeting: who spoke or was named, topics, figures, decisions, action items with owners and dates as said. Plain bullet points. Only what was said.', parts: [`<transcript_part n="${n + 1}">\n${chunk}\n</transcript_part>`], effort: 'low', maxTokens: 1500, signal });
+      notes.push(`Part ${n + 1}:\n${typeof r.data === 'string' ? r.data : r.text || JSON.stringify(r.data)}`);
+      notesCost += costOf(r.usage, r.model, settings) || 0;
+    }
+    full = `<notes_from_earlier_parts>\n${notes.join('\n\n')}\n</notes_from_earlier_parts>\n${whole.slice(-40000)}`;
+  }
   const parts = [`<transcript>\n${full}\n</transcript>\n\nSummarise this meeting.`];
   const res = await callLLM(settings, { provider, system: systemPrompt(settings, 'summary'), parts, schema: SUMMARY_SCHEMA, effort: 'low', maxTokens: 3000, signal });
   const d = res.data || {};
-  let cost = costOf(res.usage, res.model, settings) || 0;
+  let cost = (costOf(res.usage, res.model, settings) || 0) + notesCost;
   // Checked by the other AI against the transcript before anything is remembered for the project.
   let check = null;
   if (canCrossCheck(settings)) {
