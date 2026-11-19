@@ -643,10 +643,33 @@ end
 local groundParams = RaycastParams.new()
 groundParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function groundHeight(position: Vector3, ignore: Instance): number
+--[[
+	The ground under a dweller, and whether it is reachable from here.
+
+	The second return is the point: these have no Humanoid and no
+	collision, so they are moved by hand and snapped to whatever a downward
+	ray finds. The ray used to start SIX STUDS ABOVE their feet and take
+	the first hit, which meant any ledge above their ankles pulled them up
+	onto it -- a kerb, a roof lip, the underside of a skybridge. Walking
+	past a building put a zombie on top of it, and from up there it would
+	chase you across the rooftops.
+
+	Starting just above the feet and reporting whether the climb is more
+	than a step lets the caller refuse the move instead, which is what
+	walking into a wall should do.
+]]
+local function groundHeight(position: Vector3, ignore: Instance): (number, boolean)
 	groundParams.FilterDescendantsInstances = { ignore }
-	local hit = workspace:Raycast(position + Vector3.new(0, 6, 0), Vector3.new(0, -24, 0), groundParams)
-	return if hit then hit.Position.Y else position.Y
+	local hit = workspace:Raycast(
+		position + Vector3.new(0, Config.Population.StepHeight, 0),
+		Vector3.new(0, -(24 + Config.Population.StepHeight), 0),
+		groundParams
+	)
+	if not hit then
+		return position.Y, true
+	end
+	local climb = hit.Position.Y - position.Y
+	return hit.Position.Y, climb <= Config.Population.StepHeight
 end
 
 local function stepDweller(dweller: Dweller, deltaTime: number)
@@ -698,12 +721,27 @@ local function stepDweller(dweller: Dweller, deltaTime: number)
 	if blended.Magnitude > 1e-4 then
 		dweller.facing = blended.Unit
 	end
-	dweller.position += dweller.facing * speed * deltaTime
-	dweller.position = Vector3.new(
-		dweller.position.X,
-		groundHeight(dweller.position, dweller.model),
-		dweller.position.Z
-	)
+	--[[
+		Step forward, but only onto ground you could actually step onto.
+
+		A climb bigger than a kerb means a wall, so the step is refused and
+		a new wander target picked -- which is a dweller walking round a
+		building instead of up the side of it. Without this they went over
+		everything, ended up on the rooftops, and chased players from there.
+	]]
+	local wanted = dweller.position + dweller.facing * speed * deltaTime
+	local height, reachable = groundHeight(wanted, dweller.model)
+	if reachable then
+		dweller.position = Vector3.new(wanted.X, height, wanted.Z)
+	else
+		-- Blocked. Pick somewhere else rather than standing still against
+		-- the wall forever.
+		dweller.target = Vector3.new(
+			rng:NextNumber(-wanderRadius, wanderRadius),
+			0,
+			rng:NextNumber(-wanderRadius, wanderRadius)
+		)
+	end
 
 	-- A little bob, so they look like they are walking rather than sliding.
 	local bob = math.abs(math.sin(os.clock() * 7)) * 0.4

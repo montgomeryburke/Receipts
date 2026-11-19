@@ -400,9 +400,21 @@ local function step(deltaTime: number)
 				projectile.position = worldCf.Position
 				projectile.part.CFrame = worldCf
 			else
+				--[[
+					Whatever it was stuck to is gone -- a vehicle blown up,
+					a prop destroyed. It drops from where it was.
+
+					Zeroing the velocity matters: it was still holding the
+					speed and direction it hit with, so coming unstuck flung
+					it off at throwing speed in the direction of the impact,
+					seconds later and from a standstill. A bomb left hanging
+					in the air by a vehicle exploding under it should fall,
+					not take off.
+				]]
 				projectile.stuckTo = nil
 				projectile.stuckOffset = nil
 				projectile.stuck = false
+				projectile.velocity = Vector3.new()
 			end
 		end
 
@@ -550,6 +562,11 @@ function ProjectileService.HasLiveDiamond(player: Player): boolean
 end
 
 --[[ Wipe everything in flight, between rounds. ]]
+--[[ How many projectiles are in the air, for tests. ]]
+function ProjectileService.LiveCount(): number
+	return #live
+end
+
 function ProjectileService.ClearAll()
 	for _, projectile in live do
 		retire(projectile)

@@ -335,7 +335,13 @@ function ArcadeService.Join(player: Player, venueId: string): boolean
 	local humans = humanCount(venueId)
 	local side = if (humans[1] or 0) <= (humans[2] or 0) then 1 else 2
 	if not info.teamed then
-		side = TeamService.IndexOf(player)
+		--[[
+			A game with no sides still records one, so the bookkeeping has
+			a number in it. Falls back to 1 for a teamless player, because
+			this is a slot in a table rather than a claim about allegiance
+			-- and bowling does not care which side you are on.
+		]]
+		side = math.max(1, TeamService.IndexOf(player))
 	end
 
 	membership[player] = { venue = venueId, team = side }

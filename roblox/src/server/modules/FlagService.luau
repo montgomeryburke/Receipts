@@ -196,8 +196,26 @@ local function sendHome(flag: Flag, quiet: boolean?)
 	end
 end
 
---[[ Drop it where the carrier fell. ]]
+--[[
+	Drop it where the carrier fell.
+
+	Unless they fell off the map, in which case it goes home instead.
+	Dropping it where they died puts the flag below the world, where
+	nobody can reach it and nothing can be done about it until the return
+	timer expires -- so carrying the enemy flag into the void was a way to
+	take it out of play for the length of that timer, every time, on
+	purpose. Sending it straight home is both the fair outcome and the one
+	that cannot be exploited.
+
+	A drop position with a NaN in it goes home for the same reason: a flag
+	at an unrepresentable position is a flag nobody is getting back.
+]]
 local function drop(flag: Flag, position: Vector3)
+	if not Util.IsSaneVector(position) or position.Y < Config.VoidHeight then
+		sendHome(flag)
+		return
+	end
+
 	flag.state = "Dropped"
 	flag.carrier = nil
 	flag.droppedAt = os.clock()

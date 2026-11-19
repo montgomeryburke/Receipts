@@ -66,13 +66,27 @@ function TeamService.Assign(player: Player)
 end
 
 --[[ Which of the two teams a player is on, as a 1 or a 2. ]]
+--[[
+	Which side a player is on, or 0 for nobody's.
+
+	It used to return 1 for a player with no team, which is Red. That is a
+	lie with consequences: a player who has disconnected has no Team any
+	more, and their last kill was credited to Red. So the losing team could
+	be handed the round by somebody who had already left, and there was
+	nothing in the logs to suggest why.
+
+	Returning 0 makes "no team" a value callers can see. Every caller that
+	COMPARES an index is now simply false for a teamless player, which is
+	correct in each case -- you cannot score for a side you are not on. The
+	two that INDEX with it both already fall back when the lookup misses.
+]]
 function TeamService.IndexOf(player: Player): number
 	for index, team in teams do
 		if player.Team == team then
 			return index
 		end
 	end
-	return 1
+	return 0
 end
 
 function TeamService.Get(index: number): Team?

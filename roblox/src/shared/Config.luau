@@ -671,6 +671,21 @@ Config.Population = {
 	-- which is nine shots, and a crowd of them was a chore rather than a
 	-- threat.
 	ZombieHealth = 28,
+--[[
+		The tallest thing a dweller can walk up.
+
+		They have no Humanoid and no collision, so they are moved by hand --
+		which means the ground under them is found with a downward ray and
+		they are snapped to whatever it hits. The ray used to start six
+		studs above their feet and take the first hit, so ANY ledge above
+		their ankles pulled them up onto it: a kerb, a roof lip, the
+		underside of a skybridge. Walking past a building put them on it.
+
+		A step height makes the difference explicit. Anything up to this is
+		a kerb and they step up; anything more is a wall and they walk round
+		it instead.
+	]]
+	StepHeight = 4,
 	ZombieSpeed = 13,
 	ZombiePoints = 25,
 	-- How close a zombie has to get before it starts swinging.
@@ -1297,6 +1312,16 @@ Config.Kick = {
 	Points = 5,
 }
 
+--[[
+	Below this, you are falling and not coming back.
+
+	One number, used by both the thing that kills you for leaving the map
+	and the things that have to decide what to do with whatever you were
+	holding when you did. It was written as a bare -120 in MatchService,
+	which meant anything else needing the same answer had to guess it.
+]]
+Config.VoidHeight = -120
+
 Config.Movement = {
 	JumpPower = 62,
 	-- How much a headshot multiplies damage by. Was hardcoded in two
@@ -1743,6 +1768,7 @@ export type ConfigType = {
 		Range: number, DeathWindow: number, Cooldown: number,
 		Force: number, Lift: number, Points: number,
 	},
+	VoidHeight: number,
 	Movement: { JumpPower: number, HeadshotMultiplier: number, ScopedSpeedFactor: number },
 	Help: { { question: string, answer: string, keywords: { string } } },
 	Medals: { [string]: { name: string, points: number, sound: string } },
@@ -1838,6 +1864,7 @@ export type ConfigType = {
 	Boost: { Speed: number, Lift: number },
 	Population: {
 		Zombies: number, Civilians: number, Targets: number,
+		StepHeight: number,
 		ZombieHealth: number, ZombieSpeed: number, ZombiePoints: number,
 		ZombieReach: number, ZombieDamage: number,
 		CivilianHealth: number, CivilianSpeed: number, CivilianPoints: number,

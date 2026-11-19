@@ -647,7 +647,7 @@ function MatchService.Start()
 		for _, player in Players:GetPlayers() do
 			local character = player.Character
 			local root = character and character:FindFirstChild("HumanoidRootPart")
-			if root and root:IsA("BasePart") and root.Position.Y < -120 then
+			if root and root:IsA("BasePart") and root.Position.Y < Config.VoidHeight then
 				local humanoid = character:FindFirstChildOfClass("Humanoid")
 				if humanoid and humanoid.Health > 0 then
 					DamageService.ApplyDamage(player, humanoid.MaxHealth + 1000, nil, "Void")

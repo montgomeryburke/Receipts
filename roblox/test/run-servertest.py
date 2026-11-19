@@ -730,6 +730,160 @@ do
 end
 
 DUMP("")
+DUMP("Zombies stay on the ground:")
+do
+	--[[
+		A zombie must walk ROUND a building, not up it.
+
+		These have no Humanoid and no collision, so they are moved by hand
+		and snapped to whatever a downward ray finds. The ray used to start
+		six studs above their feet and take the first hit, which meant any
+		ledge above their ankles pulled them onto it -- a kerb, a roof lip,
+		the underside of a skybridge. Walking past a building put a zombie
+		on the roof, and from up there it chased you across the rooftops.
+	]]
+	local preyRoot = prey._props.Character:FindFirstChild("HumanoidRootPart")
+	preyRoot._props.CFrame = CFrame.new(0, 5, 0)
+	prey._props.Character:FindFirstChildOfClass("Humanoid")._props.Health = 100
+	local killerRoot = killer._props.Character:FindFirstChild("HumanoidRootPart")
+	killerRoot._props.CFrame = CFrame.new(4000, 5, 4000)
+
+	local zombie = WildlifeService.NearestZombieForTests(Vector3.new(0, 5, 0))
+	check("there is a zombie to test", zombie ~= nil, "")
+
+	if zombie then
+		--[[
+			A wall between the zombie and its target.
+
+			The stand-in raycast reports a surface 40 studs up for anything
+			it is asked about, which is what a roof looks like to the ground
+			probe: far above the feet, and the first thing a ray from
+			overhead would hit.
+		]]
+		local roof = Instance.new("Part")
+		roof._props.Name = "RoofLip"
+		local saved = rawget(workspace, "_props").Raycast
+		rawget(workspace, "_props").Raycast = function()
+			return {
+				Instance = roof,
+				Position = Vector3.new(0, 40, 0),
+				Material = Enum.Material.Concrete,
+				Normal = Vector3.new(0, 1, 0),
+			}
+		end
+
+		local startedAt = zombie.position.Y
+		for _ = 1, 120 do
+			ADVANCE(1 / 60)
+			RunService.Heartbeat._fire(1 / 60)
+		end
+		local climbed = zombie.position.Y - startedAt
+
+		rawget(workspace, "_props").Raycast = saved
+
+		check("a wall does not lift a zombie onto it",
+			climbed <= Config.Population.StepHeight + 0.001,
+			string.format("climbed %.1f studs, step height is %d",
+				climbed, Config.Population.StepHeight))
+
+		--[[
+			But a kerb still works.
+
+			The fix must not turn them into things that cannot step up at
+			all, or they would stop at the first pavement and the streets
+			would be lined with stuck zombies.
+		]]
+		local kerb = Instance.new("Part")
+		kerb._props.Name = "Street"
+		rawget(workspace, "_props").Raycast = function(_, origin)
+			return {
+				Instance = kerb,
+				-- Two studs up: a kerb, not a wall.
+				Position = Vector3.new(origin.X, zombie.position.Y + 2, origin.Z),
+				Material = Enum.Material.Concrete,
+				Normal = Vector3.new(0, 1, 0),
+			}
+		end
+
+		local beforeKerb = zombie.position.Y
+		for _ = 1, 60 do
+			ADVANCE(1 / 60)
+			RunService.Heartbeat._fire(1 / 60)
+		end
+		check("but a kerb can still be stepped up", zombie.position.Y > beforeKerb,
+			string.format("%.1f -> %.1f", beforeKerb, zombie.position.Y))
+
+		rawget(workspace, "_props").Raycast = saved
+	end
+end
+
+DUMP("")
+DUMP("Cluster bombs:")
+do
+	--[[
+		A cluster bomb that does not cluster is a worse grenade with a
+		longer reload.
+
+		The config has said Cluster = 8 since it was written and the code to
+		honour it exists, so this is checking the two are actually connected
+		-- which is exactly the kind of thing that can be true in config,
+		true in code, and false in the game.
+	]]
+	ProjectileService.ClearAll()
+	local spec = Config.Weapons.ClusterBomb
+	check("the cluster bomb is set to burst", (spec :: any).Cluster > 0,
+		string.format("%d bomblets", (spec :: any).Cluster))
+
+	local root = killer._props.Character:FindFirstChild("HumanoidRootPart")
+	root._props.CFrame = CFrame.new(0, 10, 0)
+	killer._props.Character:FindFirstChildOfClass("Humanoid")._props.Health = 100
+
+	ProjectileService.Spawn(killer, "ClusterBomb", Vector3.new(0, 10, 0), Vector3.new(0, 0, -1))
+	check("the bomb is in the air", ProjectileService.LiveCount() == 1,
+		string.format("%d live", ProjectileService.LiveCount()))
+
+	--[[
+		Wait out the fuse.
+
+		The bomb has to actually go off for the bomblets to exist, so the
+		clock moves past FuseTime and the step runs -- rather than reaching
+		in and calling detonate, which would prove the function works and
+		not that anything calls it.
+	]]
+	for _ = 1, 200 do
+		ADVANCE(1 / 60)
+		RunService.Heartbeat._fire(1 / 60)
+		if ProjectileService.LiveCount() > 1 then
+			break
+		end
+	end
+
+	check("it bursts into bomblets", ProjectileService.LiveCount() > 1,
+		string.format("%d live after the fuse", ProjectileService.LiveCount()))
+	check("one for each the config asks for",
+		ProjectileService.LiveCount() >= (spec :: any).Cluster,
+		string.format("%d of %d", ProjectileService.LiveCount(), (spec :: any).Cluster))
+
+	--[[
+		And the bomblets must not themselves burst.
+
+		Cluster was cleared on the sub-spec for a reason: without it each
+		bomblet spawns eight more, every one of those spawns eight more, and
+		one grenade ends the server.
+	]]
+	local peak = ProjectileService.LiveCount()
+	for _ = 1, 400 do
+		ADVANCE(1 / 60)
+		RunService.Heartbeat._fire(1 / 60)
+	end
+	check("the bomblets do not cluster again",
+		ProjectileService.LiveCount() < peak,
+		string.format("%d live, peaked at %d", ProjectileService.LiveCount(), peak))
+
+	ProjectileService.ClearAll()
+end
+
+DUMP("")
 DUMP("The cheap shot:")
 do
 	--[[
