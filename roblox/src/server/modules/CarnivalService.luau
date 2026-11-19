@@ -44,12 +44,25 @@ local dunkHome: CFrame = CFrame.identity
 local dunkWetUntil = 0
 local strikerPuck: BasePart? = nil
 local strikerUntil = 0
+-- When the puck was last launched, how high this throw will reach, and
+-- whether the bell still owes a ding. Driven ballistically rather than on a
+-- fixed 2.5-second curve, because the whole point of a high striker is that
+-- the height tells you how hard you hit it.
+local strikerLaunchedAt = -1
+local strikerPeak = 0
+local strikerBellOwed = false
 
 local rng = Random.new()
 
 local DUNK_POINTS = 60
 local DUCK_POINTS = 20
 local STRIKER_POINTS = 35
+
+-- How far the puck can climb, and the gravity it climbs against. Chosen so
+-- that a full-power hit takes about 0.45s to reach the bell, which is the
+-- rise the fairground had before the throw became variable.
+local STRIKER_HEIGHT = 56
+local STRIKER_GRAVITY = 560
 
 -- ================================================================= HELPERS ==
 
@@ -441,19 +454,73 @@ local function buildStriker(at: Vector3, parent: Instance)
 		Parent = parent,
 	})
 
-	sign(parent, at + Vector3.new(0, 0, -12), "HIGH STRIKER — SHOOT THE PAD", Color3.fromRGB(220, 120, 200))
+	sign(
+		parent,
+		at + Vector3.new(0, 0, -12),
+		"HIGH STRIKER — SHOOT THE PAD, BIGGEST GUN RINGS THE BELL",
+		Color3.fromRGB(220, 120, 200)
+	)
 end
 
-local function ringBell(shooter: Player?)
+--[[
+	Somebody shot the pad.
+
+	`power` is how hard the shot hit, and it decides how far up the tower the
+	puck goes: a submachine gun gets it a third of the way, the anti-tank
+	rifle rings the bell. That is the entire game, and without it there was
+	no game -- every hit sent the puck the full 56 studs and paid the same
+	35 points, so the high striker was a button that said DING.
+
+	A hit that falls short still pays, on a slide, so firing the wrong gun at
+	it is a worse score rather than a wasted trip across the fairground.
+]]
+local function ringBell(shooter: Player?, power: number?)
 	if os.clock() < strikerUntil then
 		return
 	end
-	strikerUntil = os.clock() + 2.5
-	local puck = strikerPuck
-	if puck then
-		Sound.At("Bell", puck.Position + Vector3.new(0, 60, 0))
+	strikerUntil = os.clock() + Config.Carnival.StrikerCooldown
+
+	local fraction = math.clamp(
+		(power or 0) / Config.Carnival.StrikerFullPower,
+		Config.Carnival.StrikerWeakestThrow,
+		1
+	)
+	strikerPeak = STRIKER_HEIGHT * fraction
+	strikerLaunchedAt = os.clock()
+
+	if fraction >= 1 then
+		-- The bell is rung when the puck gets there, not when the trigger is
+		-- pulled. Half a second of silence and then a ding is the sound of
+		-- the puck arriving; a ding on the shot is the sound of a button.
+		strikerBellOwed = true
+		award(shooter, STRIKER_POINTS, "DING! Bell rung.")
+	else
+		strikerBellOwed = false
+		award(
+			shooter,
+			math.max(1, math.floor(STRIKER_POINTS * fraction * 0.5)),
+			string.format("High striker: %d%% — bring a bigger gun", math.floor(fraction * 100 + 0.5))
+		)
 	end
-	award(shooter, STRIKER_POINTS, "DING! Bell rung.")
+end
+
+--[[ How high the puck is above its pad right now, and whether it is moving. ]]
+local function strikerClimb(now: number): number
+	if strikerLaunchedAt < 0 or strikerPeak <= 0 then
+		return 0
+	end
+	local speed = math.sqrt(2 * STRIKER_GRAVITY * strikerPeak)
+	local elapsed = now - strikerLaunchedAt
+	if elapsed >= 2 * speed / STRIKER_GRAVITY then
+		strikerLaunchedAt = -1
+		return 0
+	end
+	return math.max(0, speed * elapsed - 0.5 * STRIKER_GRAVITY * elapsed * elapsed)
+end
+
+--[[ For tests: where the puck stands, as a fraction of the full tower. ]]
+function CarnivalService.StrikerPeakForTests(): number
+	return strikerPeak / STRIKER_HEIGHT
 end
 
 -- ================================================================== PUBLIC ==
@@ -898,7 +965,12 @@ local function checkCrateStacks()
 	end
 end
 
-function CarnivalService.RegisterHit(part: BasePart, attacker: Player?, direction: Vector3?): boolean
+function CarnivalService.RegisterHit(
+	part: BasePart,
+	attacker: Player?,
+	direction: Vector3?,
+	power: number?
+): boolean
 	local game_ = part:GetAttribute("Carnival")
 	if game_ == "Dunk" then
 		dunk(attacker)
@@ -907,7 +979,7 @@ function CarnivalService.RegisterHit(part: BasePart, attacker: Player?, directio
 		hitDuck(part, attacker)
 		return true
 	elseif game_ == "Striker" then
-		ringBell(attacker)
+		ringBell(attacker, power)
 		return true
 	elseif game_ == "Balloon" then
 		return popBalloon(part, attacker)
@@ -1038,6 +1110,9 @@ function CarnivalService.Clear()
 	table.clear(ducks)
 	dunkSeat = nil
 	strikerPuck = nil
+	strikerLaunchedAt = -1
+	strikerPeak = 0
+	strikerBellOwed = false
 	dunkWetUntil = 0
 	strikerUntil = 0
 end
@@ -1120,23 +1195,18 @@ local function step()
 		end
 	end
 
-	-- The puck sits at the bottom, then rides up the tower when the bell is
-	-- rung and slides back down afterwards.
+	-- The puck rides up the tower and falls back, as far as the shot that hit
+	-- the pad threw it.
 	local puck = strikerPuck
 	if puck and puck.Parent then
-		local remaining = strikerUntil - now
-		local climbed = 0
-		if remaining > 0 then
-			local elapsed = 2.5 - remaining
-			if elapsed < 0.45 then
-				local t = elapsed / 0.45
-				climbed = (1 - (1 - t) * (1 - t)) * 56
-			else
-				local t = (elapsed - 0.45) / 2.05
-				climbed = (1 - t * t) * 56
-			end
-		end
+		local climbed = strikerClimb(now)
 		puck.CFrame = CFrame.new(puck.Position.X, origin.Y + 5 + climbed, puck.Position.Z)
+
+		-- Ring at the top of the arc, where the puck actually meets the bell.
+		if strikerBellOwed and climbed >= strikerPeak - 1 then
+			strikerBellOwed = false
+			Sound.At("Bell", puck.Position + Vector3.new(0, 4, 0))
+		end
 	end
 end
 

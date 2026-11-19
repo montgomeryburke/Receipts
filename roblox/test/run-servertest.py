@@ -41,6 +41,12 @@ local function makeFighter(name, userId)
 	root._props.Name = "HumanoidRootPart"
 	root._props.CFrame = CFrame.new(0, 5, 0)
 	root.Parent = character
+	-- A real character always has one, and the held-weapon model welds to
+	-- it, so without a hand nothing could ever be seen in anybody's hands.
+	local hand = Instance.new("Part")
+	hand._props.Name = "Right Arm"
+	hand._props.CFrame = CFrame.new(1, 5, 0)
+	hand.Parent = character
 	local humanoid = Instance.new("Humanoid")
 	humanoid.Parent = character
 	character.Parent = workspace
@@ -354,6 +360,140 @@ do
 	end
 end
 
+DUMP("")
+DUMP("You hold the gun you are holding:")
+do
+	--[[
+		THE CLAIM: picking a gun up does not change what is in your hands.
+
+		It did not. `state.equipped` is written in three places -- the equip
+		key, picking a weapon off the floor, and winning a hockey fight with
+		a stick that breaks -- and only the equip key rebuilt the hand model.
+		So a rocket launcher off the floor left you visibly holding a pistol
+		that fired rockets, and the line above the pickup code says "puts it
+		straight in your hands" while doing nothing of the kind.
+
+		Fixed by driving the model off PlayerState.Changed, which all three
+		writers already fire, so a fourth writer cannot forget. The test is
+		written against the STATE rather than against any one writer, for
+		the same reason.
+	]]
+	WeaponService.Start()
+
+	local state = PlayerState.Get(killer)
+	state.equipped = "Pistol"
+	WeaponService.UpdateHeldWeapon(killer)
+	check("you start out holding something",
+		WeaponService.HeldWeaponOf(killer) == "Pistol",
+		tostring(WeaponService.HeldWeaponOf(killer)))
+
+	local shownBefore = WeaponService.HeldWeaponOf(killer)
+
+	-- What a pickup does: set the field and announce the change.
+	state.equipped = "RPG"
+	PlayerState.Changed.Fire(killer)
+	RUN_SPAWNED()
+
+	check("picking a gun up changes what you are holding",
+		WeaponService.HeldWeaponOf(killer) == "RPG",
+		string.format("%s, was %s",
+			tostring(WeaponService.HeldWeaponOf(killer)), tostring(shownBefore)))
+
+	-- And the model in the world agrees, not just the bookkeeping.
+	local held = killer._props.Character:FindFirstChild("HeldWeapon")
+	local barrel = held and held:FindFirstChild("Barrel")
+	check("and there is a gun in the world to show it",
+		barrel ~= nil and barrel._props.Color == Config.Weapons.RPG.Color,
+		if barrel then "coloured as the RPG" else "no barrel")
+
+	--[[
+		Only when it actually changes.
+
+		Changed fires for shields, ammo, points and the multiplier, many
+		times a second for twenty players. Rebuilding the model on each of
+		those would mean destroying and welding four parts per player per
+		frame, so the whole fix rests on the compare.
+	]]
+	local rebuilt = killer._props.Character:FindFirstChild("HeldWeapon")
+	for _ = 1, 20 do
+		PlayerState.Changed.Fire(killer)
+		RUN_SPAWNED()
+	end
+	check("and not on every other thing that changes",
+		killer._props.Character:FindFirstChild("HeldWeapon") == rebuilt,
+		"same model kept")
+
+	-- Put the pistol back so nothing downstream inherits a rocket launcher.
+	state.equipped = "Pistol"
+	PlayerState.Changed.Fire(killer)
+	RUN_SPAWNED()
+end
+
+DUMP("")
+DUMP("Poop is a renewable resource:")
+do
+	--[[
+		THE CLAIM: the one ammunition you cannot buy keeps coming.
+
+		Elephant poop is marked AmmoFromPickupsOnly, so the piles lying
+		about the map ARE the ammunition. Twelve were seeded at the start of
+		the round and nothing ever made another, which meant the weapon died
+		for the rest of the match the moment the last pile was walked over.
+
+		Config had PoopInterval and PoopLifetime from the beginning and
+		nothing in the game read either of them -- the quietest sort of bug
+		there is, because a setting that does nothing looks exactly like a
+		setting that works.
+	]]
+	local seeded = WildlifeService.PoopCount()
+	check("the map starts with poop on it", seeded > 0,
+		string.format("%d piles", seeded))
+
+	-- Walk over the lot of them.
+	for _ = 1, seeded do
+		local pile = WildlifeService.NearestPoopForTests(Vector3.new(0, 0, 0))
+		if pile then
+			pile:Destroy()
+		end
+		RunService.Heartbeat._fire(1 / 60)
+	end
+	check("and they can all be taken", WildlifeService.PoopCount() == 0,
+		string.format("%d left", WildlifeService.PoopCount()))
+
+	-- Wait out one interval.
+	ADVANCE(Config.Wildlife.PoopInterval + 0.1)
+	RunService.Heartbeat._fire(1 / 60)
+	check("more arrives on its own", WildlifeService.PoopCount() > 0,
+		string.format("%d piles", WildlifeService.PoopCount()))
+
+	--[[
+		And it goes stale.
+
+		Without this the map fills to MaxPoopPiles and stays there, which is
+		forty brown spheres standing in the mud for the rest of the round.
+	]]
+	local fresh = WildlifeService.NearestPoopForTests(Vector3.new(0, 0, 0))
+	ADVANCE(Config.Wildlife.PoopLifetime + 1)
+	RunService.Heartbeat._fire(1 / 60)
+	check("and an old pile rots away", fresh ~= nil and fresh._props.Parent == nil,
+		if fresh then tostring(fresh._props.Parent ~= nil) else "none")
+
+	--[[
+		It lands on the ground, not at a guessed height.
+
+		Piles were placed at a flat y = 4 wherever the dice fell, which is
+		the ground only where the ground is at zero. On a road embankment or
+		a building floor the pile was buried, and a pickup you cannot see is
+		indistinguishable from a pickup that does not work.
+	]]
+	ADVANCE(Config.Wildlife.PoopInterval + 0.1)
+	RunService.Heartbeat._fire(1 / 60)
+	local placed = WildlifeService.NearestPoopForTests(Vector3.new(0, 0, 0))
+	check("a pile sits on whatever is under it",
+		placed ~= nil and placed._props.CFrame.Position.Y > -60,
+		if placed then string.format("y=%.1f", placed._props.CFrame.Position.Y) else "none")
+end
+
 -- ------------------------------------------------- wrecked vehicles hurt
 -- Every exploding vehicle used to deal exactly zero damage: the blast was a
 -- raw Explosion instance with joint-breaking switched off, which is the only
@@ -642,6 +782,95 @@ do
 		-- Nobody's side, so friendly fire never refuses a shot at one.
 		check("a dummy is on nobody's team", wanderer.team == 0,
 			tostring(wanderer.team))
+	end
+end
+
+DUMP("")
+DUMP("The high striker is a test of strength:")
+do
+	--[[
+		THE CLAIM: the puck goes as far up the tower as the shot deserves.
+
+		It did not. Every hit on the pad sent the puck the full 56 studs,
+		rang the bell and paid the same 35 points, whatever you shot it
+		with -- so the high striker was a button labelled DING, and the
+		strongest weapon in the game was worth exactly as much at it as the
+		weakest. Nothing in the code looked wrong, because nothing in the
+		code looked at the gun.
+
+		Shot power now decides the throw, which means the test can shoot the
+		same pad twice and compare.
+	]]
+	local pad = nil
+	for _, thing in workspace:GetDescendants() do
+		if thing._props.Name == "StrikerPad" then
+			pad = thing
+			break
+		end
+	end
+	check("the fairground has a high striker", pad ~= nil)
+
+	if pad then
+		local smg = Config.Weapons.SMG
+		local atRifle = Config.Weapons.AntiMaterial
+		check("and two guns far enough apart to tell apart",
+			smg ~= nil and atRifle ~= nil
+				and Config.ShotPower(atRifle) > Config.ShotPower(smg) * 3,
+			string.format("%d vs %d",
+				Config.ShotPower(smg or {}), Config.ShotPower(atRifle or {})))
+
+		-- A popgun.
+		ADVANCE(Config.Carnival.StrikerCooldown + 0.1)
+		CarnivalService.RegisterHit(pad, killer, nil, Config.ShotPower(smg))
+		local weak = CarnivalService.StrikerPeakForTests()
+
+		-- The heaviest rifle in the game.
+		ADVANCE(Config.Carnival.StrikerCooldown + 0.1)
+		CarnivalService.RegisterHit(pad, killer, nil, Config.ShotPower(atRifle))
+		local strong = CarnivalService.StrikerPeakForTests()
+
+		check("a submachine gun barely lifts the puck", weak < 0.4,
+			string.format("%.0f%% of the tower", weak * 100))
+		check("the anti-material rifle rings the bell", strong >= 1,
+			string.format("%.0f%% of the tower", strong * 100))
+		check("so the tower actually reads the gun", strong > weak * 2,
+			string.format("%.2f vs %.2f", strong, weak))
+
+		--[[
+			A rocket is not a feeble shot.
+
+			Every explosive in the game has Damage = 0 -- all of its damage
+			is the blast -- so scoring a hit by Damage alone would have made
+			the loudest weapon in the game the weakest thing you could hit a
+			high striker with. Config.ShotPower exists for exactly this.
+		]]
+		local rocket = Config.Weapons.RPG
+		if rocket then
+			check("and a rocket counts as a rocket",
+				Config.ShotPower(rocket) > Config.ShotPower(smg),
+				string.format("power %d, raw damage %d",
+					Config.ShotPower(rocket), rocket.Damage))
+		end
+
+		--[[
+			The puck comes back down.
+
+			It is driven ballistically off a launch time, so a throw that
+			never cleared itself would leave the puck parked in mid-air
+			against the bell for the rest of the round.
+		]]
+		ADVANCE(4)
+		RunService.Heartbeat._fire(1 / 60)
+		local puck = nil
+		for _, thing in workspace:GetDescendants() do
+			if thing._props.Name == "StrikerPuck" then
+				puck = thing
+				break
+			end
+		end
+		check("and it settles back on the pad afterwards",
+			puck ~= nil and puck._props.CFrame.Position.Y < 20,
+			if puck then string.format("y=%.1f", puck._props.CFrame.Position.Y) else "no puck")
 	end
 end
 

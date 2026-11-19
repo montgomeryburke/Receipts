@@ -46,6 +46,12 @@ type Dweller = {
 
 local dwellers: { Dweller } = {}
 local poopPiles: { BasePart } = {}
+-- When each pile appeared, and when the next one is due. Poop is the only
+-- ammo in the game you cannot buy, carry in or find in a crate, so without a
+-- clock it is a finite resource: twelve piles at the start of the round and
+-- then the elephant gun is dead for good.
+local poopBornAt: { [BasePart]: number } = {}
+local nextPoopAt = 0
 local wanderRadius = 300
 local rng = Random.new()
 
@@ -345,6 +351,7 @@ local function collectPoop(player: Player, pile: BasePart)
 	if index then
 		table.remove(poopPiles, index)
 	end
+	poopBornAt[pile] = nil
 	pile:Destroy()
 end
 
@@ -360,6 +367,7 @@ local function raisePoopColumn(pile: BasePart)
 	if index then
 		table.remove(poopPiles, index)
 	end
+	poopBornAt[pile] = nil
 	pile:Destroy()
 
 	local model = Instance.new("Model")
@@ -430,18 +438,49 @@ local function raisePoopColumn(pile: BasePart)
 	end
 end
 
+--[[
+	One set of cast settings for every downward ray in this module.
+
+	Declared up here, above the first thing that uses it, because a `local`
+	referenced from a function defined ABOVE its declaration is not an
+	upvalue at all -- it compiles to a global lookup, reads nil at runtime and
+	throws. Nothing in a typechecker catches that.
+]]
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+
+--[[
+	Drop a pile, on the ground rather than at a guessed height.
+
+	Piles used to be placed at a flat y = 4 wherever the dice landed, which
+	is the ground only where the ground happens to be at zero -- on a road
+	embankment or a building floor the pile was buried, and picking up
+	something you cannot see is indistinguishable from the pickup being
+	broken. A cast from well overhead puts it on whatever is actually there.
+]]
 local function dropPoop(position: Vector3)
 	if #poopPiles >= Config.Wildlife.MaxPoopPiles then
 		local oldest = table.remove(poopPiles, 1)
-		if oldest and oldest.Parent then
-			oldest:Destroy()
+		if oldest then
+			poopBornAt[oldest] = nil
+			if oldest.Parent then
+				oldest:Destroy()
+			end
 		end
 	end
+
+	groundParams.FilterDescendantsInstances = {}
+	local down = workspace:Raycast(
+		Vector3.new(position.X, position.Y + 240, position.Z),
+		Vector3.new(0, -400, 0),
+		groundParams
+	)
+	local restY = if down then down.Position.Y else position.Y
 
 	local pile = Util.Part({
 		Name = "PoopPile",
 		Size = Vector3.new(6, 4.5, 6),
-		CFrame = CFrame.new(position + Vector3.new(0, 2, 0)),
+		CFrame = CFrame.new(Vector3.new(position.X, restY + 2.25, position.Z)),
 		Shape = Enum.PartType.Ball,
 		Color = Color3.fromRGB(92, 64, 38),
 		Material = Enum.Material.Sand,
@@ -479,18 +518,25 @@ local function dropPoop(position: Vector3)
 		end
 	end)
 
+	poopBornAt[pile] = os.clock()
 	table.insert(poopPiles, pile)
+end
+
+--[[ Somewhere in the wildlife's half of the map, for a fresh pile. ]]
+local function poopSpot(): Vector3
+	return Vector3.new(
+		rng:NextNumber(-wanderRadius, wanderRadius),
+		0,
+		rng:NextNumber(-wanderRadius, wanderRadius)
+	)
 end
 
 --[[ Scatter some poop about, since there is no elephant leaving it any more. ]]
 local function seedPoop()
 	for _ = 1, 12 do
-		dropPoop(Vector3.new(
-			rng:NextNumber(-wanderRadius, wanderRadius),
-			2,
-			rng:NextNumber(-wanderRadius, wanderRadius)
-		))
+		dropPoop(poopSpot())
 	end
+	nextPoopAt = os.clock() + Config.Wildlife.PoopInterval
 end
 
 -- ==================================================================== DEATH ==
@@ -640,8 +686,6 @@ local function nearestLiving(from: Vector3): (Player?, Vector3?, number)
 	return best, bestPosition, bestDistance
 end
 
-local groundParams = RaycastParams.new()
-groundParams.FilterType = Enum.RaycastFilterType.Exclude
 
 --[[
 	The ground under a dweller, and whether it is reachable from here.
@@ -749,9 +793,45 @@ local function stepDweller(dweller: Dweller, deltaTime: number)
 	dweller.model:PivotTo(CFrame.lookAt(stand, stand + dweller.facing))
 end
 
+--[[
+	Poop comes and goes.
+
+	Both of these numbers were in Config from the start and neither was ever
+	read, which is the quietest kind of bug there is: PoopInterval and
+	PoopLifetime looked like settings and were decoration. So poop never
+	renewed -- twelve piles seeded at the top of the round, and once they had
+	been walked over the elephant gun had no ammunition for the rest of it,
+	because it is the one weapon in the game marked AmmoFromPickupsOnly --
+	and it never went stale either, so whatever was left sat in the mud until
+	the map changed.
+]]
+local function stepPoop(now: number)
+	for index = #poopPiles, 1, -1 do
+		local pile = poopPiles[index]
+		local born = poopBornAt[pile]
+		if not pile.Parent then
+			table.remove(poopPiles, index)
+			poopBornAt[pile] = nil
+		elseif born and now - born > Config.Wildlife.PoopLifetime then
+			table.remove(poopPiles, index)
+			poopBornAt[pile] = nil
+			pile:Destroy()
+		end
+	end
+
+	if now < nextPoopAt then
+		return
+	end
+	nextPoopAt = now + Config.Wildlife.PoopInterval
+	if #poopPiles < Config.Wildlife.MaxPoopPiles then
+		dropPoop(poopSpot())
+	end
+end
+
 local function step(deltaTime: number)
 	-- One player scan for the whole crowd, before anybody moves.
 	refreshLiving()
+	stepPoop(os.clock())
 
 	for index = #dwellers, 1, -1 do
 		local dweller = dwellers[index]
@@ -805,6 +885,7 @@ function WildlifeService.Clear()
 		end
 	end
 	table.clear(poopPiles)
+	table.clear(poopBornAt)
 
 	for _, child in workspace:GetChildren() do
 		if child.Name == "PoopColumn" then
@@ -819,6 +900,19 @@ end
 
 function WildlifeService.PoopCount(): number
 	return #poopPiles
+end
+
+--[[ The nearest pile, for the tests. ]]
+function WildlifeService.NearestPoopForTests(from: Vector3): BasePart?
+	local best: BasePart? = nil
+	local bestDistance = math.huge
+	for _, pile in poopPiles do
+		local distance = (pile.Position - from).Magnitude
+		if distance < bestDistance then
+			best, bestDistance = pile, distance
+		end
+	end
+	return best
 end
 
 --[[ How many of each kind are about, for the tests. ]]

@@ -773,6 +773,18 @@ Config.WeaponsAlwaysAvailable = true
 	is worth almost nothing and clearing a whole board is worth a kill, which
 	is what makes a stall worth standing at rather than walking past.
 ]]
+--[[
+	How hard a shot hits something that is not a player.
+
+	A rocket's Damage is zero -- all of its damage is the blast -- so reading
+	Damage alone makes the loudest weapon in the game the feeblest thing you
+	can hit a high striker with. Anything scoring a shot by its force wants
+	this rather than the raw field.
+]]
+function Config.ShotPower(spec: { Damage: number?, BlastDamage: number? }): number
+	return math.max(spec.Damage or 0, spec.BlastDamage or 0)
+end
+
 Config.Carnival = {
 	BalloonPoints = 12,
 	BalloonClearBonus = 240,
@@ -785,6 +797,20 @@ Config.Carnival = {
 	CratePoints = 15,
 	CrateStackBonus = 300,
 	CannonCooldown = 2.2,
+	--[[
+		The high striker reads the gun you shot it with.
+
+		StrikerFullPower is the shot power that sends the puck all the way to
+		the bell. Set just under the anti-tank rifle's 62 so one hitscan
+		weapon in the game can ring it cleanly, with every explosive doing it
+		too -- the reward for carrying the heaviest thing you own across the
+		fairground. The weakest throw stops the submachine gun looking
+		broken: the puck still leaves the pad.
+	]]
+	StrikerFullPower = 58,
+	StrikerWeakestThrow = 0.16,
+	-- Long enough for the puck to fly and settle before the next shot counts.
+	StrikerCooldown = 1.6,
 	-- How long before a cleared stall sets itself up again.
 	ResetSeconds = 5,
 }

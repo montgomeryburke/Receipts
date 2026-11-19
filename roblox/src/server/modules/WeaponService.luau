@@ -92,9 +92,24 @@ local function broadcastShot(
 	end
 end
 
+--[[
+	What is in each player's hand right now.
+
+	Kept so the model can be rebuilt FROM the state rather than by every
+	place that changes it. `state.equipped` is written in three modules --
+	the equip key, picking a gun up off the floor, and winning a hockey
+	fight with a stick that breaks -- and only the first of them remembered
+	to rebuild the hand model. So picking up a rocket launcher left you
+	holding a pistol that fired rockets, and the comment above the pickup
+	code said "puts it straight in your hands" while doing nothing of the
+	sort. A fourth writer would have forgotten too.
+]]
+local shownWeapon: { [Player]: string } = {}
+
 local function updateHeldWeapon(player: Player)
 	local character = player.Character
 	if not character then
+		shownWeapon[player] = nil
 		return
 	end
 
@@ -105,12 +120,14 @@ local function updateHeldWeapon(player: Player)
 
 	local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
 	if not hand or not hand:IsA("BasePart") then
+		shownWeapon[player] = nil
 		return
 	end
 
 	local state = PlayerState.Get(player)
 	local spec = Config.Weapons[state.equipped]
 	if not spec then
+		shownWeapon[player] = nil
 		return
 	end
 
@@ -166,6 +183,12 @@ local function updateHeldWeapon(player: Player)
 
 	Util.Weld(hand, body)
 	model.Parent = character
+	shownWeapon[player] = state.equipped
+end
+
+--[[ For tests: what the hand model is showing, if anything. ]]
+function WeaponService.HeldWeaponOf(player: Player): string?
+	return shownWeapon[player]
 end
 
 WeaponService.UpdateHeldWeapon = updateHeldWeapon
@@ -203,7 +226,7 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 
 	-- Shooting a giant animal does not hurt it, but it does annoy it.
 	-- Fairground props first: they are neither people nor vehicles.
-	if CarnivalService.RegisterHit(result.Instance, player, direction) then
+	if CarnivalService.RegisterHit(result.Instance, player, direction, Config.ShotPower(spec)) then
 		return
 	end
 
@@ -827,10 +850,24 @@ local function handleAim(player: Player, worldTarget: any)
 	end
 end
 
+local started = false
+
 function WeaponService.Start()
+	-- Idempotent, because connecting the listeners twice means two rebuilds
+	-- of the hand model per state change and two shots per trigger pull.
+	if started then
+		return
+	end
+	started = true
+
 	-- Everyone spawns holding something.
 	local function armOnSpawn(player: Player)
 		player.CharacterAdded:Connect(function()
+			-- The old model died with the old character, so forget it BEFORE
+			-- the wait: a state change landing in that half-second would
+			-- otherwise match the cache and skip the rebuild, leaving the
+			-- player empty-handed for the rest of the life.
+			shownWeapon[player] = nil
 			task.wait(0.5)
 			updateHeldWeapon(player)
 		end)
@@ -846,6 +883,28 @@ function WeaponService.Start()
 	for _, player in Players:GetPlayers() do
 		armOnSpawn(player)
 	end
+
+	--[[
+		The hand follows the state.
+
+		Rebuilding here rather than at each of the three places that write
+		`state.equipped` is what makes it impossible to forget. Changed fires
+		for shields, ammo and points as well, many times a second, so the
+		string compare is the whole point: a rebuild happens only when what
+		is in the hand no longer matches what is equipped.
+	]]
+	PlayerState.Changed.Connect(function(player: Player)
+		if not player.Parent or not player.Character then
+			return
+		end
+		if shownWeapon[player] ~= PlayerState.Get(player).equipped then
+			updateHeldWeapon(player)
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player: Player)
+		shownWeapon[player] = nil
+	end)
 
 	Remotes.Event("FireWeapon").OnServerEvent:Connect(function(player, direction)
 		handleFire(player, direction)

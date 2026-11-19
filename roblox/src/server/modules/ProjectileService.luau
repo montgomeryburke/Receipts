@@ -192,7 +192,7 @@ local function applyDirectHit(projectile: Projectile, hitPart: BasePart)
 		return
 	end
 
-	if CarnivalService.RegisterHit(hitPart, projectile.owner) then
+	if CarnivalService.RegisterHit(hitPart, projectile.owner, nil, Config.ShotPower(spec)) then
 		return
 	end
 
