@@ -40,6 +40,28 @@ local DOOR_HEIGHT = 14
 local WALL_THICKNESS = 2
 local STAIR_STEPS = 14
 
+--[[
+	The four corners the vehicle switchback ramp turns at, in the order it
+	visits them.
+
+	Shared between the ramp itself and the roof lip, which has to leave a gap
+	exactly where the ramp arrives. Kept as unit signs so the one table can
+	serve both: the ramp scales them by its outset, the lip only needs to know
+	which way each corner points.
+]]
+local RAMP_CORNERS = {
+	Vector3.new(1, 0, 1),
+	Vector3.new(-1, 0, 1),
+	Vector3.new(-1, 0, -1),
+	Vector3.new(1, 0, -1),
+}
+
+--[[ Which corner a building's ramp finishes on, from its storey count. ]]
+local function rampArrivalCorner(floors: number): Vector3
+	local runs = floors * 2
+	return RAMP_CORNERS[(runs % 4) + 1]
+end
+
 -- ============================================================ BASIC PIECES ==
 
 --[[
@@ -284,10 +306,23 @@ local function building(
 		end
 	end
 
-	-- Roof lip with a gap on the vehicle ramp entry side so cars drive cleanly onto the roof.
+	-- Roof lip, with a gap over the corner the vehicle ramp arrives at so cars
+	-- drive cleanly onto the roof.
+	--
+	-- The gap used to be hardcoded to the -Z face, which was wrong: the
+	-- switchback finishes on RAMP_CORNERS[(floors * 2 % 4) + 1], so an
+	-- even-storey tower arrives at +X/+Z and an odd-storey one at -X/-Z. On
+	-- half the buildings the gap was on the far side of the roof and the ramp
+	-- ran into a four-stud wall; on the other half only one of the two faces
+	-- it crosses was open. The bridge comes in diagonally over a corner, so
+	-- BOTH faces meeting there have to go.
 	local roofY = floors * FLOOR_HEIGHT + SLAB
+	local arrival = rampArrivalCorner(floors)
 	for _, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
-		if vehicleRamp ~= false and side.Z == -1 then
+		if
+			vehicleRamp ~= false
+			and (side.X == arrival.X or side.Z == arrival.Z)
+		then
 			continue
 		end
 		Util.Part({
@@ -322,12 +357,10 @@ local function building(
 	-- flat landing at every corner so you do not clip the turn.
 	local rampWidth = 16
 	local outset = half + rampWidth * 0.5
-	local corners = {
-		Vector3.new(outset, 0, outset),
-		Vector3.new(-outset, 0, outset),
-		Vector3.new(-outset, 0, -outset),
-		Vector3.new(outset, 0, -outset),
-	}
+	local corners = {}
+	for index, sign in RAMP_CORNERS do
+		corners[index] = sign * outset
+	end
 
 	local runs = floors * 2
 	local rise = roofY / runs
@@ -356,14 +389,19 @@ local function building(
 	end
 
 	-- Bridge the top of the ramp onto the roof.
-	local topCorner = corners[(runs % 4) + 1]
-	ramp(
+	--
+	-- Named apart from every other ramp in the game so a test can find it and
+	-- check that nothing is parked across it -- which is how the roof lip was
+	-- caught walling off the one route cars have onto the roof.
+	local topCorner = rampArrivalCorner(floors) * outset
+	local roofRamp = ramp(
 		origin + topCorner + Vector3.new(0, roofY, 0),
 		origin + topCorner * 0.4 + Vector3.new(0, roofY + SLAB * 0.5, 0),
 		rampWidth,
 		rampColor,
 		parent
 	)
+	roofRamp.Name = "RoofRamp"
 
 	return roofY
 end
@@ -374,6 +412,21 @@ end
 	A barricade: a long, low wall you can crouch behind and shoot over, with
 	a sandbag look. Scattered thickly, because open ground is no fun on foot.
 ]]
+--[[
+	How different two roofs may be and still be worth bridging.
+
+	A step, essentially. Any more and the far end of a deck drawn at the
+	lower roof is below the taller tower's roofline, which means inside it.
+]]
+local BRIDGE_ROOF_TOLERANCE = 6
+
+--[[ Every bridge built on the last map, so a test can check the pairing. ]]
+local bridges: { { aRoof: number, bRoof: number, deck: number } } = {}
+
+function MapService.BridgesForTests(): { { aRoof: number, bRoof: number, deck: number } }
+	return bridges
+end
+
 local function barricade(origin: Vector3, heading: number, rng: Random, parent: Instance)
 	local length = rng:NextNumber(18, 34)
 	local height = rng:NextNumber(6, 9)
@@ -940,27 +993,54 @@ function MapService.Build(mapConfig: any, teamColors: { BrickColor }): MapBuild
 		end
 	end
 
-	-- Sky bridges between neighbouring rooftops, so the roofs are a second
-	-- level you can cross rather than a set of islands. Only between blocks
-	-- that are actually adjacent, and drawn at the lower of the two roofs.
+	--[[
+		Sky bridges between neighbouring rooftops, so the roofs are a second
+		level you can cross rather than a set of islands.
+
+		Only between towers of SIMILAR HEIGHT. It used to bridge any
+		adjacent pair and draw the deck at the lower of the two roofs, which
+		put the far end of the bridge below the taller tower's roofline --
+		so the bridge drove straight through its wall and ended inside the
+		building. You could walk out along it and find yourself in somebody
+		else's top floor, and from the street there was a slab sticking out
+		of a wall for no reason.
+
+		Drawing at the higher roof instead would have been worse: the deck
+		would float above the lower tower with a step up to reach it from
+		its own roof. A height difference is simply not bridgeable, so the
+		fix is to not bridge it and keep looking for a partner that is.
+	]]
 	local bridgeSpan = pitch * 1.35
 	local bridged = 0
+	table.clear(bridges)
 	for i = 1, #towers do
 		for j = i + 1, #towers do
 			local a, b = towers[i], towers[j]
-			local gap = (a.center - b.center).Magnitude
-			if gap < bridgeSpan and bridged < #towers then
-				local deck = math.min(a.roof, b.roof)
-				ramp(
-					Vector3.new(a.center.X, deck, a.center.Z),
-					Vector3.new(b.center.X, deck, b.center.Z),
-					14,
-					Color3.fromRGB(120, 116, 108),
-					model
-				)
-				bridged += 1
+			if bridged >= #towers then
 				break
 			end
+			local gap = (a.center - b.center).Magnitude
+			if gap >= bridgeSpan then
+				continue
+			end
+			-- A step's worth of difference is a kerb on the deck; more than
+			-- that is a wall, and a bridge into a wall is a bridge into a
+			-- building.
+			if math.abs(a.roof - b.roof) > BRIDGE_ROOF_TOLERANCE then
+				continue
+			end
+
+			local deck = math.min(a.roof, b.roof)
+			ramp(
+				Vector3.new(a.center.X, deck, a.center.Z),
+				Vector3.new(b.center.X, deck, b.center.Z),
+				14,
+				Color3.fromRGB(120, 116, 108),
+				model
+			)
+			table.insert(bridges, { aRoof = a.roof, bRoof = b.roof, deck = deck })
+			bridged += 1
+			break
 		end
 	end
 
