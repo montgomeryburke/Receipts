@@ -194,6 +194,27 @@ else
   echo "  (skipped: set PEBBLE_GOPATH and CERTBOT_BIN_DIR; see tests/README in the main README)"
 fi
 
+echo "• commands from Project Assistant (--enable-commands): NAS login + command key, limited user, logged"
+out="$("$SCRIPT" --yes --access local --port 18490 --password "$PASS" --enable-commands 2>&1)"; rc=$?
+check "commands: script succeeded" [ $rc -eq 0 ]
+KEY="$(cat /etc/nas-uploader-command-key 2>/dev/null)"
+check "commands: key printed for the extension" grep -q "command key $KEY" <<<"$out"
+run_cmd() { curl -sk -X POST -u "uploader:$PASS" -H "X-Command-Key: $1" -H 'Content-Type: application/json' --data "$2" -w '\n%{http_code}' https://127.0.0.1:18490/.run; }
+r="$(run_cmd "$KEY" '{"cmd":"whoami; pwd; id -nG","timeout":10}')"
+check "commands: runs as nas-runner" grep -q '"stdout": "nas-runner' <<<"$r"
+check "commands: starts in the shared folder" grep -q '/srv/test-media' <<<"$r"
+check "commands: wrong key refused (403)" [ "$(run_cmd wrong '{"cmd":"whoami"}' | tail -1)" = 403 ]
+check "commands: no NAS login refused (401)" [ "$(curl -sk -o /dev/null -w '%{http_code}' -X POST -H "X-Command-Key: $KEY" --data '{"cmd":"whoami"}' https://127.0.0.1:18490/.run)" = 401 ]
+check "commands: not root" bash -c "! grep -q '\"stdout\": \"root' <<<'$(run_cmd "$KEY" '{"cmd":"whoami"}')'"
+r="$(run_cmd "$KEY" '{"cmd":"sleep 30","timeout":2}')"
+check "commands: time limit stops it" grep -q '"timed_out": true' <<<"$r"
+check "commands: logged" grep -q '"cmd": "whoami; pwd; id -nG"' /var/log/nas-uploader-commands.log
+check "commands: the key file is not readable by everyone" [ "$(stat -c %a /etc/nas-uploader-command-key)" = 640 ]
+out="$("$SCRIPT" --yes --access local --port 18490 --password "$PASS" 2>&1)"
+check "commands: remembered on a later run" [ "$(run_cmd "$KEY" '{"cmd":"echo still"}' | tail -1)" = 200 ]
+out="$("$SCRIPT" --yes --access local --port 18490 --password "$PASS" --disable-commands 2>&1)"
+check "commands: --disable-commands switches them off" bash -c "[ ! -e /etc/sudoers.d/nas-uploader-commands ] && [ \"\$(curl -sk -o /dev/null -w '%{http_code}' -X POST -u 'uploader:$PASS' -H 'X-Command-Key: $KEY' --data '{\"cmd\":\"whoami\"}' https://127.0.0.1:18490/.run)\" != 200 ]"
+
 echo "• folder owned by 'nobody' (unprivileged container, unmapped owner): explains the Proxmox fix"
 mkdir -p /srv/test-media-nobody && chown nobody:nogroup /srv/test-media-nobody
 out="$("$SCRIPT" --yes --access local --port 18493 --folder /srv/test-media-nobody 2>&1)"; rc=$?

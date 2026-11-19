@@ -583,7 +583,7 @@ $('instList').addEventListener('click', async (e) => {
 
 // ---------------------------------------------------------------- export / import (moving to another computer)
 
-const SECRET = new Set(['anthropicKey', 'geminiKey', 'localKey']);
+const SECRET = new Set(['anthropicKey', 'geminiKey', 'localKey', 'hpCommandKey']);
 
 $('exportSetup').addEventListener('click', async () => {
   const s = await getSettings();
@@ -659,4 +659,17 @@ $('importSetup').addEventListener('click', () => {
 $('ttsTest').addEventListener('click', async () => {
   const r = await speak('This is how answers will sound when they are read aloud.', await getSettings());
   if (r.fallback) toast(`The Gemini voice couldn't be used (${r.fallback}); this computer's voice was used.`);
+});
+
+// ---------------------------------------------------------------- run on the HP
+
+$('hpTest').addEventListener('click', async () => {
+  $('hpOut').textContent = 'Asking the HP…';
+  try {
+    const { runOnHp } = await import('./lib/hp.js');
+    const r = await runOnHp('echo "$(whoami)@$(hostname) in $(pwd)"', { timeout: 15 });
+    $('hpOut').textContent = r.exit === 0 ? `✓ ${r.stdout.trim()}` : `exit ${r.exit}: ${(r.stderr || r.stdout).trim()}`;
+  } catch (err) {
+    $('hpOut').textContent = err.message;
+  }
 });

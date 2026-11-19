@@ -25,6 +25,8 @@ chmod 644 "$DATA/htpasswd"
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$DATA/key.pem" -out "$DATA/cert.pem" -days 3 -subj "/CN=127.0.0.1" >/dev/null 2>&1
 
 M=/usr/lib/apache2/modules
+CMD_DIR="$(cd "$(dirname "$0")/../server/commands" && pwd)"
+mkdir -p "$DATA/cmd" && printf 'test-command-key' > "$DATA/cmd/command-key" && chown -R www-data:www-data "$DATA/cmd" && chmod 640 "$DATA/cmd/command-key"
 cat > "$DATA/apache.conf" <<CONF
 ServerRoot "/etc/apache2"
 ServerName localhost
@@ -45,6 +47,9 @@ LoadModule dav_fs_module $M/mod_dav_fs.so
 LoadModule alias_module $M/mod_alias.so
 LoadModule dir_module $M/mod_dir.so
 LoadModule mime_module $M/mod_mime.so
+LoadModule cgid_module $M/mod_cgid.so
+LoadModule env_module $M/mod_env.so
+ScriptSock "$DATA/cgid.sock"
 TypesConfig /etc/mime.types
 User www-data
 Group www-data
@@ -77,6 +82,24 @@ Timeout 600
 </VirtualHost>
 <VirtualHost 127.0.0.1:18082>
   DocumentRoot "$DATA/root2"
+  # Commands on the HP (server/commands, as setup-webdav.sh --enable-commands installs them), run directly here.
+  ScriptAlias "/my dav/.run" "$CMD_DIR/run.cgi"
+  <Location "/my dav/.run">
+    AuthType Basic
+    AuthName "NAS"
+    AuthUserFile "$DATA/htpasswd"
+    Require valid-user
+    SetEnv NAS_RUNNER_DIRECT 1
+    SetEnv NAS_COMMAND_KEY_FILE "$DATA/cmd/command-key"
+    SetEnv NAS_RUN_COMMAND "$CMD_DIR/run-command"
+    SetEnv NAS_COMMAND_LOG "$DATA/cmd/commands.log"
+    SetEnv NAS_COMMAND_LOCK "$DATA/cmd/command.lock"
+    SetEnv NAS_RUNNER_HOME "$DATA/root2"
+  </Location>
+  <Directory "$CMD_DIR">
+    Options +ExecCGI
+    Require all granted
+  </Directory>
   Alias "/my dav" "$DATA/root2"
 </VirtualHost>
 <VirtualHost 127.0.0.1:18443>

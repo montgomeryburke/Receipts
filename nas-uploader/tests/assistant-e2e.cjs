@@ -2527,6 +2527,44 @@ test('chat like Claude in Chrome: reads the open page, hands a task to the brows
   eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
 });
 
+test('run on the HP: the chat proposes a command, it runs after "Run on the HP" through the real endpoint (NAS login + command key); without the click when switched off; wrong key explained', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  const panel = await b.open('sidepanel.html');
+  await setSettings(panel, keys({ hpCommandKey: 'test-command-key' }));
+  ai.anthropic = (body) => {
+    if (!endsWithToolResult(body)) {
+      const last = body.messages[body.messages.length - 1];
+      const t = Array.isArray(last.content) ? last.content.map((c) => c.text || '').join('') : String(last.content);
+      return { stop_reason: 'tool_use', content: [toolUse('run_on_hp', { command: /hello/.test(t) ? 'echo hello-from-hp; whoami' : 'pwd; echo files: $(ls | wc -l)', timeout: 10 })] };
+    }
+    const r = lastToolResults(body).run_on_hp;
+    return { content: [text(r.awaiting_user ? 'Ready to run on the HP.' : `Output: ${r.output}`)] };
+  };
+  const reply = await chatSend(panel, 'How many files are in the shared folder on the HP?');
+  assert(/Ready to run/.test(reply), 'reply: ' + reply);
+  await panel.waitForSelector('#chatLog [data-test] [data-act="runTest"]');
+  assert(/pwd; echo files/.test(await panel.textContent('#chatLog [data-test]')), 'the command is shown before it runs');
+  await panel.click('#chatLog [data-test] [data-act="runTest"]');
+  await panel.waitForFunction(() => /exit 0/.test(document.querySelector('#chatLog [data-test]').textContent), null, { timeout: 20000 });
+  const out = await panel.textContent('#chatLog [data-test]');
+  assert(/root2/.test(out) && /files: \d+/.test(out), 'ran in the shared folder: ' + out);
+  // Switched off: it runs straight away and the AI sees the output.
+  await setSettings(panel, { hpCommandConfirm: false });
+  const reply2 = await chatSend(panel, 'Say hello from the HP');
+  assert(/hello-from-hp/.test(reply2) && /www-data/.test(reply2), 'ran without a click: ' + reply2);
+  // Settings → Run on the HP → Test; a wrong key is explained.
+  const options = await b.open('options.html');
+  await options.evaluate(() => { document.getElementById('hpBox').open = true; });
+  await options.click('#hpTest');
+  await options.waitForFunction(() => /✓ www-data@/.test(document.getElementById('hpOut').textContent), null, { timeout: 15000 });
+  await setSettings(options, { hpCommandKey: 'wrong' });
+  await options.click('#hpTest');
+  await options.waitForFunction(() => /Wrong command key/.test(document.getElementById('hpOut').textContent), null, { timeout: 15000 });
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
 test('email chain parsing: Outlook (EN/FR), "Original Message" and "On … wrote:" quotes become separate earlier messages', async () => {
   const b = await launch();
   const page = await b.open('sidepanel.html');

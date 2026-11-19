@@ -382,6 +382,12 @@ The side panel's **Chat** tab talks to the extension itself. Examples:
   Project folders on this computer can be read (Chrome gives read access); writing, moving, renaming, copying and
   deleting happen on the NAS, each with a **Do it** button (Settings → Accuracy & safety can switch the clicks off). The chat
   can't run programs or commands on this computer: Chrome doesn't allow it.
+- Commands on the HP, like Desktop Commander's terminal: "zip the Alert photos from October", "how much space is
+  left on the NAS?", "convert these .doc files to PDF". Run the NAS setup script once with `--enable-commands`; it
+  prints a **command key** for Settings → Run on the HP. Commands run in the NAS container as the limited user
+  `nas-runner` (not root), start in the shared folder, stop at a time limit, and are logged in
+  `/var/log/nas-uploader-commands.log`. Each one shows with a **Run on the HP** button first (switchable). They
+  need the NAS login *and* the command key; `--disable-commands` switches them off.
 - **🎤** dictates your message; **🔊** reads a reply aloud.
 
 Every change appears under the reply with **Undo** (and under *Changes made from the chat*). API keys are never

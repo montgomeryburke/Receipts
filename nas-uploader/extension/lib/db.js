@@ -205,7 +205,9 @@ export const DEFAULT_SETTINGS = {
   ttsGeminiVoice: 'Kore',
   ttsRate: 1,
   dictationStt: 'computer',           // dictation (🎤): 'computer' (Whisper here, free) | 'gemini'
-  chatFileConfirm: true,              // file changes the chat makes on the NAS wait for a click
+  chatFileConfirm: true,
+  hpCommandKey: '',                   // the command key setup-webdav.sh --enable-commands printed (secret)
+  hpCommandConfirm: true,             // commands on the HP wait for my click              // file changes the chat makes on the NAS wait for a click
   emailWebLookup: true,               // email drafts: public facts the files don't have (a standard, product data) looked up online — only when the draft asks for it
   meetingFolder: '/Meetings',         // transcripts are saved here on the NAS
   meetingSummary: true,               // one call at the end for a summary, decisions and action items

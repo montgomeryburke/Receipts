@@ -78,6 +78,15 @@
         </div>
         <div class="row"><button type="button" id="localTest">Test the local model</button><span id="localOut" class="small muted"></span></div>
       </details>
+      <details class="stack" id="hpBox">
+        <summary><b>Run on the HP</b> — commands in the NAS container, from the chat</summary>
+        <p class="small muted">Like Desktop Commander's terminal, but on the HP (nothing can run on this computer). Run the HP setup script with <code>--enable-commands</code>: commands then run in the NAS container as the limited user <code>nas-runner</code> (not root), starting in the shared folder, with a time limit, and every command is logged there. They need the NAS login <b>and</b> this command key, which the script prints at the end.</p>
+        <div class="grid2">
+          <label class="field"><span>Command key</span><span class="row nowrap"><input type="password" data-key="hpCommandKey" class="grow" autocomplete="off" spellcheck="false"><button type="button" data-reveal="hpCommandKey">Show</button></span></label>
+          <label class="check small"><input type="checkbox" data-key="hpCommandConfirm"> Each command waits for my click (recommended)</label>
+        </div>
+        <div class="row"><button type="button" id="hpTest">Test</button><span id="hpOut" class="small muted mono"></span></div>
+      </details>
       <div class="grid3">
         <label class="field"><span>Thinking effort</span>
           <select data-key="effort">

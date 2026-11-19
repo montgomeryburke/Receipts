@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Project Assistant — NAS, email and meetings",
   "short_name": "Project Assistant",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Mirror project folders to your NAS, draft Outlook replies from your project files, and get live prompts in Teams meetings.",
   "minimum_chrome_version": "116",
   "action": {

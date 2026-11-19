@@ -29,6 +29,9 @@
 #    --llm-url URL        your own AI model server (e.g. Ollama: http://192.168.1.50:11434) made reachable at
 #                         <NAS address>/.llm/ behind the same login, for Project Assistant's free local jobs
 #                         (remembered for later runs; --no-llm removes it)
+#    --enable-commands    let Project Assistant run commands in this container (from its chat), as the limited
+#                         user "nas-runner", behind the NAS login AND a separate command key that is printed at
+#                         the end; every command is logged (remembered; --disable-commands removes it)
 #    --email ADDR         optional, given to Let's Encrypt
 #    --acme-server URL    certificate authority (default Let's Encrypt); e.g. Let's Encrypt staging for a dry run
 #    --yes                don't ask questions; use defaults
@@ -50,6 +53,7 @@ PORT="443"
 LOCAL_PORT="8090"
 LLM_URL=""
 NO_LLM=0
+COMMANDS=""
 PUBLIC_URL=""
 ASSUME_YES=0
 UNINSTALL=0
@@ -77,7 +81,7 @@ warn() { printf '\033[1;33m !\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m ✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 usage() {
-  if [[ -f "$0" ]]; then sed -n '2,38p' "$0" | sed 's/^# \{0,2\}//'; else echo "See the comments at the top of setup-webdav.sh for options."; fi
+  if [[ -f "$0" ]]; then sed -n '2,41p' "$0" | sed 's/^# \{0,2\}//'; else echo "See the comments at the top of setup-webdav.sh for options."; fi
   exit "${1:-0}"
 }
 
@@ -94,6 +98,8 @@ while [[ $# -gt 0 ]]; do
     --local-port) LOCAL_PORT="${2:?}"; shift 2 ;;
     --llm-url) LLM_URL="${2:?}"; shift 2 ;;
     --no-llm) NO_LLM=1; shift ;;
+    --enable-commands) COMMANDS=1; shift ;;
+    --disable-commands) COMMANDS=0; shift ;;
     --public-url) PUBLIC_URL="${2:?}"; shift 2 ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
@@ -146,6 +152,8 @@ if [[ $UNINSTALL -eq 1 ]]; then
   if command -v tailscale >/dev/null && [[ -f "$STATE_DIR/funnel" ]]; then
     tailscale funnel --https=443 off >/dev/null 2>&1 || tailscale funnel reset >/dev/null 2>&1 || true
   fi
+  rm -f /etc/sudoers.d/nas-uploader-commands /etc/nas-uploader-command-key /usr/local/lib/nas-uploader/run-command /usr/local/lib/nas-uploader/cgi/run.cgi
+  userdel -r nas-runner >/dev/null 2>&1 || true
   rm -rf "$STATE_DIR"
   apache_reload || true
   ok "Removed. Apache itself is still installed (apt-get remove apache2 to remove it too)."
@@ -465,6 +473,213 @@ $LLM_SSL
 EOF
 )
 fi
+# ---- commands from Project Assistant (opt-in) ----
+RUN_DIR=/usr/local/lib/nas-uploader
+CMD_LOCATION=""
+CMD_KEY=""
+# Readable by the web server (the settings folder is root-only); the command key is separate from the NAS password.
+CMD_KEY_FILE=/etc/nas-uploader-command-key
+[[ -z "$COMMANDS" && -f "$STATE_DIR/commands" ]] && COMMANDS=1
+if [[ "$COMMANDS" == "0" ]]; then
+  rm -f "$STATE_DIR/commands" "$CMD_KEY_FILE" /etc/sudoers.d/nas-uploader-commands "$RUN_DIR/cgi/run.cgi"
+  ok "Commands from Project Assistant are off"
+elif [[ "$COMMANDS" == "1" ]]; then
+  command -v sudo >/dev/null || apt-get install -y -qq sudo >/dev/null
+  command -v python3 >/dev/null || apt-get install -y -qq python3 >/dev/null
+  id nas-runner >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/nas-runner --shell /bin/bash nas-runner
+  # It may read and add files in the shared folder (the web server's group), nothing else of the system.
+  usermod -a -G "$RUN_GROUP" nas-runner
+  install -d -m 755 "$RUN_DIR" "$RUN_DIR/cgi"
+  cat > "$RUN_DIR/run-command" <<'PYEOF'
+#!/usr/bin/env python3
+# Project Assistant — runs one shell command for the extension, as the limited "nas-runner" user.
+# Installed by setup-webdav.sh --enable-commands; called by run.cgi through sudo. Reads JSON on stdin:
+#   {"cmd": "...", "cwd": "/mnt/mirror", "timeout": 60}
+# and prints JSON: {"exit": 0, "stdout": "...", "stderr": "...", "ms": 12, "timed_out": false, "truncated": false}
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+
+MAX_OUT = 200_000      # characters of output kept
+MAX_TIMEOUT = 600      # seconds
+
+
+def main():
+    try:
+        req = json.loads(sys.stdin.read(70_000) or '{}')
+    except ValueError:
+        print(json.dumps({'error': 'bad request'}))
+        return
+    cmd = str(req.get('cmd') or '')
+    if not cmd.strip():
+        print(json.dumps({'error': 'no command'}))
+        return
+    cwd = str(req.get('cwd') or os.environ.get('NAS_RUNNER_HOME') or os.path.expanduser('~'))
+    if not os.path.isdir(cwd):
+        print(json.dumps({'error': f'no such folder: {cwd}'}))
+        return
+    try:
+        timeout = max(1, min(MAX_TIMEOUT, int(req.get('timeout') or 60)))
+    except (TypeError, ValueError):
+        timeout = 60
+    t0 = time.monotonic()
+    timed_out = False
+    # Its own process group, so a time-out stops everything the command started, not just the shell.
+    p = subprocess.Popen(['bash', '-lc', cmd], cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        out, err = p.communicate(timeout=timeout)
+        code = p.returncode
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        out, err = p.communicate()
+        code = 124
+        err = (err or b'') + f'\n[stopped after {timeout} s]'.encode()
+    out_s = out.decode('utf-8', 'replace')
+    err_s = err.decode('utf-8', 'replace')
+    truncated = len(out_s) > MAX_OUT or len(err_s) > MAX_OUT
+    print(json.dumps({
+        'exit': code,
+        'stdout': out_s[-MAX_OUT:],
+        'stderr': err_s[-MAX_OUT // 4:],
+        'ms': int((time.monotonic() - t0) * 1000),
+        'timed_out': timed_out,
+        'truncated': truncated,
+        'cwd': cwd,
+    }))
+
+
+if __name__ == '__main__':
+    main()
+PYEOF
+  cat > "$RUN_DIR/cgi/run.cgi" <<'PYEOF'
+#!/usr/bin/env python3
+# Project Assistant — the HP command endpoint (<NAS address>/.run), installed by setup-webdav.sh --enable-commands.
+# Apache has already checked the NAS login; this also needs the separate command key (X-Command-Key header), so the
+# NAS password alone can't run commands. The command runs as the limited "nas-runner" user through sudo, with a
+# time limit, one at a time, and is written to the log.
+import fcntl
+import hmac
+import json
+import os
+import subprocess
+import sys
+import time
+
+KEY_FILE = os.environ.get('NAS_COMMAND_KEY_FILE', '/etc/nas-uploader-command-key')
+LOG_FILE = os.environ.get('NAS_COMMAND_LOG', '/var/log/nas-uploader-commands.log')
+LOCK_FILE = os.environ.get('NAS_COMMAND_LOCK', '/run/lock/nas-uploader-command.lock')
+RUN_COMMAND = os.environ.get('NAS_RUN_COMMAND', '/usr/local/lib/nas-uploader/run-command')
+# Tests run the runner directly (no sudo); on the NAS it always goes through sudo as nas-runner.
+RUNNER = [sys.executable, RUN_COMMAND] if os.environ.get('NAS_RUNNER_DIRECT') == '1' else ['sudo', '-n', '-u', 'nas-runner', RUN_COMMAND]
+
+
+def reply(status, data):
+    body = json.dumps(data).encode()
+    sys.stdout.write(f'Status: {status}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {len(body)}\r\n\r\n')
+    sys.stdout.flush()
+    sys.stdout.buffer.write(body)
+    sys.stdout.flush()
+
+
+def log(entry):
+    try:
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry) + '\n')
+    except OSError:
+        pass
+
+
+def main():
+    if os.environ.get('REQUEST_METHOD') != 'POST':
+        return reply('405 Method Not Allowed', {'error': 'POST only'})
+    try:
+        with open(KEY_FILE, encoding='utf-8') as f:
+            key = f.read().strip()
+    except OSError:
+        return reply('503 Service Unavailable', {'error': 'commands are not switched on (setup-webdav.sh --enable-commands)'})
+    given = os.environ.get('HTTP_X_COMMAND_KEY', '')
+    who = os.environ.get('REMOTE_USER', '')
+    ip = os.environ.get('HTTP_X_FORWARDED_FOR') or os.environ.get('REMOTE_ADDR', '')
+    if not key or not hmac.compare_digest(given.encode(), key.encode()):
+        log({'at': time.strftime('%Y-%m-%dT%H:%M:%S'), 'user': who, 'ip': ip, 'refused': 'wrong command key'})
+        return reply('403 Forbidden', {'error': 'wrong command key'})
+    try:
+        length = min(int(os.environ.get('CONTENT_LENGTH') or 0), 65536)
+    except ValueError:
+        length = 0
+    raw = sys.stdin.buffer.read(length) if length else b''
+    try:
+        req = json.loads(raw or b'{}')
+    except ValueError:
+        return reply('400 Bad Request', {'error': 'bad JSON'})
+    cmd = str(req.get('cmd') or '')
+    if not cmd.strip():
+        return reply('400 Bad Request', {'error': 'no command'})
+    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+    with open(LOCK_FILE, 'w') as lock:
+        # One command at a time; wait up to 10 s for the one before.
+        for _ in range(100):
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            return reply('409 Conflict', {'error': 'another command is still running'})
+        t0 = time.time()
+        try:
+            p = subprocess.run(RUNNER, input=json.dumps({'cmd': cmd, 'cwd': req.get('cwd') or os.environ.get('NAS_RUNNER_HOME', ''), 'timeout': req.get('timeout') or 60}).encode(), capture_output=True, timeout=660)
+            out = json.loads(p.stdout or b'{}') if p.returncode == 0 else {'error': (p.stderr or b'').decode('utf-8', 'replace')[-2000:] or f'runner failed ({p.returncode})'}
+        except (subprocess.TimeoutExpired, ValueError) as e:
+            out = {'error': f'runner failed: {e}'}
+    log({'at': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(t0)), 'user': who, 'ip': ip, 'cmd': cmd[:2000], 'cwd': req.get('cwd') or '', 'exit': out.get('exit'), 'ms': out.get('ms'), 'error': out.get('error')})
+    return reply('200 OK' if 'error' not in out else '500 Internal Server Error', out)
+
+
+if __name__ == '__main__':
+    main()
+PYEOF
+  chmod 755 "$RUN_DIR/run-command" "$RUN_DIR/cgi/run.cgi"
+  chown root:root "$RUN_DIR/run-command" "$RUN_DIR/cgi/run.cgi"
+  [[ -s "$CMD_KEY_FILE" ]] || { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$CMD_KEY_FILE"; }
+  chown "root:$RUN_GROUP" "$CMD_KEY_FILE"; chmod 640 "$CMD_KEY_FILE"
+  CMD_KEY="$(cat "$CMD_KEY_FILE")"
+  touch /var/log/nas-uploader-commands.log; chown "$RUN_USER:$RUN_GROUP" /var/log/nas-uploader-commands.log; chmod 640 /var/log/nas-uploader-commands.log
+  printf '%s ALL=(nas-runner) NOPASSWD: %s\n' "$RUN_USER" "$RUN_DIR/run-command" > /etc/sudoers.d/nas-uploader-commands.tmp
+  chmod 440 /etc/sudoers.d/nas-uploader-commands.tmp
+  visudo -cf /etc/sudoers.d/nas-uploader-commands.tmp >/dev/null || die "sudoers rule for commands failed to check"
+  mv /etc/sudoers.d/nas-uploader-commands.tmp /etc/sudoers.d/nas-uploader-commands
+  touch "$STATE_DIR/commands"
+  a2enmod -q cgid >/dev/null
+  CMD_LOCATION=$(cat <<EOF
+    ScriptAlias "/.run" "$RUN_DIR/cgi/run.cgi"
+    <Directory "$RUN_DIR/cgi">
+        Options +ExecCGI
+        Require all granted
+    </Directory>
+    <Location "/.run">
+        Dav Off
+        AuthType Basic
+        AuthName "NAS Uploader"
+        AuthBasicProvider file
+        AuthUserFile "$HTPASSWD"
+        Require valid-user
+        SetEnv NAS_RUN_COMMAND "$RUN_DIR/run-command"
+        SetEnv NAS_COMMAND_KEY_FILE "$CMD_KEY_FILE"
+        SetEnv NAS_RUNNER_HOME "$FOLDER"
+    </Location>
+EOF
+)
+  ok "Commands from Project Assistant are on (user nas-runner, log /var/log/nas-uploader-commands.log)"
+fi
+
 COMMON=$(cat <<EOF
     DocumentRoot "$FOLDER"
     DavLockDB "$LOCK_DIR/DavLock"
@@ -495,6 +710,7 @@ COMMON=$(cat <<EOF
         </IfModule>
     </Directory>
 $LLM_LOCATION
+$CMD_LOCATION
     ErrorLog \${APACHE_LOG_DIR}/nas-uploader-error.log
     CustomLog \${APACHE_LOG_DIR}/nas-uploader-access.log combined
 EOF
@@ -728,6 +944,10 @@ fi
   if [[ -n "$LLM_URL" ]]; then
     echo
     echo "Local AI model (Project Assistant: Settings, AI, Local model): ${PUBLIC_URL}.llm/ with the NAS login"
+  fi
+  if [[ -n "$CMD_KEY" ]]; then
+    echo
+    echo "Commands on this container (Project Assistant: Settings, Run on the HP): command key $CMD_KEY"
   fi
 } > "$SUMMARY"
 chmod 600 "$SUMMARY"

@@ -1074,7 +1074,7 @@ const STEP_LABEL = {
   automate_list: 'read flows', automate_save: 'saved a flow action', automate_remove: 'removed a flow action', automate_flow_schema: 'built the flow schema',
   automate_test: 'tested a flow', record_change_request: 'saved a change request', undo_last_change: 'undid a change',
   search_web: 'searched the web', read_page: 'read the page', browser_task: 'started the browser agent', find_files: 'found files',
-  list_folder: 'listed a folder', read_file: 'read a file', change_files: 'prepared file changes',
+  list_folder: 'listed a folder', read_file: 'read a file', change_files: 'prepared file changes', run_on_hp: 'command on the HP',
 };
 
 function chatNode(m) {
@@ -1087,7 +1087,8 @@ function chatNode(m) {
   }
   const steps = (m.steps || []).map((st) => `<span class="pill ${st.ok ? '' : 'bad'}" title="${esc(st.note || '')}">${esc(STEP_LABEL[st.name] || st.name)}</span>`).join(' ');
   const changes = (m.changes || []).map((c) => `<div class="change" data-change="${esc(c.id)}">✎ ${esc(c.summary)} <button class="link" data-act="undo">Undo</button></div>`).join('');
-  const pending = (m.pending || []).map((p) => (p.kind === 'file' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b>${p.change?.op === 'write' ? `<pre class="preview">${esc(String(p.change.text || '').slice(0, 1500))}</pre>` : ''}
+  const pending = (m.pending || []).map((p) => (p.kind === 'hp' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b><pre class="preview">$ ${esc(p.command)}</pre>
+      ${p.done ? `<pre class="preview ${p.ok ? '' : 'err'}">${esc(p.result || '')}</pre>` : '<button class="primary" data-act="runTest">Run on the HP</button>'}</div>` : p.kind === 'file' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b>${p.change?.op === 'write' ? `<pre class="preview">${esc(String(p.change.text || '').slice(0, 1500))}</pre>` : ''}
       ${p.done ? `<div class="small ${p.ok ? '' : 'err'}">${esc(p.result || '')}</div>` : `<button class="${p.change?.op === 'delete' ? 'danger' : 'primary'}" data-act="runTest">Do it</button>`}</div>` : `<div class="dreq" data-test="${esc(p.id)}"><b>Test ${esc(p.action)}</b> <span class="mono muted">${esc(Object.entries(p.params || {}).map(([k, v]) => `${k}=${v}`).join(', '))}</span>
       ${p.done ? `<pre class="preview">${esc(p.result || '')}</pre>` : '<div class="small muted">This flow changes records. Check the values, then:</div><button class="primary" data-act="runTest">Run test</button>'}</div>`)).join('');
   el.innerHTML = `<div class="bubble">${m.working && !m.text ? '<span class="muted">Working…</span>' : ''}${m.error ? `<div class="err">${esc(m.error)}</div>` : mdLite(m.text)}</div>
@@ -1216,7 +1217,7 @@ async function onChatClick(e) {
     const msgEl = b.closest('.msg');
     const box = b.closest('[data-test]');
     b.disabled = true;
-    toast(box.querySelector('b')?.textContent?.startsWith('Test ') ? 'Running the flow…' : 'Working…');
+    toast(box.querySelector('b')?.textContent?.startsWith('Test ') ? 'Running the flow…' : /^Run on the HP/.test(box.querySelector('b')?.textContent || '') ? 'Running on the HP…' : 'Working…');
     const res = await engine('chat.runTest', { messageId: Number(msgEl.dataset.id), testId: box.dataset.test });
     if (res?.error) toast(res.error, 6000);
     await loadChat();
