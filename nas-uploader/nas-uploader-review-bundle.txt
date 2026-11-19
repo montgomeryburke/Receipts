@@ -1,4 +1,4 @@
-Project Assistant: complete source for review (0d4efdb 2026-11-19 + uncommitted changes)
+Project Assistant: complete source for review (e6e45b7 2026-11-19 + uncommitted changes)
 Files: extension/ (Chrome extension, Manifest V3; third-party libraries in extension/vendor/ are left out),
 server/setup-webdav.sh (Proxmox container setup), server/assistant-ocr-index.py (OCR / mail / NAS-only text job
 on the NAS) and server/setup-drive-copy.sh (daily Google Drive copy with rclone).
@@ -10,7 +10,7 @@ Tests live in tests/ in the repository and are not included here.
   "manifest_version": 3,
   "name": "Project Assistant — NAS, email and meetings",
   "short_name": "Project Assistant",
-  "version": "2.3.2",
+  "version": "2.4.0",
   "description": "Mirror project folders to your NAS, draft Outlook replies from your project files, and get live prompts in Teams meetings.",
   "minimum_chrome_version": "116",
   "action": {
@@ -1785,9 +1785,9 @@ dialog::backdrop {
 }
 
 
-===== FILE: extension/app.js (1288 lines) =====
+===== FILE: extension/app.js (1289 lines) =====
 import { CONFIG, loadConfig, saveConfig, problemWith } from './lib/config-store.js';
-import { WebDAVClient } from './lib/webdav.js';
+import { createNasClient } from './lib/nasclient.js';
 import { captureDrop, scanEntries, scanFileList, scanDirectoryHandle, stripTopFolder, singleTopFolder } from './lib/scan.js';
 import { TransferManager } from './lib/transfer.js';
 import { MANIFEST_NAME, isProtectedName, listRemoteTree, readManifest, writeManifest, planMirror, buildManifest } from './lib/mirror.js';
@@ -1932,7 +1932,8 @@ function wireSetup() {
 
 async function connect(creds, { fromLogin = false } = {}) {
   setConn('connecting', `Connecting to ${serverLabel()}…`);
-  const client = new WebDAVClient({ serverUrl: CONFIG.serverUrl, ...creds });
+  // WebDAV or File Browser ("Mark NAS"): found out from the address itself.
+  const client = await createNasClient({ serverUrl: CONFIG.serverUrl, ...creds });
   const candidates = [...new Set([folderFromHash(), normalizePath(CONFIG.startFolder || '/'), '/'].filter(Boolean))];
   let entries = null;
   let folder = null;
@@ -2185,8 +2186,8 @@ async function deleteEntry(e) {
 
 async function downloadEntry(e) {
   try {
-    const headers = state.client.authHeader ? [{ name: 'Authorization', value: state.client.authHeader }] : [];
-    await chrome.downloads.download({ url: state.client.url(e.path), filename: sanitizeDownloadName(e.name), conflictAction: 'uniquify', saveAs: false, headers });
+    const { url, headers } = await state.client.downloadInfo(e.path);
+    await chrome.downloads.download({ url, filename: sanitizeDownloadName(e.name), conflictAction: 'uniquify', saveAs: false, headers });
   } catch (err) {
     await dialog({ title: "Couldn't start download", body: err?.message || String(err), okText: 'OK', noCancel: true });
   }
@@ -12586,6 +12587,203 @@ async function extractZipListing(file) {
 }
 
 
+===== FILE: extension/lib/filebrowser.js (194 lines) =====
+// A File Browser server (filebrowser.org, e.g. "Mark NAS") as the NAS: the same operations as the WebDAV client
+// (list, stat, mkdir, upload, remove, move, getText, getBlob, putText), over File Browser's own API.
+//   POST   api/login                         {username, password} → a session token (sent as X-Auth)
+//   GET    api/resources/<folder>/           folder listing (items: name, size, modified, isDir)
+//   POST   api/resources/<folder>/           make the folder (and its parents)
+//   POST   api/resources/<file>?override=true upload (parent folders made too)
+//   PATCH  api/resources/<from>?action=rename&destination=<to>&override=false   move; 409 if <to> exists
+//   DELETE api/resources/<path>              delete (folders with their contents)
+//   GET    api/raw/<file>                    download
+// The token lasts a couple of hours; a 401 signs in again once and repeats the request.
+
+import { normalizePath, encodePath, parentPath, baseName } from './util.js';
+import { WebDAVError, describeStatus, xhrSend } from './webdav.js';
+
+export class FileBrowserClient {
+  constructor({ serverUrl, username, password }) {
+    const url = new URL(serverUrl);
+    if (!url.pathname.endsWith('/')) url.pathname += '/';
+    url.search = '';
+    url.hash = '';
+    this.kind = 'filebrowser';
+    this.origin = url.origin;
+    this.basePath = url.pathname;
+    this.username = username || '';
+    this.password = password || '';
+    this.authHeader = null; // no Basic auth: a session token instead
+    this.token = null;
+    this.signingIn = null;
+  }
+
+  /** api/<kind>/<path> (folders end in "/"), with an optional query. */
+  api(kind, path, { dir = false, query = null } = {}) {
+    const p = normalizePath(path);
+    let u = `${this.origin}${this.basePath}api/${kind}${encodePath(p)}`;
+    if (dir && !u.endsWith('/')) u += '/';
+    if (query) u += `?${new URLSearchParams(query)}`;
+    return u;
+  }
+
+  /** The file's page in File Browser's own web interface. */
+  url(path) {
+    return `${this.origin}${this.basePath}files${encodePath(normalizePath(path))}`;
+  }
+
+  async signIn(force = false) {
+    if (this.token && !force) return this.token;
+    if (!this.signingIn) {
+      this.signingIn = (async () => {
+        let res;
+        try {
+          res = await fetch(`${this.origin}${this.basePath}api/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: this.username, password: this.password, recaptcha: '' }),
+            credentials: 'omit',
+            cache: 'no-store',
+          });
+        } catch {
+          throw new WebDAVError(describeStatus(0), { status: 0, retryable: true });
+        }
+        // File Browser answers 403 to a wrong username or password.
+        if (res.status === 403 || res.status === 401) throw new WebDAVError(describeStatus(401), { status: 401 });
+        if (!res.ok) throw new WebDAVError(describeStatus(res.status, 'POST'), { status: res.status, retryable: res.status >= 500 });
+        const token = (await res.text()).trim();
+        if (token.split('.').length !== 3) throw new WebDAVError('The NAS answered the sign-in with something unexpected (is this File Browser?)');
+        this.token = token;
+        return token;
+      })().finally(() => {
+        this.signingIn = null;
+      });
+    }
+    return this.signingIn;
+  }
+
+  /** A signed-in request; signs in again once if the token ran out. */
+  async send(method, url, opts = {}) {
+    const go = async () => xhrSend(method, url, { ...opts, headers: { ...(opts.headers || {}), 'X-Auth': await this.signIn() } });
+    try {
+      return await go();
+    } catch (err) {
+      if (err.status !== 401) throw err;
+      this.token = null;
+      await this.signIn(true);
+      return go();
+    }
+  }
+
+  async list(path, opts = {}) {
+    const res = await this.send('GET', this.api('resources', path, { dir: true }), { ...opts, timeout: 300000 });
+    let data;
+    try {
+      data = JSON.parse(res.text);
+    } catch {
+      throw new WebDAVError('The NAS sent a folder listing that could not be read (is this really File Browser?)');
+    }
+    if (!data.isDir) return [];
+    const folder = normalizePath(path);
+    return (data.items || []).map((it) => {
+      const p = normalizePath(`${folder}/${it.name}`);
+      const modified = it.modified ? new Date(it.modified) : null;
+      return { path: p, name: it.name, isDir: !!it.isDir, size: it.isDir ? null : Number(it.size) || 0, modified: modified && !Number.isNaN(modified.getTime()) ? modified : null };
+    });
+  }
+
+  /** Info about a path, or null when it doesn't exist (read from its folder's listing: never the file itself). */
+  async stat(path, opts = {}) {
+    const p = normalizePath(path);
+    if (p === '/') return { path: '/', name: '', isDir: true, size: null, modified: null };
+    try {
+      const entries = await this.list(parentPath(p), opts);
+      return entries.find((e) => e.name === baseName(p)) || null;
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /** Create a folder (and any missing parents). Resolves to 'created' or 'exists'. */
+  async mkdir(path, opts = {}) {
+    const p = normalizePath(path);
+    if (p === '/') return 'exists';
+    const info = await this.stat(p, opts);
+    if (info?.isDir) return 'exists';
+    if (info) throw new WebDAVError(`A file named "${baseName(p)}" already exists where a folder is needed`, { status: 409 });
+    await this.send('POST', this.api('resources', p, { dir: true }), opts);
+    return 'created';
+  }
+
+  /** Upload a File/Blob to path (overwrites; missing folders are made). */
+  upload(path, file, { onProgress, signal } = {}) {
+    return this.send('POST', this.api('resources', path, { query: { override: 'true' } }), {
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+      timeout: 0,
+      signal,
+      onUploadProgress: onProgress,
+    });
+  }
+
+  async remove(path, { ignoreMissing = false, ...opts } = {}) {
+    const p = normalizePath(path);
+    if (p === '/') throw new WebDAVError('Refusing to delete the root folder');
+    try {
+      await this.send('DELETE', this.api('resources', p), opts);
+    } catch (err) {
+      if (ignoreMissing && err.status === 404) return;
+      throw err;
+    }
+  }
+
+  /** Server-side rename/move. Never overwrites: fails if the destination exists. */
+  async move(from, to, { dir: _dir, ...opts } = {}) {
+    const src = normalizePath(from);
+    const dst = normalizePath(to);
+    if (src === '/' || dst === '/') throw new WebDAVError('Refusing to move the root folder');
+    try {
+      await this.send('PATCH', this.api('resources', src, { query: { action: 'rename', destination: dst, override: 'false', rename: 'false' } }), opts);
+    } catch (err) {
+      if (err.status === 409) throw new WebDAVError(`"${baseName(dst)}" already exists on the NAS`, { status: 412 });
+      throw err;
+    }
+  }
+
+  async getText(path, opts = {}) {
+    try {
+      const res = await this.send('GET', this.api('raw', path), { headers: { 'Cache-Control': 'no-cache' }, ...opts });
+      return res.text;
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async getBlob(path, opts = {}) {
+    try {
+      const res = await this.send('GET', this.api('raw', path), { headers: { 'Cache-Control': 'no-cache' }, responseType: 'blob', timeout: 600000, ...opts });
+      const lm = Date.parse(res.lastModified || '') || Date.now();
+      return new File([res.response], baseName(normalizePath(path)), { lastModified: lm, type: res.response?.type || '' });
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  putText(path, text, { contentType = 'application/json; charset=utf-8', ...opts } = {}) {
+    return this.send('POST', this.api('resources', path, { query: { override: 'true' } }), { headers: { 'Content-Type': contentType }, body: text, ...opts });
+  }
+
+  /** Where Chrome's download manager can fetch a file from, with the session token it needs. */
+  async downloadInfo(path) {
+    const token = await this.signIn();
+    return { url: this.api('raw', path), headers: [{ name: 'X-Auth', value: token }] };
+  }
+}
+
+
 ===== FILE: extension/lib/files.js (152 lines) =====
 // File tools for the chat, like Desktop Commander's but inside Chrome: list, read and find files in the project
 // folders on this computer (read-only: Chrome gave the extension read access) and on the NAS (read and write over
@@ -12915,7 +13113,7 @@ export function stamp(d = new Date()) {
 }
 
 
-===== FILE: extension/lib/hp.js (57 lines) =====
+===== FILE: extension/lib/hp.js (59 lines) =====
 // Commands on the HP: the NAS container runs them for the extension (setup-webdav.sh --enable-commands), as its
 // limited "nas-runner" user, behind the NAS login and a separate command key (Settings → Run on the HP).
 // Nothing runs on this computer: Chrome doesn't allow that.
@@ -12965,6 +13163,8 @@ export async function runOnHp(cmd, { cwd = '', timeout = 60, signal } = {}) {
   if (res.status === 404) throw new Error('Commands are not switched on on the HP: run the NAS setup script with --enable-commands.');
   if (res.status === 409) throw new Error('Another command is still running on the HP.');
   if (!res.ok || data.error) throw new Error(data.error || `The HP answered ${res.status}`);
+  // Something other than the command endpoint answered (e.g. File Browser's page): commands aren't set up there.
+  if (!('exit' in data)) throw new Error('Commands are not switched on at this NAS address (it has no command endpoint).');
   return data;
 }
 
@@ -15540,7 +15740,7 @@ export function fillModelSelect(select, choices, current) {
 // password that isn't remembered is typed once per browser session.
 
 import { CONFIG, problemWith, loadConfig } from './config-store.js';
-import { WebDAVClient } from './webdav.js';
+import { createNasClient } from './nasclient.js';
 import { normalizePath, parentPath } from './util.js';
 
 /** Why the NAS connection can't be used yet, or null (call loadConfig() first). */
@@ -15577,7 +15777,7 @@ export async function nasClient() {
   if (problem) throw new Error(`The NAS isn't set up yet (open NAS files to enter its address): ${problem}`);
   const creds = await nasCreds();
   if (!creds) throw new Error('Not signed in to the NAS — open "NAS files" once and sign in.');
-  return new WebDAVClient({ serverUrl: CONFIG.serverUrl, ...creds });
+  return createNasClient({ serverUrl: CONFIG.serverUrl, ...creds });
 }
 
 /** Creates a folder and any missing parents. */
@@ -15605,6 +15805,62 @@ export function safeFileName(name, fallback = 'untitled') {
     .replace(/^\.+/, '')
     .slice(0, 120);
   return cleaned || fallback;
+}
+
+
+===== FILE: extension/lib/nasclient.js (53 lines) =====
+// The NAS client for an address: WebDAV (Apache, Synology, QNAP, Nextcloud…) or File Browser (filebrowser.org,
+// e.g. "Mark NAS"). Which one is found out once from the address's own start page and remembered.
+
+import { WebDAVClient } from './webdav.js';
+import { FileBrowserClient } from './filebrowser.js';
+
+const KEY = (serverUrl) => `nasKind:${serverUrl}`;
+const known = new Map(); // also in memory: the background engine has no chrome.storage
+
+/** 'filebrowser' when the address is a File Browser, else 'webdav'. Remembered per address. */
+export async function serverKind(serverUrl, { fresh = false } = {}) {
+  const key = KEY(serverUrl);
+  if (!fresh && known.has(serverUrl)) return known.get(serverUrl);
+  if (!fresh) {
+    try {
+      const saved = (await chrome.storage.local.get(key))[key];
+      if (saved) {
+        known.set(serverUrl, saved);
+        return saved;
+      }
+    } catch {
+      /* no storage (tests) */
+    }
+  }
+  let kind = 'webdav';
+  let sure = false;
+  try {
+    const res = await fetch(serverUrl, { credentials: 'omit', cache: 'no-store', redirect: 'follow' });
+    sure = true;
+    if (res.ok && /text\/html/i.test(res.headers.get('content-type') || '')) {
+      const html = (await res.text()).slice(0, 20000);
+      // File Browser's page carries its settings in "window.FileBrowser = {…}".
+      if (/window\.FileBrowser\s*=/.test(html)) kind = 'filebrowser';
+    }
+  } catch {
+    sure = false; // unreachable now: don't remember a guess
+  }
+  if (sure) {
+    known.set(serverUrl, kind);
+    try {
+      await chrome.storage.local.set({ [key]: kind });
+    } catch {
+      /* no storage */
+    }
+  }
+  return kind;
+}
+
+/** A client for the NAS at serverUrl with these credentials. */
+export async function createNasClient({ serverUrl, username, password }) {
+  const kind = await serverKind(serverUrl);
+  return kind === 'filebrowser' ? new FileBrowserClient({ serverUrl, username, password }) : new WebDAVClient({ serverUrl, username, password });
 }
 
 
@@ -18540,7 +18796,7 @@ export function attachDictation(button, input, { getSettings, onError = () => {}
 }
 
 
-===== FILE: extension/lib/webdav.js (321 lines) =====
+===== FILE: extension/lib/webdav.js (336 lines) =====
 // Minimal WebDAV client built on XMLHttpRequest (XHR gives us upload progress, fetch does not).
 // Works with Synology, QNAP, TrueNAS, Nextcloud, Apache mod_dav and any other RFC 4918 server.
 
@@ -18558,7 +18814,7 @@ export class WebDAVError extends Error {
   }
 }
 
-function describeStatus(status, method) {
+export function describeStatus(status, method) {
   switch (status) {
     case 0:
       return 'Could not reach the NAS (network error, wrong address, or HTTPS certificate problem)';
@@ -18585,6 +18841,81 @@ function describeStatus(status, method) {
     default:
       return `The NAS answered HTTP ${status}`;
   }
+}
+
+/**
+ * One HTTP request over XMLHttpRequest (upload progress, stall detection, cancel). Resolves with
+ * {status, text, response, headers, lastModified} for 2xx (or okStatuses), throws WebDAVError otherwise.
+ * basic: {username, password, header} for Basic auth; headers may carry other auth (e.g. X-Auth).
+ */
+export function xhrSend(method, url, { headers = {}, body = null, timeout = 120000, signal, onUploadProgress, okStatuses, responseType = '', basic = null } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new WebDAVError('Cancelled', { aborted: true }));
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    // Passing the credentials here as well as in the header stops Chrome from showing (and waiting on)
+    // its own login pop-up when the NAS answers 401; the request then simply fails with status 401.
+    if (basic) xhr.open(method, url, true, basic.username, basic.password);
+    else xhr.open(method, url, true);
+    xhr.timeout = timeout;
+    if (responseType) xhr.responseType = responseType;
+    if (basic) xhr.setRequestHeader('Authorization', basic.header);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+
+    let stallTimer = null;
+    let lastProgress = Date.now();
+    const STALL_MS = 120000;
+    const cleanup = () => {
+      if (stallTimer) clearInterval(stallTimer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => xhr.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    if (onUploadProgress && xhr.upload) {
+      let sentAll = false;
+      xhr.upload.onprogress = (e) => {
+        lastProgress = Date.now();
+        if (e.lengthComputable && e.loaded >= e.total) sentAll = true;
+        onUploadProgress(e.loaded, e.total);
+      };
+      // Abort uploads that stop moving for two minutes so the retry logic can take over.
+      stallTimer = setInterval(() => {
+        if (!sentAll && Date.now() - lastProgress > STALL_MS) {
+          xhr.stalled = true;
+          xhr.abort();
+        }
+      }, 5000);
+    }
+
+    xhr.onload = () => {
+      cleanup();
+      const status = xhr.status;
+      const ok = okStatuses ? okStatuses.includes(status) : status >= 200 && status < 300;
+      if (ok) {
+        const text = responseType && responseType !== 'text' ? '' : xhr.responseText;
+        resolve({ status, text, response: xhr.response, headers: xhr.getAllResponseHeaders(), lastModified: xhr.getResponseHeader('Last-Modified') });
+      } else {
+        reject(new WebDAVError(describeStatus(status, method), { status, retryable: RETRYABLE_STATUS.has(status) }));
+      }
+    };
+    xhr.onerror = () => {
+      cleanup();
+      reject(new WebDAVError(describeStatus(0, method), { status: 0, retryable: true }));
+    };
+    xhr.ontimeout = () => {
+      cleanup();
+      reject(new WebDAVError('The NAS took too long to answer', { status: 0, retryable: true }));
+    };
+    xhr.onabort = () => {
+      cleanup();
+      if (xhr.stalled) reject(new WebDAVError('Upload stalled (no progress for 2 minutes)', { status: 0, retryable: true }));
+      else reject(new WebDAVError('Cancelled', { aborted: true }));
+    };
+    xhr.send(body);
+  });
 }
 
 export class WebDAVClient {
@@ -18615,74 +18946,14 @@ export class WebDAVClient {
   /**
    * Low-level request. Resolves with {status, text, headers} for 2xx, throws WebDAVError otherwise.
    */
-  request(method, path, { headers = {}, body = null, dir = false, timeout = 120000, signal, onUploadProgress, okStatuses, responseType = '' } = {}) {
-    return new Promise((resolve, reject) => {
-      if (signal?.aborted) {
-        reject(new WebDAVError('Cancelled', { aborted: true }));
-        return;
-      }
-      const xhr = new XMLHttpRequest();
-      // Passing the credentials here as well as in the header stops Chrome from showing (and waiting on)
-      // its own login pop-up when the NAS answers 401; the request then simply fails with status 401.
-      if (this.authHeader) xhr.open(method, this.url(path, { dir }), true, this.username, this.password);
-      else xhr.open(method, this.url(path, { dir }), true);
-      xhr.timeout = timeout;
-      if (responseType) xhr.responseType = responseType;
-      if (this.authHeader) xhr.setRequestHeader('Authorization', this.authHeader);
-      for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+  request(method, path, { dir = false, ...opts } = {}) {
+    const basic = this.authHeader ? { username: this.username, password: this.password, header: this.authHeader } : null;
+    return xhrSend(method, this.url(path, { dir }), { ...opts, basic });
+  }
 
-      let stallTimer = null;
-      let lastProgress = Date.now();
-      const STALL_MS = 120000;
-      const cleanup = () => {
-        if (stallTimer) clearInterval(stallTimer);
-        signal?.removeEventListener('abort', onAbort);
-      };
-      const onAbort = () => xhr.abort();
-      signal?.addEventListener('abort', onAbort, { once: true });
-
-      if (onUploadProgress && xhr.upload) {
-        let sentAll = false;
-        xhr.upload.onprogress = (e) => {
-          lastProgress = Date.now();
-          if (e.lengthComputable && e.loaded >= e.total) sentAll = true;
-          onUploadProgress(e.loaded, e.total);
-        };
-        // Abort uploads that stop moving for two minutes so the retry logic can take over.
-        stallTimer = setInterval(() => {
-          if (!sentAll && Date.now() - lastProgress > STALL_MS) {
-            xhr.stalled = true;
-            xhr.abort();
-          }
-        }, 5000);
-      }
-
-      xhr.onload = () => {
-        cleanup();
-        const status = xhr.status;
-        const ok = okStatuses ? okStatuses.includes(status) : status >= 200 && status < 300;
-        if (ok) {
-          const text = responseType && responseType !== 'text' ? '' : xhr.responseText;
-          resolve({ status, text, response: xhr.response, headers: xhr.getAllResponseHeaders(), lastModified: xhr.getResponseHeader('Last-Modified') });
-        } else {
-          reject(new WebDAVError(describeStatus(status, method), { status, retryable: RETRYABLE_STATUS.has(status) }));
-        }
-      };
-      xhr.onerror = () => {
-        cleanup();
-        reject(new WebDAVError(describeStatus(0, method), { status: 0, retryable: true }));
-      };
-      xhr.ontimeout = () => {
-        cleanup();
-        reject(new WebDAVError('The NAS took too long to answer', { status: 0, retryable: true }));
-      };
-      xhr.onabort = () => {
-        cleanup();
-        if (xhr.stalled) reject(new WebDAVError('Upload stalled (no progress for 2 minutes)', { status: 0, retryable: true }));
-        else reject(new WebDAVError('Cancelled', { aborted: true }));
-      };
-      xhr.send(body);
-    });
+  /** Where Chrome's download manager can fetch a file from, with the login it needs. */
+  async downloadInfo(path) {
+    return { url: this.url(path), headers: this.authHeader ? [{ name: 'Authorization', value: this.authHeader }] : [] };
   }
 
   /** Convert an href from a PROPFIND response into a normalised NAS path, or null if it is outside our root. */

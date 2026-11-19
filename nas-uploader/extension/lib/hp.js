@@ -47,6 +47,8 @@ export async function runOnHp(cmd, { cwd = '', timeout = 60, signal } = {}) {
   if (res.status === 404) throw new Error('Commands are not switched on on the HP: run the NAS setup script with --enable-commands.');
   if (res.status === 409) throw new Error('Another command is still running on the HP.');
   if (!res.ok || data.error) throw new Error(data.error || `The HP answered ${res.status}`);
+  // Something other than the command endpoint answered (e.g. File Browser's page): commands aren't set up there.
+  if (!('exit' in data)) throw new Error('Commands are not switched on at this NAS address (it has no command endpoint).');
   return data;
 }
 

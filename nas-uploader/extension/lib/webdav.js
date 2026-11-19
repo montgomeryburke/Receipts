@@ -15,7 +15,7 @@ export class WebDAVError extends Error {
   }
 }
 
-function describeStatus(status, method) {
+export function describeStatus(status, method) {
   switch (status) {
     case 0:
       return 'Could not reach the NAS (network error, wrong address, or HTTPS certificate problem)';
@@ -42,6 +42,81 @@ function describeStatus(status, method) {
     default:
       return `The NAS answered HTTP ${status}`;
   }
+}
+
+/**
+ * One HTTP request over XMLHttpRequest (upload progress, stall detection, cancel). Resolves with
+ * {status, text, response, headers, lastModified} for 2xx (or okStatuses), throws WebDAVError otherwise.
+ * basic: {username, password, header} for Basic auth; headers may carry other auth (e.g. X-Auth).
+ */
+export function xhrSend(method, url, { headers = {}, body = null, timeout = 120000, signal, onUploadProgress, okStatuses, responseType = '', basic = null } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new WebDAVError('Cancelled', { aborted: true }));
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    // Passing the credentials here as well as in the header stops Chrome from showing (and waiting on)
+    // its own login pop-up when the NAS answers 401; the request then simply fails with status 401.
+    if (basic) xhr.open(method, url, true, basic.username, basic.password);
+    else xhr.open(method, url, true);
+    xhr.timeout = timeout;
+    if (responseType) xhr.responseType = responseType;
+    if (basic) xhr.setRequestHeader('Authorization', basic.header);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+
+    let stallTimer = null;
+    let lastProgress = Date.now();
+    const STALL_MS = 120000;
+    const cleanup = () => {
+      if (stallTimer) clearInterval(stallTimer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => xhr.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    if (onUploadProgress && xhr.upload) {
+      let sentAll = false;
+      xhr.upload.onprogress = (e) => {
+        lastProgress = Date.now();
+        if (e.lengthComputable && e.loaded >= e.total) sentAll = true;
+        onUploadProgress(e.loaded, e.total);
+      };
+      // Abort uploads that stop moving for two minutes so the retry logic can take over.
+      stallTimer = setInterval(() => {
+        if (!sentAll && Date.now() - lastProgress > STALL_MS) {
+          xhr.stalled = true;
+          xhr.abort();
+        }
+      }, 5000);
+    }
+
+    xhr.onload = () => {
+      cleanup();
+      const status = xhr.status;
+      const ok = okStatuses ? okStatuses.includes(status) : status >= 200 && status < 300;
+      if (ok) {
+        const text = responseType && responseType !== 'text' ? '' : xhr.responseText;
+        resolve({ status, text, response: xhr.response, headers: xhr.getAllResponseHeaders(), lastModified: xhr.getResponseHeader('Last-Modified') });
+      } else {
+        reject(new WebDAVError(describeStatus(status, method), { status, retryable: RETRYABLE_STATUS.has(status) }));
+      }
+    };
+    xhr.onerror = () => {
+      cleanup();
+      reject(new WebDAVError(describeStatus(0, method), { status: 0, retryable: true }));
+    };
+    xhr.ontimeout = () => {
+      cleanup();
+      reject(new WebDAVError('The NAS took too long to answer', { status: 0, retryable: true }));
+    };
+    xhr.onabort = () => {
+      cleanup();
+      if (xhr.stalled) reject(new WebDAVError('Upload stalled (no progress for 2 minutes)', { status: 0, retryable: true }));
+      else reject(new WebDAVError('Cancelled', { aborted: true }));
+    };
+    xhr.send(body);
+  });
 }
 
 export class WebDAVClient {
@@ -72,74 +147,14 @@ export class WebDAVClient {
   /**
    * Low-level request. Resolves with {status, text, headers} for 2xx, throws WebDAVError otherwise.
    */
-  request(method, path, { headers = {}, body = null, dir = false, timeout = 120000, signal, onUploadProgress, okStatuses, responseType = '' } = {}) {
-    return new Promise((resolve, reject) => {
-      if (signal?.aborted) {
-        reject(new WebDAVError('Cancelled', { aborted: true }));
-        return;
-      }
-      const xhr = new XMLHttpRequest();
-      // Passing the credentials here as well as in the header stops Chrome from showing (and waiting on)
-      // its own login pop-up when the NAS answers 401; the request then simply fails with status 401.
-      if (this.authHeader) xhr.open(method, this.url(path, { dir }), true, this.username, this.password);
-      else xhr.open(method, this.url(path, { dir }), true);
-      xhr.timeout = timeout;
-      if (responseType) xhr.responseType = responseType;
-      if (this.authHeader) xhr.setRequestHeader('Authorization', this.authHeader);
-      for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+  request(method, path, { dir = false, ...opts } = {}) {
+    const basic = this.authHeader ? { username: this.username, password: this.password, header: this.authHeader } : null;
+    return xhrSend(method, this.url(path, { dir }), { ...opts, basic });
+  }
 
-      let stallTimer = null;
-      let lastProgress = Date.now();
-      const STALL_MS = 120000;
-      const cleanup = () => {
-        if (stallTimer) clearInterval(stallTimer);
-        signal?.removeEventListener('abort', onAbort);
-      };
-      const onAbort = () => xhr.abort();
-      signal?.addEventListener('abort', onAbort, { once: true });
-
-      if (onUploadProgress && xhr.upload) {
-        let sentAll = false;
-        xhr.upload.onprogress = (e) => {
-          lastProgress = Date.now();
-          if (e.lengthComputable && e.loaded >= e.total) sentAll = true;
-          onUploadProgress(e.loaded, e.total);
-        };
-        // Abort uploads that stop moving for two minutes so the retry logic can take over.
-        stallTimer = setInterval(() => {
-          if (!sentAll && Date.now() - lastProgress > STALL_MS) {
-            xhr.stalled = true;
-            xhr.abort();
-          }
-        }, 5000);
-      }
-
-      xhr.onload = () => {
-        cleanup();
-        const status = xhr.status;
-        const ok = okStatuses ? okStatuses.includes(status) : status >= 200 && status < 300;
-        if (ok) {
-          const text = responseType && responseType !== 'text' ? '' : xhr.responseText;
-          resolve({ status, text, response: xhr.response, headers: xhr.getAllResponseHeaders(), lastModified: xhr.getResponseHeader('Last-Modified') });
-        } else {
-          reject(new WebDAVError(describeStatus(status, method), { status, retryable: RETRYABLE_STATUS.has(status) }));
-        }
-      };
-      xhr.onerror = () => {
-        cleanup();
-        reject(new WebDAVError(describeStatus(0, method), { status: 0, retryable: true }));
-      };
-      xhr.ontimeout = () => {
-        cleanup();
-        reject(new WebDAVError('The NAS took too long to answer', { status: 0, retryable: true }));
-      };
-      xhr.onabort = () => {
-        cleanup();
-        if (xhr.stalled) reject(new WebDAVError('Upload stalled (no progress for 2 minutes)', { status: 0, retryable: true }));
-        else reject(new WebDAVError('Cancelled', { aborted: true }));
-      };
-      xhr.send(body);
-    });
+  /** Where Chrome's download manager can fetch a file from, with the login it needs. */
+  async downloadInfo(path) {
+    return { url: this.url(path), headers: this.authHeader ? [{ name: 'Authorization', value: this.authHeader }] : [] };
   }
 
   /** Convert an href from a PROPFIND response into a normalised NAS path, or null if it is outside our root. */

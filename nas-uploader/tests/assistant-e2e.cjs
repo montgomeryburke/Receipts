@@ -2617,6 +2617,60 @@ test('run on the HP: the chat proposes a command, it runs after "Run on the HP" 
   eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
 });
 
+test('File Browser NAS ("Mark NAS") for the assistant: detected, minutes/reports written, files read back, moves refuse to overwrite, deletes', async () => {
+  const { startFileBrowser } = require('./filebrowser-mock.cjs');
+  const root = path.join(WORK, 'fb-assistant');
+  fs.rmSync(root, { recursive: true, force: true });
+  const fb = await startFileBrowser({ root, username: USER, password: PASSWORD });
+  try {
+    const b = await launch();
+    const page = await b.open('sidepanel.html');
+    const r = await page.evaluate(async ({ url, user, pass }) => {
+      const { createNasClient } = await import('./lib/nasclient.js');
+      const { ensureDir, writeTextFile } = await import('./lib/nas.js');
+      const c = await createNasClient({ serverUrl: url, username: user, password: pass });
+      const out = { kind: c.kind };
+      await ensureDir(c, '/Meetings/Alert Bridge');
+      await writeTextFile(c, '/Meetings/Alert Bridge/2026-11-19 Site meeting — Minutes.md', '# Minutes\nPour on Nov 18.');
+      await c.upload('/Reports/Invoices 2026-10.csv', new Blob(['"Party","Amount"\r\n"Acme","$12,450.00"']));
+      out.text = await c.getText('/Meetings/Alert Bridge/2026-11-19 Site meeting — Minutes.md');
+      out.blob = await (await c.getBlob('/Reports/Invoices 2026-10.csv')).text();
+      out.list = (await c.list('/Meetings/Alert Bridge')).map((e) => [e.name, e.isDir, e.size]);
+      out.statDir = (await c.stat('/Reports'))?.isDir;
+      out.missing = await c.stat('/nope/none.txt');
+      out.mkdirAgain = await c.mkdir('/Reports');
+      await c.upload('/Reports/a.txt', new Blob(['a']));
+      await c.upload('/Reports/b.txt', new Blob(['b']));
+      try {
+        await c.move('/Reports/a.txt', '/Reports/b.txt');
+        out.overwrote = true;
+      } catch (err) {
+        out.moveErr = [err.status, err.message];
+      }
+      await c.move('/Reports/a.txt', '/Reports/Old/a.txt');
+      await c.remove('/Reports/b.txt');
+      await c.remove('/Reports/gone.txt', { ignoreMissing: true });
+      out.after = (await c.list('/Reports')).map((e) => e.name).sort();
+      out.dl = await c.downloadInfo('/Reports/Invoices 2026-10.csv');
+      return out;
+    }, { url: fb.url, user: USER, pass: PASSWORD });
+    eq(r.kind, 'filebrowser', 'detected as File Browser');
+    eq(r.text, '# Minutes\nPour on Nov 18.', 'minutes written and read back');
+    assert(/Acme/.test(r.blob), 'report read back');
+    eq(JSON.stringify(r.list), JSON.stringify([['2026-11-19 Site meeting — Minutes.md', false, 25]]), 'listing with sizes');
+    eq(r.statDir, true, 'folder stat');
+    eq(r.missing, null, 'missing path is null');
+    eq(r.mkdirAgain, 'exists', 'existing folder');
+    assert(!r.overwrote && r.moveErr[0] === 412 && /already exists/.test(r.moveErr[1]), 'a move never overwrites: ' + JSON.stringify(r.moveErr));
+    eq(r.after.join(','), 'Invoices 2026-10.csv,Old', 'moved into a new folder, deleted, missing delete ignored');
+    assert(/\/api\/raw\/Reports\/Invoices%202026-10\.csv$/.test(r.dl.url) && r.dl.headers[0].name === 'X-Auth', 'downloads carry the session token');
+    eq(fs.readFileSync(path.join(root, 'Reports', 'Old', 'a.txt'), 'utf8'), 'a', 'on disk');
+    eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+  } finally {
+    await fb.close();
+  }
+});
+
 test('email chain parsing: Outlook (EN/FR), "Original Message" and "On … wrote:" quotes become separate earlier messages', async () => {
   const b = await launch();
   const page = await b.open('sidepanel.html');

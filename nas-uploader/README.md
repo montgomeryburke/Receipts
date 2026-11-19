@@ -153,6 +153,15 @@ The extension works with any WebDAV server reachable over HTTPS:
 
 ## 2. Put your details into the extension
 
+**Already have File Browser on the NAS** (filebrowser.org — e.g. "Mark NAS")? The extension works with it as it is,
+no setup script needed: it recognises File Browser from its address and signs in with File Browser's own username
+and password. Make it reachable from work with Tailscale Funnel (in the NAS container:
+`tailscale funnel --bg --https=443 http://127.0.0.1:<File Browser's port>`), then enter that `https://…ts.net/` address
+with your File Browser login in the Connect form. Uploads, mirrors (renames as server-side moves), downloads,
+meeting transcripts and reports all go through File Browser. Not with File Browser: the HP's OCR job and commands
+on the HP (those come with the setup script's WebDAV server). Use a strong File Browser password: with Funnel its
+sign-in page is on the internet.
+
 Download **`nas-uploader-extension.zip`** from this folder on GitHub (open the file, then **Download raw file**)
 and unzip it. You get a folder called `nas-uploader`. Then either:
 
@@ -572,7 +581,8 @@ control (page, browser agent, files, commands on the HP through the real endpoin
 above. It uses mock Claude and
 Gemini servers, so no keys are needed: `node tests/assistant-e2e.cjs` with the WebDAV test servers running.
 
-`tests/test-hp-bootstrap.sh` dry-runs the one-line HP setup against a stand-in for Proxmox's `pct`;
+`tests/filebrowser-mock.cjs` is a stand-in for File Browser v2.63's API (written from its source) that both suites use
+to test the extension against a File Browser NAS. `tests/test-hp-bootstrap.sh` dry-runs the one-line HP setup against a stand-in for Proxmox's `pct`;
 `tests/test-ocr-index.py` checks the HP's OCR/full-text job on a throwaway folder (symbolic links, Word headers,
 Excel inline text, zip bombs); `tests/test-setup-script.sh` runs the setup script for real in a throwaway container
 (`CI_OK_TO_MODIFY_SYSTEM=1`), including commands on the HP.

@@ -3,7 +3,7 @@
 // password that isn't remembered is typed once per browser session.
 
 import { CONFIG, problemWith, loadConfig } from './config-store.js';
-import { WebDAVClient } from './webdav.js';
+import { createNasClient } from './nasclient.js';
 import { normalizePath, parentPath } from './util.js';
 
 /** Why the NAS connection can't be used yet, or null (call loadConfig() first). */
@@ -40,7 +40,7 @@ export async function nasClient() {
   if (problem) throw new Error(`The NAS isn't set up yet (open NAS files to enter its address): ${problem}`);
   const creds = await nasCreds();
   if (!creds) throw new Error('Not signed in to the NAS — open "NAS files" once and sign in.');
-  return new WebDAVClient({ serverUrl: CONFIG.serverUrl, ...creds });
+  return createNasClient({ serverUrl: CONFIG.serverUrl, ...creds });
 }
 
 /** Creates a folder and any missing parents. */

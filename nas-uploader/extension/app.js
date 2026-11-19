@@ -1,5 +1,5 @@
 import { CONFIG, loadConfig, saveConfig, problemWith } from './lib/config-store.js';
-import { WebDAVClient } from './lib/webdav.js';
+import { createNasClient } from './lib/nasclient.js';
 import { captureDrop, scanEntries, scanFileList, scanDirectoryHandle, stripTopFolder, singleTopFolder } from './lib/scan.js';
 import { TransferManager } from './lib/transfer.js';
 import { MANIFEST_NAME, isProtectedName, listRemoteTree, readManifest, writeManifest, planMirror, buildManifest } from './lib/mirror.js';
@@ -144,7 +144,8 @@ function wireSetup() {
 
 async function connect(creds, { fromLogin = false } = {}) {
   setConn('connecting', `Connecting to ${serverLabel()}…`);
-  const client = new WebDAVClient({ serverUrl: CONFIG.serverUrl, ...creds });
+  // WebDAV or File Browser ("Mark NAS"): found out from the address itself.
+  const client = await createNasClient({ serverUrl: CONFIG.serverUrl, ...creds });
   const candidates = [...new Set([folderFromHash(), normalizePath(CONFIG.startFolder || '/'), '/'].filter(Boolean))];
   let entries = null;
   let folder = null;
@@ -397,8 +398,8 @@ async function deleteEntry(e) {
 
 async function downloadEntry(e) {
   try {
-    const headers = state.client.authHeader ? [{ name: 'Authorization', value: state.client.authHeader }] : [];
-    await chrome.downloads.download({ url: state.client.url(e.path), filename: sanitizeDownloadName(e.name), conflictAction: 'uniquify', saveAs: false, headers });
+    const { url, headers } = await state.client.downloadInfo(e.path);
+    await chrome.downloads.download({ url, filename: sanitizeDownloadName(e.name), conflictAction: 'uniquify', saveAs: false, headers });
   } catch (err) {
     await dialog({ title: "Couldn't start download", body: err?.message || String(err), okText: 'OK', noCancel: true });
   }

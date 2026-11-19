@@ -791,6 +791,85 @@ test('second WebDAV implementation (WsgiDAV): upload + resume', async () => {
   eq(errors.length, 0, 'page errors: ' + errors.join('; '));
 });
 
+test('File Browser server ("Mark NAS"): found automatically, its own sign-in; upload + resume; mirror with edits, renames as server-side moves, deletions; download; sign-in renewed when the token runs out', async () => {
+  const { startFileBrowser } = require('./filebrowser-mock.cjs');
+  const fbRoot = path.join(WORK, 'filebrowser-root');
+  fs.rmSync(fbRoot, { recursive: true, force: true });
+  const fb = await startFileBrowser({ root: fbRoot, username: USER, password: PASSWORD });
+  try {
+    const { page, errors } = await launch({ serverUrl: fb.url, username: USER, password: PASSWORD, startFolder: '/', parallelUploads: 3 });
+    await waitConnected(page);
+    assert(fb.requests.some((r) => r.path === '/api/login'), 'signed in with File Browser\'s own login');
+    assert(!fb.requests.some((r) => r.method === 'PROPFIND'), 'no WebDAV requests');
+    // Upload a tree, then drop it again: everything skipped.
+    await drop(page, [small]);
+    await confirmUpload(page);
+    let st = await waitFinished(page);
+    eq(st.failedFiles, 0, 'failed ' + JSON.stringify(await failedList(page)));
+    await assertSameTree(small, path.join(fbRoot, 'Small Set'));
+    await drop(page, [small]);
+    await confirmUpload(page);
+    st = await waitFinished(page);
+    eq(st.uploadedFiles, 0, 'nothing re-uploaded');
+    eq(st.skippedFiles, walk(small).files.size, 'all skipped');
+    // Mirror: first sync, then edits, a rename (a server-side move), a deletion.
+    const src = path.join(WORK, 'fb-mirror', 'Jobs');
+    fs.rmSync(path.dirname(src), { recursive: true, force: true });
+    const t0 = new Date(Date.now() - 3600000);
+    writeFileAt(path.join(src, 'Drawings', 'D-101.pdf'), crypto.randomBytes(300 * 1024), t0);
+    writeFileAt(path.join(src, 'Drawings', 'D-102.pdf'), crypto.randomBytes(200 * 1024), t0);
+    writeFileAt(path.join(src, 'notes.txt'), 'v1', t0);
+    writeFileAt(path.join(src, 'old.txt'), 'old', t0);
+    let d = await dropAndMirror(page, src);
+    eq(d.title, 'Mirror: review the changes', 'first mirror reviewed');
+    await page.click('#dialog-ok');
+    st = await waitFinished(page);
+    eq(st.failedFiles + st.opsFailed, 0, 'first mirror without failures ' + JSON.stringify(await failedList(page)));
+    await assertSameTree(src, path.join(fbRoot, 'Jobs'), { ignoreRemote: (rel) => rel === MANIFEST });
+    fs.writeFileSync(path.join(src, 'notes.txt'), 'version 2, longer');
+    fs.renameSync(path.join(src, 'Drawings', 'D-101.pdf'), path.join(src, 'Drawings', '2024-017 D-101.pdf'));
+    fs.rmSync(path.join(src, 'old.txt'));
+    const before = fb.requests.length;
+    d = await dropAndMirror(page, src);
+    assert(/renamed or moved/.test(d.text) && /old\.txt/.test(d.text), 'review lists the rename and the deletion: ' + d.text);
+    await page.click('#dialog-ok');
+    st = await waitFinished(page);
+    eq(st.failedFiles + st.opsFailed, 0, 'second mirror without failures ' + JSON.stringify(await failedList(page)));
+    eq(st.movesDone, 1, 'the rename was a server-side move');
+    eq(st.movesFellBack, 0, 'no move fell back to uploading');
+    const later = fb.requests.slice(before);
+    assert(!later.some((r) => r.method === 'POST' && /D-101\.pdf$/.test(r.path)), 'the renamed drawing was not uploaded again');
+    await assertSameTree(src, path.join(fbRoot, 'Jobs'), { ignoreRemote: (rel) => rel === MANIFEST });
+    d = await dropAndMirror(page, src);
+    eq(d.title, 'Already in sync', 'in sync afterwards');
+    await page.click('#dialog-ok');
+    // The token runs out: the next action signs in again by itself.
+    fb.expireTokens();
+    const logins = fb.requests.filter((r) => r.path === '/api/login').length;
+    await goTo(page, '/Jobs');
+    await page.waitForSelector('#listing-body tr[data-name="notes.txt"]');
+    assert(fb.requests.filter((r) => r.path === '/api/login').length > logins, 'signed in again');
+    // Download through Chrome's download manager with the session token.
+    await page.click('#listing-body tr[data-name="notes.txt"] button.dl');
+    let dl = null;
+    for (let i = 0; i < 80 && !dl; i++) {
+      dl = await page.evaluate(async () => {
+        const [x] = await chrome.downloads.search({ orderBy: ['-startTime'], limit: 1 });
+        return x && x.state === 'complete' ? x : x && x.state === 'interrupted' ? { error: x.error } : null;
+      });
+      if (!dl) await page.waitForTimeout(250);
+    }
+    assert(dl && !dl.error, 'downloaded: ' + JSON.stringify(dl));
+    eq(fs.readFileSync(dl.filename, 'utf8'), 'version 2, longer', 'downloaded content');
+    // A wrong password is explained, not a browser pop-up.
+    const bad = await launch({ serverUrl: fb.url, username: USER, password: 'wrong', startFolder: '/' });
+    await bad.page.waitForFunction(() => /username or password|401/i.test(document.body.innerText), null, { timeout: 15000 });
+    eq(errors.length, 0, 'page errors: ' + errors.join('; '));
+  } finally {
+    await fb.close();
+  }
+});
+
 test('20,000 small files in one drop', async () => {
   const stressDir = path.join(DS, 'stress', 'Twenty Thousand');
   const { page, errors } = main;
