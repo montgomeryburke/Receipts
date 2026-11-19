@@ -31,6 +31,9 @@ export const ASK_SETTINGS = {
 };
 const settingFor = (kind) => Object.keys(ASK_SETTINGS).find((k) => ASK_SETTINGS[k].kinds.includes(kind)) || null;
 
+/** Untrusted text put between <tags> in a prompt: a "</tag>" inside it can't close the block. */
+const fence = (text) => String(text ?? '').replace(/<\/(?=\s*[a-z_]+\s*>)/gi, '<\u200b/');
+
 const hostOf = (url) => {
   try {
     return new URL(url).hostname.replace(/^www\./, '');
@@ -89,6 +92,7 @@ export class Agent extends EventTarget {
     this.tabs = new Map(); // tabId → TabControl
     this.tab = null;
     this.allowedHosts = hostsInText(this.task);
+    this.taskHosts = new Set(this.allowedHosts); // the sites the task itself named
     this.always = new Set(); // "kind:host" the user allowed for the rest of this task
     this.cost = 0;
     this.steps = 0;
@@ -202,7 +206,12 @@ export class Agent extends EventTarget {
   /** Navigation to a site the task didn't name needs the user's OK (a page could try to send data elsewhere). */
   async allowSite(url) {
     const host = hostOf(url);
-    if (!host) return true;
+    if (!host) {
+      // file:, data:, blob:, about: and the like have no site to check: the user decides (a blank page is fine).
+      if (!url || /^about:blank$/i.test(String(url).trim())) return true;
+      const scheme = (/^([a-z][a-z0-9+.-]*):/i.exec(String(url)) || [])[1] || 'that address';
+      return this.permit('site', `${scheme}:`, `Work with a ${scheme}: address?`, `${String(url).slice(0, 300)}\nThis is not a web site; it can be a file on this computer.`);
+    }
     const start = this.startHost;
     if (host === start || this.allowedHosts.has(host) || [...this.allowedHosts].some((h) => host.endsWith(`.${h}`))) return true;
     const ok = await this.permit('site', host, `Go to ${host}?`, `The task didn't mention ${host}. Pages can contain instructions meant to mislead the agent, so it only goes to new sites with your OK.\n${url}`);
@@ -219,7 +228,7 @@ export class Agent extends EventTarget {
       const r = await review(this.settings, {
         provider: this.provider,
         what: `a browser step about to happen: ${what}`,
-        sources: `<task>\n${this.task}\n</task>\n<answers_from_user>\n${(this.answers || []).join('\n') || '(none)'}\n</answers_from_user>\n<page url="${snap.url}">\n${snap.text.slice(0, 1500)}\n</page>`,
+        sources: `<task>\n${fence(this.task)}\n</task>\n<answers_from_user>\n${fence((this.answers || []).join('\n') || '(none)')}\n</answers_from_user>\n<page url="${fence(snap.url).replace(/"/g, '%22')}">\n${fence(snap.text.slice(0, 1500))}\n</page>`,
         text: `About to: ${what}\nForm fields now:\n${fields || '(no fields)'}`,
         signal: this.signal,
       });
@@ -252,7 +261,10 @@ export class Agent extends EventTarget {
     if (!/^https?:\/\//i.test(url)) throw new Error(`Unknown file source "${from}". Use nas:/path, local:<folder>/<path> or a web address.`);
     // A web address is a request to that site (and could carry data out in the address): new sites need the user.
     if (!(await this.allowSite(url))) throw new Error('The user said no to that site.');
-    const res = await fetch(url, { credentials: 'include' });
+    // Your logins (cookies) go only to the site you started on and sites the task named, not to sites a page sent it to.
+    const h = hostOf(url);
+    const trusted = h && (h === this.startHost || this.taskHosts?.has(h) || [...(this.taskHosts || [])].some((t) => h.endsWith(`.${t}`)));
+    const res = await fetch(url, { credentials: trusted ? 'include' : 'omit' });
     if (!res.ok) throw new Error(`download failed (${res.status})`);
     const blob = await res.blob();
     const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'download');
@@ -329,10 +341,19 @@ export class Agent extends EventTarget {
         input_schema: S({ x: int('x in screenshot pixels'), y: int('y in screenshot pixels'), double: bool('double-click') }, ['x', 'y']),
         run: async ({ x, y, double }) => {
           const tc = this.current();
-          if (await this.mustAsk('click_xy')) {
-            if (!(await this.permit('click', hostOf(await this.currentUrl()), `Click at ${x}, ${y}?`, ''))) return { declined: true };
+          const cx = x / (tc.scale || 1);
+          const cy = y / (tc.scale || 1);
+          // The same checks as click for what is under the point (a link to another site, a send button).
+          const at = await tc.pointInfo(cx, cy).catch(() => null);
+          const label = at?.name || at?.tag || `${x}, ${y}`;
+          if (at?.href && /^https?:/i.test(at.href) && !(await this.allowSite(at.href))) return { declined: true, note: 'The user said no to that site.' };
+          const risky = !!at && !at.canvas && (at.submits || RISKY_WORDS.test(at.name || ''));
+          if (risky || (await this.mustAsk('click_xy'))) {
+            const host = hostOf(await this.currentUrl());
+            const check = risky ? await this.secondOpinion(`click "${label}" on ${host}`) : null;
+            if (!(await this.permit(at?.submits ? 'submit' : 'click', host, `Click “${label}” on ${host}?`, at?.submits ? 'This sends the form.' : `at ${x}, ${y}`, { check }))) return { declined: true, note: 'The user said no. Don’t try another way; ask or stop.' };
           }
-          await tc.clickAt(x / (tc.scale || 1), y / (tc.scale || 1), { double: !!double });
+          await tc.clickAt(cx, cy, { double: !!double });
           return { clicked: [x, y], ...(await after(tc)) };
         },
       },
@@ -617,7 +638,9 @@ export class Agent extends EventTarget {
             url = URL.createObjectURL(src.blob);
             revoke = url;
           }
-          const id = await chrome.downloads.download({ url, filename: String(name).replace(/^[\\/]+/, ''), conflictAction: 'uniquify' });
+          // A name inside Downloads only: no absolute paths, no ".." (Chrome refuses those too).
+          const filename = String(name).split(/[\\/]+/).filter((p) => p && p !== '.' && p !== '..').join('/') || 'download';
+          const id = await chrome.downloads.download({ url, filename, conflictAction: 'uniquify' });
           if (revoke) setTimeout(() => URL.revokeObjectURL(revoke), 60000);
           return { downloading: true, id };
         },
@@ -662,7 +685,7 @@ export class Agent extends EventTarget {
       const res = await runChat({ ...settings, _tag: 'agent' }, {
         provider: this.provider,
         system: SYSTEM(who),
-        history: [{ role: 'user', text: `<task>\n${this.task}\n</task>${this.startTabId ? '\nThe tab to work in is already open: start with read_page.' : '\nNo tab was chosen: use list_tabs / open_tab as needed.'}` }],
+        history: [{ role: 'user', text: `<task>\n${fence(this.task)}\n</task>${this.startTabId ? '\nThe tab to work in is already open: start with read_page.' : '\nNo tab was chosen: use list_tabs / open_tab as needed.'}` }],
         tools: this.tools(),
         effort: settings.agentEffort || 'medium',
         maxTokens: 3000,
@@ -701,7 +724,7 @@ export class Agent extends EventTarget {
       const tc = this.tab?.attached ? this.tab : null;
       if (tc) {
         const snap = await tc.snapshot({ maxElements: 60, maxText: 2500 });
-        page = `<final_page url="${snap.url}">\n${snap.text}\n${snap.elements.filter((e) => 'value' in e).map((e) => `[${e.n}] ${e.name}: ${e.value}`).join('\n')}\n</final_page>`;
+        page = `<final_page url="${fence(snap.url).replace(/"/g, '%22')}">\n${fence(snap.text)}\n${fence(snap.elements.filter((e) => 'value' in e).map((e) => `[${e.n}] ${e.name}: ${e.value}`).join('\n'))}\n</final_page>`;
       }
     } catch {
       /* the page went away */
@@ -711,7 +734,7 @@ export class Agent extends EventTarget {
       const r = await review(this.settings, {
         provider: this.provider,
         what: 'the browser agent’s summary of a finished task',
-        sources: `<task>\n${this.task}\n</task>\n<answers_from_user>\n${(this.answers || []).join('\n') || '(none)'}\n</answers_from_user>\n<actions_taken>\n${actions || '(none)'}\n</actions_taken>\n${page}`,
+        sources: `<task>\n${fence(this.task)}\n</task>\n<answers_from_user>\n${fence((this.answers || []).join('\n') || '(none)')}\n</answers_from_user>\n<actions_taken>\n${fence(actions || '(none)')}\n</actions_taken>\n${page}`,
         text: this.summary,
         hints: failed.length ? [`these steps failed or didn't check out: ${failed.join('; ')}`] : [],
         signal: this.signal,

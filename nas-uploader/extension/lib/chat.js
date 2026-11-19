@@ -28,6 +28,12 @@ const INT = 'integer';
 const BOOL = 'boolean';
 const LIST = 'list'; // comma- or line-separated text in, array out
 
+/**
+ * Safety switches: the chat can change them only with the user's click ("Apply" under the reply), so text in a
+ * file, an email or a web page can never talk it out of asking first or into spending more.
+ */
+export const SAFETY_KEYS = new Set(['agentConfirm', 'agentAskSend', 'agentAskSite', 'agentAskUpload', 'agentAskOverwrite', 'chatFileConfirm', 'hpCommandConfirm', 'dailyBudgetUsd']);
+
 /** key: [type, description, {enum|min|max}] — secrets (API keys) are deliberately not here. */
 export const EDITABLE = {
   provider: [STR, 'Which AI writes email drafts and answers in this chat', { enum: ['anthropic', 'gemini'] }],
@@ -255,15 +261,24 @@ function makeTools(ctx) {
         const s = await getSettings();
         const patch = {};
         const before = {};
+        const safety = {};
         for (const c of changes || []) {
-          patch[c.key] = coerce(c.key, c.value);
-          before[c.key] = s[c.key];
+          const v = coerce(c.key, c.value);
+          if (SAFETY_KEYS.has(c.key)) safety[c.key] = v;
+          else {
+            patch[c.key] = v;
+            before[c.key] = s[c.key];
+          }
+        }
+        if (Object.keys(safety).length) {
+          ctx.pending.push({ id: newRequestId(), kind: 'setting', patch: safety, summary: `Change ${Object.entries(safety).map(([k, v]) => `${k} → ${JSON.stringify(v)}`).join(', ')}` });
+          if (!Object.keys(patch).length) return { awaiting_user: true, note: 'Safety settings change only when the user clicks "Apply" under your reply.' };
         }
         if (!Object.keys(patch).length) return { error: 'nothing to change' };
         await saveSettings(patch);
         await change(`Settings: ${Object.entries(patch).map(([k, v]) => `${k} → ${JSON.stringify(v)}`).join(', ')}`, { settings: before }, 'update_settings');
         if ('nasFolders' in patch || 'excludePatterns' in patch || 'includeExt' in patch) ctx.reindex = true;
-        return { ok: true, now: patch };
+        return { ok: true, now: patch, ...(Object.keys(safety).length ? { awaiting_user: Object.keys(safety), note: 'Safety settings change only when the user clicks "Apply" under your reply.' } : {}) };
       },
     },
     {
@@ -754,6 +769,18 @@ export async function runPendingTest(messageId, testId) {
   const p = msg?.pending?.find((x) => x.id === testId);
   if (!p) throw new Error('That test is no longer available');
   if (p.done) return p;
+  if (p.kind === 'setting') {
+    // A safety setting the chat proposed: applied now that the user clicked, with Undo like any change.
+    const s = await getSettings();
+    const before = Object.fromEntries(Object.keys(p.patch || {}).map((k) => [k, s[k]]));
+    await saveSettings(p.patch || {});
+    await recordChange(`Settings: ${Object.entries(p.patch || {}).map(([k, v]) => `${k} → ${JSON.stringify(v)}`).join(', ')}`, { settings: before }, 'update_settings');
+    p.result = 'Applied.';
+    p.ok = true;
+    p.done = true;
+    await put('chat', msg);
+    return p;
+  }
   if (p.kind === 'hp') {
     try {
       const r = await runOnHp(p.command, { cwd: p.folder, timeout: p.timeout });

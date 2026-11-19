@@ -928,6 +928,9 @@ test('unit: mirror planning (changes, renames, deletions, Jellyfin metadata, saf
     check('empty local warns', p.warnings.length > 0 && /empty/.test(p.warnings[0]), true);
     p = planMirror({ local: { files: [{ rel: 'keep', file: f('keep', 1, T0) }], dirs: [] }, remote: remoteOf([['keep', 1, T0 + 1000], ...Array.from({ length: 30 }, (_, i) => [`x${i}`, 1, T0])]), manifest: null });
     check('mass deletion warns', p.warnings.length, 1);
+    // 6b. Something inside a NAS folder couldn't be read here (e.g. a .pst Outlook has open): that folder stays.
+    p = planMirror({ local: { files: [{ rel: 'keep', file: f('keep', 1, T0) }], dirs: [], errors: [{ rel: 'Mail/archive.pst' }] }, remote: remoteOf([['keep', 1, T0 + 1000], ['Mail/archive.pst', 9, T0], ['Mail/notes.txt', 1, T0]], ['Mail']), manifest: null });
+    check('unreadable inside: the folder and its files are kept', [p.deleteDirs.length, p.deletes.map((d) => d.rel)], [0, []]);
 
     // 7. Folder picker can't see empty folders: don't delete empty NAS folders in that case.
     p = planMirror({ local: { files: [], dirs: [] }, remote: remoteOf([], ['empty']), manifest: null, options: { localKnowsEmptyDirs: false } });

@@ -9,6 +9,8 @@ import { speak, stopSpeaking, attachDictation } from './lib/voice.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/** A link address for an href: http(s) only (never javascript:, data: …), escaped. */
+const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '').trim()) ? esc(String(u).trim()) : '#');
 
 const bg = (type, data = {}) => chrome.runtime.sendMessage({ to: 'bg', type, ...data });
 const engine = (type, data = {}) => bg('engine', { payload: { type, ...data } });
@@ -86,7 +88,7 @@ function render() {
 }
 
 function chip(text, cls, title = '') {
-  return `<span class="pill ${cls}" title="${esc(title)}">${esc(text)}</span>`;
+  return `<span class="pill ${esc(cls)}" title="${esc(title)}">${esc(text)}</span>`;
 }
 
 function renderChips() {
@@ -262,7 +264,7 @@ function cardBody(it) {
   const parts = [];
   // Public facts looked up on the web (the files didn't have them).
   if (it.web?.queries?.length) {
-    parts.push(`<h3>From the web</h3>${it.web.found ? `<div class="small" data-web>${esc(it.web.text).replace(/\n/g, '<br>')}</div>${it.web.sources.map((s, i) => `<div class="small">[W${i + 1}] <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></div>`).join('')}` : `<div class="small muted" data-web>Looked on the web for ${esc(it.web.queries.join('; '))}: nothing found.</div>`}`);
+    parts.push(`<h3>From the web</h3>${it.web.found ? `<div class="small" data-web>${esc(it.web.text).replace(/\n/g, '<br>')}</div>${it.web.sources.map((s, i) => `<div class="small">[W${i + 1}] <a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></div>`).join('')}` : `<div class="small muted" data-web>Looked on the web for ${esc(it.web.queries.join('; '))}: nothing found.</div>`}`);
   }
   // What the drafter read: the thread's history and earlier related emails.
   const nThread = (it.thread || []).length;
@@ -285,7 +287,7 @@ function cardBody(it) {
     for (const r of reqs) {
       const params = Object.entries(r.params || {});
       if (r.state === 'proposed') {
-        parts.push(`<div class="dreq" data-key="${esc(r.key)}"><div><b>${esc(r.action)}</b> <span class="pill ${r.kind === 'write' ? 'warn' : 'info'}">${r.kind}</span></div>
+        parts.push(`<div class="dreq" data-key="${esc(r.key)}"><div><b>${esc(r.action)}</b> <span class="pill ${r.kind === 'write' ? 'warn' : 'info'}">${esc(r.kind)}</span></div>
           <div class="muted">${esc(r.reason)}</div>
           ${params.map(([k, v]) => `<label class="field"><span>${esc(k)}</span><input type="text" data-param="${esc(k)}" value="${esc(v)}"></label>`).join('')}
           <div class="row" style="margin-top:6px"><button class="primary" data-act="approve">Run</button><button data-act="reject">Skip</button></div></div>`);
@@ -304,12 +306,13 @@ function cardBody(it) {
     const seen = new Set();
     for (const s of it.snippets) {
       const key = s.path;
-      const tag = `[${s.sid}]`;
+      const tag = esc(`[${s.sid}]`);
+      const pg = Number(s.page) || 0;
       const slash = s.path.lastIndexOf('/');
       const fname = s.path.slice(slash + 1);
       const folder = slash > 0 ? s.path.slice(0, slash) : '';
-      parts.push(`<div class="src" data-path="${esc(s.path)}" data-page="${s.page || 0}">
-        <span class="tag">${tag}</span><span class="path" title="${esc(s.path)}"><b>${esc(fname)}</b>${s.page ? ` · ${pageLabel(s.path, s.page)}` : ''}${s.taught ? ' · taught' : ''} <span class="muted">${esc(folder)}</span></span>
+      parts.push(`<div class="src" data-path="${esc(s.path)}" data-page="${pg}">
+        <span class="tag">${tag}</span><span class="path" title="${esc(s.path)}"><b>${esc(fname)}</b>${pg ? ` · ${esc(pageLabel(s.path, pg))}` : ''}${s.taught ? ' · taught' : ''} <span class="muted">${esc(folder)}</span></span>
         <button data-act="open" title="Open">Open</button>
         ${seen.has(key) ? '' : `<button data-act="good" class="${taught[key] === 'prefer' ? 'on' : ''}" title="Right document — use it for emails like this">👍</button>
         <button data-act="bad" class="${taught[key] === 'avoid' ? 'off' : ''}" title="Wrong document — don't use it for emails like this">👎</button>`}
@@ -462,7 +465,9 @@ function openSettings(section) {
   chrome.tabs.create({ url });
 }
 
-const VIEWABLE = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'html', 'htm', 'svg', 'mp4']);
+// Opened in a tab. Not HTML or SVG: as blob: pages they would run in the extension's own origin (they're shown as
+// indexed text, with the original to download).
+const VIEWABLE = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'mp4']);
 
 // Opens a file: the copy on this computer (its mirror's folder), else the copy on the NAS.
 async function openLocalFile(rec, path) {
@@ -1087,7 +1092,8 @@ function chatNode(m) {
   }
   const steps = (m.steps || []).map((st) => `<span class="pill ${st.ok ? '' : 'bad'}" title="${esc(st.note || '')}">${esc(STEP_LABEL[st.name] || st.name)}</span>`).join(' ');
   const changes = (m.changes || []).map((c) => `<div class="change" data-change="${esc(c.id)}">✎ ${esc(c.summary)} <button class="link" data-act="undo">Undo</button></div>`).join('');
-  const pending = (m.pending || []).map((p) => (p.kind === 'hp' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b><pre class="preview">$ ${esc(p.command)}</pre>
+  const pending = (m.pending || []).map((p) => (p.kind === 'setting' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b>
+      ${p.done ? `<div class="small">${esc(p.result || '')}</div>` : '<div class="small muted">A safety setting: it changes only when you click.</div><button class="primary" data-act="runTest">Apply</button>'}</div>` : p.kind === 'hp' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b><pre class="preview">$ ${esc(p.command)}</pre>
       ${p.done ? `<pre class="preview ${p.ok ? '' : 'err'}">${esc(p.result || '')}</pre>` : '<button class="primary" data-act="runTest">Run on the HP</button>'}</div>` : p.kind === 'file' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b>${p.change?.op === 'write' ? `<pre class="preview">${esc(String(p.change.text || '').slice(0, 1500))}</pre>` : ''}
       ${p.done ? `<div class="small ${p.ok ? '' : 'err'}">${esc(p.result || '')}</div>` : `<button class="${p.change?.op === 'delete' ? 'danger' : 'primary'}" data-act="runTest">Do it</button>`}</div>` : `<div class="dreq" data-test="${esc(p.id)}"><b>Test ${esc(p.action)}</b> <span class="mono muted">${esc(Object.entries(p.params || {}).map(([k, v]) => `${k}=${v}`).join(', '))}</span>
       ${p.done ? `<pre class="preview">${esc(p.result || '')}</pre>` : '<div class="small muted">This flow changes records. Check the values, then:</div><button class="primary" data-act="runTest">Run test</button>'}</div>`)).join('');

@@ -51,7 +51,12 @@
 
   function itemIdFromUrl() {
     const m = location.href.match(/\/id\/([^/?#]+)/);
-    return m ? decodeURIComponent(m[1]) : '';
+    if (!m) return '';
+    try {
+      return decodeURIComponent(m[1]);
+    } catch {
+      return m[1]; // a malformed %-sequence: the raw id still identifies the email
+    }
   }
 
   // Walks up from the body to the message's own container (the closest
@@ -484,7 +489,8 @@
   const observer = new MutationObserver(() => scheduleCapture());
   observer.observe(document.body, { childList: true, subtree: true, characterData: false });
 
-  refreshSettings().then(() => scan());
+  // The new-mail scan opens emails (Outlook then marks them read) and drafts them: only when switched on.
+  refreshSettings().then(() => { if (settings.autoScan) scan(); });
   setInterval(async () => {
     await refreshSettings();
     if (settings.autoScan) scan();

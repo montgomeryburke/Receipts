@@ -61,6 +61,10 @@ def main():
     cmd = str(req.get('cmd') or '')
     if not cmd.strip():
         return reply('400 Bad Request', {'error': 'no command'})
+    home = os.path.realpath(os.environ.get('NAS_RUNNER_HOME', '') or '/')
+    cwd = os.path.realpath(str(req.get('cwd') or home))
+    if not (cwd == home or cwd.startswith(home.rstrip('/') + '/')):
+        return reply('400 Bad Request', {'error': f'the folder must be inside the shared folder ({home})'})
     os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
     with open(LOCK_FILE, 'w') as lock:
         # One command at a time; wait up to 10 s for the one before.
@@ -74,11 +78,11 @@ def main():
             return reply('409 Conflict', {'error': 'another command is still running'})
         t0 = time.time()
         try:
-            p = subprocess.run(RUNNER, input=json.dumps({'cmd': cmd, 'cwd': req.get('cwd') or os.environ.get('NAS_RUNNER_HOME', ''), 'timeout': req.get('timeout') or 60}).encode(), capture_output=True, timeout=660)
+            p = subprocess.run(RUNNER, input=json.dumps({'cmd': cmd, 'cwd': cwd, 'timeout': req.get('timeout') or 60}).encode(), capture_output=True, timeout=660)
             out = json.loads(p.stdout or b'{}') if p.returncode == 0 else {'error': (p.stderr or b'').decode('utf-8', 'replace')[-2000:] or f'runner failed ({p.returncode})'}
         except (subprocess.TimeoutExpired, ValueError) as e:
             out = {'error': f'runner failed: {e}'}
-    log({'at': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(t0)), 'user': who, 'ip': ip, 'cmd': cmd[:2000], 'cwd': req.get('cwd') or '', 'exit': out.get('exit'), 'ms': out.get('ms'), 'error': out.get('error')})
+    log({'at': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(t0)), 'user': who, 'ip': ip, 'cmd': cmd[:2000], 'cwd': cwd, 'exit': out.get('exit'), 'ms': out.get('ms'), 'error': out.get('error')})
     return reply('200 OK' if 'error' not in out else '500 Internal Server Error', out)
 
 

@@ -631,10 +631,11 @@ async function writeMinutes({ final = false } = {}) {
 
 function sourceHtml(src) {
   const name = (src.path || '').split('/').pop() || src.ref;
-  const where = src.page ? ` · ${pageLabel(src.path, src.page)}` : '';
+  const page = Number(src.page) || 0; // from the AI's answer: a number only
+  const where = page ? ` · ${esc(pageLabel(src.path, page))}` : '';
   // An email inside a .pst mailbox can't be opened on its own; the quote is the useful part.
   if (/\.pst$/i.test(src.path || '')) return `<div class="src">✉ <span title="${esc(src.path)}">${esc(name)}${where}</span> <span class="quote">“${esc(src.quote)}”</span> ${quoteMark(src)}</div>`;
-  return `<div class="src">📄 <a data-open="${esc(src.path)}" data-page="${src.page || 0}" title="${esc(src.path)}">${esc(name)}${where}</a> <span class="quote">“${esc(src.quote)}”</span> ${quoteMark(src)}</div>`;
+  return `<div class="src">📄 <a data-open="${esc(src.path)}" data-page="${page}" title="${esc(src.path)}">${esc(name)}${where}</a> <span class="quote">“${esc(src.quote)}”</span> ${quoteMark(src)}</div>`;
 }
 
 function linksHtml(list) {

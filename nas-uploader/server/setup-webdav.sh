@@ -154,6 +154,7 @@ if [[ $UNINSTALL -eq 1 ]]; then
   fi
   rm -f /etc/sudoers.d/nas-uploader-commands /etc/nas-uploader-command-key /usr/local/lib/nas-uploader/run-command /usr/local/lib/nas-uploader/cgi/run.cgi
   userdel -r nas-runner >/dev/null 2>&1 || true
+  groupdel nas-secrets >/dev/null 2>&1 || true
   rm -rf "$STATE_DIR"
   apache_reload || true
   ok "Removed. Apache itself is still installed (apt-get remove apache2 to remove it too)."
@@ -326,7 +327,11 @@ else
   printf '%s' "$WEB_PASS" > "$STATE_DIR/password"
   ok "User $WEB_USER created"
 fi
-chown "root:$RUN_GROUP" "$HTPASSWD"
+# Secrets (the login file, the command key) are readable by the web server's user through a group of their own,
+# not through the web server's group: the "nas-runner" user that runs commands is in that group, for the files.
+groupadd -f nas-secrets
+usermod -a -G nas-secrets "$RUN_USER"
+chown "root:nas-secrets" "$HTPASSWD"
 chmod 640 "$HTPASSWD"
 chmod 600 "$STATE_DIR/password"
 
@@ -622,6 +627,10 @@ def main():
     cmd = str(req.get('cmd') or '')
     if not cmd.strip():
         return reply('400 Bad Request', {'error': 'no command'})
+    home = os.path.realpath(os.environ.get('NAS_RUNNER_HOME', '') or '/')
+    cwd = os.path.realpath(str(req.get('cwd') or home))
+    if not (cwd == home or cwd.startswith(home.rstrip('/') + '/')):
+        return reply('400 Bad Request', {'error': f'the folder must be inside the shared folder ({home})'})
     os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
     with open(LOCK_FILE, 'w') as lock:
         # One command at a time; wait up to 10 s for the one before.
@@ -635,11 +644,11 @@ def main():
             return reply('409 Conflict', {'error': 'another command is still running'})
         t0 = time.time()
         try:
-            p = subprocess.run(RUNNER, input=json.dumps({'cmd': cmd, 'cwd': req.get('cwd') or os.environ.get('NAS_RUNNER_HOME', ''), 'timeout': req.get('timeout') or 60}).encode(), capture_output=True, timeout=660)
+            p = subprocess.run(RUNNER, input=json.dumps({'cmd': cmd, 'cwd': cwd, 'timeout': req.get('timeout') or 60}).encode(), capture_output=True, timeout=660)
             out = json.loads(p.stdout or b'{}') if p.returncode == 0 else {'error': (p.stderr or b'').decode('utf-8', 'replace')[-2000:] or f'runner failed ({p.returncode})'}
         except (subprocess.TimeoutExpired, ValueError) as e:
             out = {'error': f'runner failed: {e}'}
-    log({'at': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(t0)), 'user': who, 'ip': ip, 'cmd': cmd[:2000], 'cwd': req.get('cwd') or '', 'exit': out.get('exit'), 'ms': out.get('ms'), 'error': out.get('error')})
+    log({'at': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(t0)), 'user': who, 'ip': ip, 'cmd': cmd[:2000], 'cwd': cwd, 'exit': out.get('exit'), 'ms': out.get('ms'), 'error': out.get('error')})
     return reply('200 OK' if 'error' not in out else '500 Internal Server Error', out)
 
 
@@ -649,7 +658,7 @@ PYEOF
   chmod 755 "$RUN_DIR/run-command" "$RUN_DIR/cgi/run.cgi"
   chown root:root "$RUN_DIR/run-command" "$RUN_DIR/cgi/run.cgi"
   [[ -s "$CMD_KEY_FILE" ]] || { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$CMD_KEY_FILE"; }
-  chown "root:$RUN_GROUP" "$CMD_KEY_FILE"; chmod 640 "$CMD_KEY_FILE"
+  chown "root:nas-secrets" "$CMD_KEY_FILE"; chmod 640 "$CMD_KEY_FILE"
   CMD_KEY="$(cat "$CMD_KEY_FILE")"
   touch /var/log/nas-uploader-commands.log; chown "$RUN_USER:$RUN_GROUP" /var/log/nas-uploader-commands.log; chmod 640 /var/log/nas-uploader-commands.log
   printf '%s ALL=(nas-runner) NOPASSWD: %s\n' "$RUN_USER" "$RUN_DIR/run-command" > /etc/sudoers.d/nas-uploader-commands.tmp

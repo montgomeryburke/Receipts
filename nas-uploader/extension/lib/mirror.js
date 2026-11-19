@@ -136,6 +136,8 @@ export function planMirror({ local, remote, manifest, options = {} }) {
   const unreadable = (local.errors || []).map((e) => nfc(e.rel).replace(/^\.\/?/, '').replace(/\/+$/, ''));
   const unreadableAll = unreadable.includes('');
   const isUnreadable = (key) => unreadableAll || unreadable.some((u) => key === u || key.startsWith(u + '/'));
+  // Something inside this folder couldn't be read here: the folder (and what's in it) stays on the NAS.
+  const hasUnreadableInside = (key) => unreadable.some((u) => u.startsWith(key + '/'));
 
   // Ignore things on the NAS that a mirror must never touch.
   const ignoredRemote = (key, isDir) => {
@@ -241,7 +243,7 @@ export function planMirror({ local, remote, manifest, options = {} }) {
     const sortedDirs = [...remoteDirs.keys()].sort((a, b) => a.split('/').length - b.split('/').length);
     for (const k of sortedDirs) {
       if (localDirs.has(k)) continue;
-      if (isUnreadable(k)) {
+      if (isUnreadable(k) || hasUnreadableInside(k)) {
         keptDirKeys.add(k);
         continue;
       }

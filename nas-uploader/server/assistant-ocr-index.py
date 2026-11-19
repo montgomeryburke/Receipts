@@ -154,12 +154,19 @@ def eml_text(path, folder=''):
 
 def mail_pages(path, ext, max_chars, deadline):
     """Unpacks a .pst or .msg into [[n, email text], ...], newest email first."""
+    # Unpacking needs about twice the mailbox's size; it stops at the run's time budget (or 2 h).
+    need = os.path.getsize(path) * 2 + 50_000_000
+    if shutil.disk_usage(tempfile.gettempdir()).free < need:
+        raise RuntimeError(f'not enough free space in {tempfile.gettempdir()} to unpack it ({need // 1_000_000} MB needed)')
+    left = int(deadline - time.time()) if deadline else 7200
+    if left < 30:
+        raise RuntimeError('no time left in this run (it is done next run)')
     tmp = tempfile.mkdtemp(prefix='mail-')
     try:
         if ext == '.pst':
-            run(['readpst', '-e', '-q', '-8', '-t', 'e', '-j', '0', '-o', tmp, path], timeout=7200)
+            run(['readpst', '-e', '-q', '-8', '-t', 'e', '-j', '0', '-o', tmp, path], timeout=min(7200, left))
         else:
-            run(['msgconvert', '--outfile', os.path.join(tmp, 'message.eml'), path], timeout=300)
+            run(['msgconvert', '--outfile', os.path.join(tmp, 'message.eml'), path], timeout=min(300, left))
         mails = []
         for dirpath, _, files in os.walk(tmp):
             for name in files:
@@ -176,7 +183,7 @@ def mail_pages(path, ext, max_chars, deadline):
         pages, used = [], 0
         for i, (_, text) in enumerate(mails, start=1):
             if used + len(text) > max_chars:
-                break
+                continue  # too long for what's left: older, shorter emails may still fit
             pages.append([i, text])
             used += len(text)
         return pages, len(mails)
@@ -190,13 +197,25 @@ def xml_text(xml):
     return html.unescape(re.sub(r'<[^>]+>', '', xml))
 
 
+MAX_XML_BYTES = 64_000_000  # one part of an Office file, unpacked (a "zip bomb" is skipped, not read)
+
+
 def office_pages(path, ext):
     """Text of a Word / Excel / PowerPoint file: [[page, text]] (slides and sheets count as pages)."""
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
-        read = lambda n: z.read(n).decode('utf-8', 'replace')
+
+        def read(n):
+            if z.getinfo(n).file_size > MAX_XML_BYTES:
+                raise RuntimeError(f'{n} is too large unpacked')
+            return z.read(n).decode('utf-8', 'replace')
+
         if ext in ('.docx', '.docm'):
-            return [[0, xml_text(read('word/document.xml'))]] if 'word/document.xml' in names else []
+            if 'word/document.xml' not in names:
+                return []
+            # The body, then headers, footers, footnotes and endnotes (often where a drawing number or date is).
+            extra = sorted(n for n in names if re.match(r'word/(header|footer)\d*\.xml$|word/(footnotes|endnotes)\.xml$', n))
+            return [[0, '\n'.join(xml_text(read(n)) for n in ['word/document.xml', *extra])]]
         if ext == '.pptx':
             slides = sorted((n for n in names if re.match(r'ppt/slides/slide\d+\.xml$', n)), key=lambda n: int(re.findall(r'\d+', n)[-1]))
             return [[i, xml_text(read(n))] for i, n in enumerate(slides, start=1)]
@@ -209,7 +228,14 @@ def office_pages(path, ext):
             rows = []
             for row in re.findall(r'<row[^>]*>(.*?)</row>', read(n), re.S):
                 cells = []
-                for attrs, v in re.findall(r'<c([^>]*)>(?:.*?<v>(.*?)</v>)?', row, re.S):
+                for attrs, body in re.findall(r'<c([^>]*?)(?:/>|>(.*?)</c>)', row, re.S):
+                    if 't="inlineStr"' in attrs:
+                        inline = re.search(r'<is>(.*?)</is>', body or '', re.S)
+                        if inline:
+                            cells.append(xml_text(inline.group(1)))
+                        continue
+                    m = re.search(r'<v>(.*?)</v>', body or '', re.S)
+                    v = m.group(1) if m else ''
                     if not v:
                         continue
                     cells.append(shared[int(v)] if 't="s"' in attrs and v.isdigit() and int(v) < len(shared) else html.unescape(v))
@@ -265,6 +291,8 @@ def walk(root, nas_only=False, skip=frozenset()):
         for name in sorted(filenames):
             if name.startswith('.') or name.startswith('~$'):
                 continue
+            if os.path.islink(os.path.join(dirpath, name)):
+                continue  # a link could point outside the shared folder
             ext = os.path.splitext(name)[1].lower()
             if ext in kinds:
                 yield os.path.join(dirpath, name), ext, nas_only
@@ -280,7 +308,7 @@ def main():
     ap.add_argument('--folder', action='append', default=[], help='a project folder (NAS path) to include; repeatable')
     ap.add_argument('--max-mail-chars', type=int, default=8_000_000, help='most text kept per mailbox (newest emails first)')
     a = ap.parse_args()
-    root = os.path.abspath(a.root)
+    root = os.path.realpath(a.root)
     out_path = os.path.join(root, OUT_REL)
     folders = list(a.folder)
     nas_only = []
@@ -295,8 +323,9 @@ def main():
         log('project-folders.json unreadable:', e)
 
     def inside_root(x):
-        d = os.path.abspath(os.path.join(root, x.strip('/')))
-        return d if (d == root or d.startswith(root + os.sep)) and os.path.isdir(d) and d != root else None
+        # realpath: a folder that is (or goes through) a symlink is judged by where it really is.
+        d = os.path.realpath(os.path.join(root, x.strip('/')))
+        return d if d.startswith(root + os.sep) and os.path.isdir(d) else None
 
     mirrored = list(dict.fromkeys(filter(None, map(inside_root, folders))))
     within = lambda d, parents: any(d == p or d.startswith(p + os.sep) for p in parents)
@@ -369,11 +398,19 @@ def main():
             log('failed', rel, e)
     if not scan_dirs and not prev:
         return 0
-    tmp = out_path + '.tmp'
-    with gzip.open(tmp, 'wt', encoding='utf-8') as f:
-        for r in records:
-            f.write(json.dumps(r, ensure_ascii=False) + '\n')
-    os.replace(tmp, out_path)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(out_path), prefix='.deep-index-', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'wb') as raw, gzip.open(raw, 'wt', encoding='utf-8') as f:
+            for r in records:
+                f.write(json.dumps(r, ensure_ascii=False) + '\n')
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, out_path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     if a.owner:
         try:
             shutil.chown(out_path, a.owner, a.owner)

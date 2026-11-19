@@ -1,4 +1,4 @@
-Project Assistant: complete source for review (559db6c 2026-11-19 + uncommitted changes)
+Project Assistant: complete source for review (38a46fc 2026-11-19 + uncommitted changes)
 Files: extension/ (Chrome extension, Manifest V3; third-party libraries in extension/vendor/ are left out),
 server/setup-webdav.sh (Proxmox container setup), server/assistant-ocr-index.py (OCR / mail / NAS-only text job
 on the NAS) and server/setup-drive-copy.sh (daily Google Drive copy with rclone).
@@ -10,7 +10,7 @@ Tests live in tests/ in the repository and are not included here.
   "manifest_version": 3,
   "name": "Project Assistant — NAS, email and meetings",
   "short_name": "Project Assistant",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Mirror project folders to your NAS, draft Outlook replies from your project files, and get live prompts in Teams meetings.",
   "minimum_chrome_version": "116",
   "action": {
@@ -3395,7 +3395,7 @@ textarea.draft { min-height: 160px; font-size: 13px; line-height: 1.5; }
 .top .row button { padding: 4px 8px; }
 
 
-===== FILE: extension/sidepanel.js (1297 lines) =====
+===== FILE: extension/sidepanel.js (1303 lines) =====
 import { getSettings, saveSettings, getAll, get, put, kvGet } from './lib/db.js';
 import { getRootHandle, permissionState, requestPermission, getFileByPath } from './lib/fsutil.js';
 import { listMirrors } from './lib/store.js';
@@ -3407,6 +3407,8 @@ import { speak, stopSpeaking, attachDictation } from './lib/voice.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/** A link address for an href: http(s) only (never javascript:, data: …), escaped. */
+const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '').trim()) ? esc(String(u).trim()) : '#');
 
 const bg = (type, data = {}) => chrome.runtime.sendMessage({ to: 'bg', type, ...data });
 const engine = (type, data = {}) => bg('engine', { payload: { type, ...data } });
@@ -3484,7 +3486,7 @@ function render() {
 }
 
 function chip(text, cls, title = '') {
-  return `<span class="pill ${cls}" title="${esc(title)}">${esc(text)}</span>`;
+  return `<span class="pill ${esc(cls)}" title="${esc(title)}">${esc(text)}</span>`;
 }
 
 function renderChips() {
@@ -3660,7 +3662,7 @@ function cardBody(it) {
   const parts = [];
   // Public facts looked up on the web (the files didn't have them).
   if (it.web?.queries?.length) {
-    parts.push(`<h3>From the web</h3>${it.web.found ? `<div class="small" data-web>${esc(it.web.text).replace(/\n/g, '<br>')}</div>${it.web.sources.map((s, i) => `<div class="small">[W${i + 1}] <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></div>`).join('')}` : `<div class="small muted" data-web>Looked on the web for ${esc(it.web.queries.join('; '))}: nothing found.</div>`}`);
+    parts.push(`<h3>From the web</h3>${it.web.found ? `<div class="small" data-web>${esc(it.web.text).replace(/\n/g, '<br>')}</div>${it.web.sources.map((s, i) => `<div class="small">[W${i + 1}] <a href="${safeUrl(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></div>`).join('')}` : `<div class="small muted" data-web>Looked on the web for ${esc(it.web.queries.join('; '))}: nothing found.</div>`}`);
   }
   // What the drafter read: the thread's history and earlier related emails.
   const nThread = (it.thread || []).length;
@@ -3683,7 +3685,7 @@ function cardBody(it) {
     for (const r of reqs) {
       const params = Object.entries(r.params || {});
       if (r.state === 'proposed') {
-        parts.push(`<div class="dreq" data-key="${esc(r.key)}"><div><b>${esc(r.action)}</b> <span class="pill ${r.kind === 'write' ? 'warn' : 'info'}">${r.kind}</span></div>
+        parts.push(`<div class="dreq" data-key="${esc(r.key)}"><div><b>${esc(r.action)}</b> <span class="pill ${r.kind === 'write' ? 'warn' : 'info'}">${esc(r.kind)}</span></div>
           <div class="muted">${esc(r.reason)}</div>
           ${params.map(([k, v]) => `<label class="field"><span>${esc(k)}</span><input type="text" data-param="${esc(k)}" value="${esc(v)}"></label>`).join('')}
           <div class="row" style="margin-top:6px"><button class="primary" data-act="approve">Run</button><button data-act="reject">Skip</button></div></div>`);
@@ -3702,12 +3704,13 @@ function cardBody(it) {
     const seen = new Set();
     for (const s of it.snippets) {
       const key = s.path;
-      const tag = `[${s.sid}]`;
+      const tag = esc(`[${s.sid}]`);
+      const pg = Number(s.page) || 0;
       const slash = s.path.lastIndexOf('/');
       const fname = s.path.slice(slash + 1);
       const folder = slash > 0 ? s.path.slice(0, slash) : '';
-      parts.push(`<div class="src" data-path="${esc(s.path)}" data-page="${s.page || 0}">
-        <span class="tag">${tag}</span><span class="path" title="${esc(s.path)}"><b>${esc(fname)}</b>${s.page ? ` · ${pageLabel(s.path, s.page)}` : ''}${s.taught ? ' · taught' : ''} <span class="muted">${esc(folder)}</span></span>
+      parts.push(`<div class="src" data-path="${esc(s.path)}" data-page="${pg}">
+        <span class="tag">${tag}</span><span class="path" title="${esc(s.path)}"><b>${esc(fname)}</b>${pg ? ` · ${esc(pageLabel(s.path, pg))}` : ''}${s.taught ? ' · taught' : ''} <span class="muted">${esc(folder)}</span></span>
         <button data-act="open" title="Open">Open</button>
         ${seen.has(key) ? '' : `<button data-act="good" class="${taught[key] === 'prefer' ? 'on' : ''}" title="Right document — use it for emails like this">👍</button>
         <button data-act="bad" class="${taught[key] === 'avoid' ? 'off' : ''}" title="Wrong document — don't use it for emails like this">👎</button>`}
@@ -3860,7 +3863,9 @@ function openSettings(section) {
   chrome.tabs.create({ url });
 }
 
-const VIEWABLE = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'html', 'htm', 'svg', 'mp4']);
+// Opened in a tab. Not HTML or SVG: as blob: pages they would run in the extension's own origin (they're shown as
+// indexed text, with the original to download).
+const VIEWABLE = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'mp4']);
 
 // Opens a file: the copy on this computer (its mirror's folder), else the copy on the NAS.
 async function openLocalFile(rec, path) {
@@ -4485,7 +4490,8 @@ function chatNode(m) {
   }
   const steps = (m.steps || []).map((st) => `<span class="pill ${st.ok ? '' : 'bad'}" title="${esc(st.note || '')}">${esc(STEP_LABEL[st.name] || st.name)}</span>`).join(' ');
   const changes = (m.changes || []).map((c) => `<div class="change" data-change="${esc(c.id)}">✎ ${esc(c.summary)} <button class="link" data-act="undo">Undo</button></div>`).join('');
-  const pending = (m.pending || []).map((p) => (p.kind === 'hp' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b><pre class="preview">$ ${esc(p.command)}</pre>
+  const pending = (m.pending || []).map((p) => (p.kind === 'setting' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b>
+      ${p.done ? `<div class="small">${esc(p.result || '')}</div>` : '<div class="small muted">A safety setting: it changes only when you click.</div><button class="primary" data-act="runTest">Apply</button>'}</div>` : p.kind === 'hp' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b><pre class="preview">$ ${esc(p.command)}</pre>
       ${p.done ? `<pre class="preview ${p.ok ? '' : 'err'}">${esc(p.result || '')}</pre>` : '<button class="primary" data-act="runTest">Run on the HP</button>'}</div>` : p.kind === 'file' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b>${p.change?.op === 'write' ? `<pre class="preview">${esc(String(p.change.text || '').slice(0, 1500))}</pre>` : ''}
       ${p.done ? `<div class="small ${p.ok ? '' : 'err'}">${esc(p.result || '')}</div>` : `<button class="${p.change?.op === 'delete' ? 'danger' : 'primary'}" data-act="runTest">Do it</button>`}</div>` : `<div class="dreq" data-test="${esc(p.id)}"><b>Test ${esc(p.action)}</b> <span class="mono muted">${esc(Object.entries(p.params || {}).map(([k, v]) => `${k}=${v}`).join(', '))}</span>
       ${p.done ? `<pre class="preview">${esc(p.result || '')}</pre>` : '<div class="small muted">This flow changes records. Check the values, then:</div><button class="primary" data-act="runTest">Run test</button>'}</div>`)).join('');
@@ -4816,7 +4822,7 @@ attachDictation($('chatMic'), $('chatInput'), { getSettings, onError: (m) => toa
         <thead><tr><th>Runs by itself</th><th>Cost when it runs</th><th>On / off</th></tr></thead>
         <tbody>
           <tr><td>Draft a reply when you open a <b>new</b> email in Outlook</td><td>1 call per email (more when information is missing)</td><td><input type="checkbox" data-key="processOnOpen"></td></tr>
-          <tr><td>Scan the inbox for new emails while you're away, and draft them</td><td>1 call per new email</td><td><input type="checkbox" data-key="autoScan"></td></tr>
+          <tr><td>Scan the inbox for new emails while you're away, and draft them (it opens each new email, so Outlook marks it read)</td><td>1 call per new email</td><td><input type="checkbox" data-key="autoScan"></td></tr>
           <tr><td>Thinking effort for email drafts</td><td>low ≈ ½ · medium ≈ 1 · high ≈ 2–3 × the tokens</td><td><select data-key="emailEffort"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></td></tr>
           <tr><td>Search the files again when a draft is missing information</td><td>sometimes +1 call</td><td><input type="checkbox" data-key="refinePass"></td></tr>
           <tr><td>Second check of drafts, meeting prompts, answers, minutes, agent results</td><td>+1 call each (≈ double)</td><td><input type="checkbox" data-key="crossCheck"></td></tr>
@@ -5042,7 +5048,7 @@ attachDictation($('chatMic'), $('chatInput'), { getSettings, onError: (m) => toa
 </html>
 
 
-===== FILE: extension/options.js (675 lines) =====
+===== FILE: extension/options.js (680 lines) =====
 import { getSettings, saveSettings, clear, kvSet, get, DEFAULT_SETTINGS } from './lib/db.js';
 import { getRootHandle, setRootHandle, permissionState, requestPermission } from './lib/fsutil.js';
 import { getRules, deleteRule, addHint } from './lib/teach.js';
@@ -5632,7 +5638,8 @@ const SECRET = new Set(['anthropicKey', 'geminiKey', 'localKey', 'hpCommandKey']
 
 $('exportSetup').addEventListener('click', async () => {
   const s = await getSettings();
-  const out = Object.fromEntries(Object.entries(s).filter(([k]) => !SECRET.has(k) && k !== 'folderPrefs'));
+  // Only known settings, never keys or anything else stored alongside them.
+  const out = Object.fromEntries(Object.entries(s).filter(([k]) => k in DEFAULT_SETTINGS && !SECRET.has(k) && k !== 'folderPrefs'));
   out.rules = await getRules();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify({ projectAssistantSettings: 1, at: new Date().toISOString(), settings: out }, null, 2)], { type: 'application/json' }));
@@ -5681,7 +5688,11 @@ $('importSetup').addEventListener('click', () => {
   renderProjectMail();
   renderModelPicker('gemini');
   $('nasFolders').value = (settings.nasFolders || []).join('\n');
-  if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+  if (location.hash) {
+    let id = location.hash.slice(1);
+    try { id = decodeURIComponent(id); } catch { /* keep it as is */ }
+    document.getElementById(id)?.scrollIntoView();
+  }
 })();
 
 // ---------------------------------------------------------------- voice
@@ -5913,7 +5924,7 @@ body.pip .pip-list { flex: 1; overflow-y: auto; display: flex; flex-direction: c
 .card .points li { margin: 3px 0; }
 
 
-===== FILE: extension/meeting.js (1212 lines) =====
+===== FILE: extension/meeting.js (1213 lines) =====
 // Meeting window: listens to the Teams meeting (desktop app via system audio, or a Chrome tab) and the user's
 // microphone, shows both sound levels, transcribes (free on this computer, or Gemini), flashes prompts of what
 // to say with quotes from the project files, answers private typed questions, and saves the transcript to
@@ -6547,10 +6558,11 @@ async function writeMinutes({ final = false } = {}) {
 
 function sourceHtml(src) {
   const name = (src.path || '').split('/').pop() || src.ref;
-  const where = src.page ? ` · ${pageLabel(src.path, src.page)}` : '';
+  const page = Number(src.page) || 0; // from the AI's answer: a number only
+  const where = page ? ` · ${esc(pageLabel(src.path, page))}` : '';
   // An email inside a .pst mailbox can't be opened on its own; the quote is the useful part.
   if (/\.pst$/i.test(src.path || '')) return `<div class="src">✉ <span title="${esc(src.path)}">${esc(name)}${where}</span> <span class="quote">“${esc(src.quote)}”</span> ${quoteMark(src)}</div>`;
-  return `<div class="src">📄 <a data-open="${esc(src.path)}" data-page="${src.page || 0}" title="${esc(src.path)}">${esc(name)}${where}</a> <span class="quote">“${esc(src.quote)}”</span> ${quoteMark(src)}</div>`;
+  return `<div class="src">📄 <a data-open="${esc(src.path)}" data-page="${page}" title="${esc(src.path)}">${esc(name)}${where}</a> <span class="quote">“${esc(src.quote)}”</span> ${quoteMark(src)}</div>`;
 }
 
 function linksHtml(list) {
@@ -7909,7 +7921,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 
-===== FILE: extension/content/outlook.js (494 lines) =====
+===== FILE: extension/content/outlook.js (500 lines) =====
 // Runs inside Outlook on the web. Reads the open message, notices new mail
 // in the message list, and inserts prepared drafts into a reply. It never
 // sends anything. Selectors are deliberately loose (roles and labels in
@@ -7963,7 +7975,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   function itemIdFromUrl() {
     const m = location.href.match(/\/id\/([^/?#]+)/);
-    return m ? decodeURIComponent(m[1]) : '';
+    if (!m) return '';
+    try {
+      return decodeURIComponent(m[1]);
+    } catch {
+      return m[1]; // a malformed %-sequence: the raw id still identifies the email
+    }
   }
 
   // Walks up from the body to the message's own container (the closest
@@ -8396,7 +8413,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   const observer = new MutationObserver(() => scheduleCapture());
   observer.observe(document.body, { childList: true, subtree: true, characterData: false });
 
-  refreshSettings().then(() => scan());
+  // The new-mail scan opens emails (Outlook then marks them read) and drafts them: only when switched on.
+  refreshSettings().then(() => { if (settings.autoScan) scan(); });
   setInterval(async () => {
     await refreshSettings();
     if (settings.autoScan) scan();
@@ -8406,7 +8424,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 })();
 
 
-===== FILE: extension/lib/agent.js (779 lines) =====
+===== FILE: extension/lib/agent.js (802 lines) =====
 // The browser agent: does a task in Chrome for the user with the mouse and keyboard (a general version of the
 // game-testing agent). The AI reads the page as a numbered list of elements (or a screenshot when the page is
 // visual), and acts through lib/browser.js. Files come from the NAS or the project folders on this computer.
@@ -8439,6 +8457,9 @@ export const ASK_SETTINGS = {
   agentAskOverwrite: { kinds: ['overwrite'], label: 'replacing a file on the NAS' },
 };
 const settingFor = (kind) => Object.keys(ASK_SETTINGS).find((k) => ASK_SETTINGS[k].kinds.includes(kind)) || null;
+
+/** Untrusted text put between <tags> in a prompt: a "</tag>" inside it can't close the block. */
+const fence = (text) => String(text ?? '').replace(/<\/(?=\s*[a-z_]+\s*>)/gi, '<\u200b/');
 
 const hostOf = (url) => {
   try {
@@ -8498,6 +8519,7 @@ export class Agent extends EventTarget {
     this.tabs = new Map(); // tabId → TabControl
     this.tab = null;
     this.allowedHosts = hostsInText(this.task);
+    this.taskHosts = new Set(this.allowedHosts); // the sites the task itself named
     this.always = new Set(); // "kind:host" the user allowed for the rest of this task
     this.cost = 0;
     this.steps = 0;
@@ -8611,7 +8633,12 @@ export class Agent extends EventTarget {
   /** Navigation to a site the task didn't name needs the user's OK (a page could try to send data elsewhere). */
   async allowSite(url) {
     const host = hostOf(url);
-    if (!host) return true;
+    if (!host) {
+      // file:, data:, blob:, about: and the like have no site to check: the user decides (a blank page is fine).
+      if (!url || /^about:blank$/i.test(String(url).trim())) return true;
+      const scheme = (/^([a-z][a-z0-9+.-]*):/i.exec(String(url)) || [])[1] || 'that address';
+      return this.permit('site', `${scheme}:`, `Work with a ${scheme}: address?`, `${String(url).slice(0, 300)}\nThis is not a web site; it can be a file on this computer.`);
+    }
     const start = this.startHost;
     if (host === start || this.allowedHosts.has(host) || [...this.allowedHosts].some((h) => host.endsWith(`.${h}`))) return true;
     const ok = await this.permit('site', host, `Go to ${host}?`, `The task didn't mention ${host}. Pages can contain instructions meant to mislead the agent, so it only goes to new sites with your OK.\n${url}`);
@@ -8628,7 +8655,7 @@ export class Agent extends EventTarget {
       const r = await review(this.settings, {
         provider: this.provider,
         what: `a browser step about to happen: ${what}`,
-        sources: `<task>\n${this.task}\n</task>\n<answers_from_user>\n${(this.answers || []).join('\n') || '(none)'}\n</answers_from_user>\n<page url="${snap.url}">\n${snap.text.slice(0, 1500)}\n</page>`,
+        sources: `<task>\n${fence(this.task)}\n</task>\n<answers_from_user>\n${fence((this.answers || []).join('\n') || '(none)')}\n</answers_from_user>\n<page url="${fence(snap.url).replace(/"/g, '%22')}">\n${fence(snap.text.slice(0, 1500))}\n</page>`,
         text: `About to: ${what}\nForm fields now:\n${fields || '(no fields)'}`,
         signal: this.signal,
       });
@@ -8661,7 +8688,10 @@ export class Agent extends EventTarget {
     if (!/^https?:\/\//i.test(url)) throw new Error(`Unknown file source "${from}". Use nas:/path, local:<folder>/<path> or a web address.`);
     // A web address is a request to that site (and could carry data out in the address): new sites need the user.
     if (!(await this.allowSite(url))) throw new Error('The user said no to that site.');
-    const res = await fetch(url, { credentials: 'include' });
+    // Your logins (cookies) go only to the site you started on and sites the task named, not to sites a page sent it to.
+    const h = hostOf(url);
+    const trusted = h && (h === this.startHost || this.taskHosts?.has(h) || [...(this.taskHosts || [])].some((t) => h.endsWith(`.${t}`)));
+    const res = await fetch(url, { credentials: trusted ? 'include' : 'omit' });
     if (!res.ok) throw new Error(`download failed (${res.status})`);
     const blob = await res.blob();
     const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'download');
@@ -8738,10 +8768,19 @@ export class Agent extends EventTarget {
         input_schema: S({ x: int('x in screenshot pixels'), y: int('y in screenshot pixels'), double: bool('double-click') }, ['x', 'y']),
         run: async ({ x, y, double }) => {
           const tc = this.current();
-          if (await this.mustAsk('click_xy')) {
-            if (!(await this.permit('click', hostOf(await this.currentUrl()), `Click at ${x}, ${y}?`, ''))) return { declined: true };
+          const cx = x / (tc.scale || 1);
+          const cy = y / (tc.scale || 1);
+          // The same checks as click for what is under the point (a link to another site, a send button).
+          const at = await tc.pointInfo(cx, cy).catch(() => null);
+          const label = at?.name || at?.tag || `${x}, ${y}`;
+          if (at?.href && /^https?:/i.test(at.href) && !(await this.allowSite(at.href))) return { declined: true, note: 'The user said no to that site.' };
+          const risky = !!at && !at.canvas && (at.submits || RISKY_WORDS.test(at.name || ''));
+          if (risky || (await this.mustAsk('click_xy'))) {
+            const host = hostOf(await this.currentUrl());
+            const check = risky ? await this.secondOpinion(`click "${label}" on ${host}`) : null;
+            if (!(await this.permit(at?.submits ? 'submit' : 'click', host, `Click “${label}” on ${host}?`, at?.submits ? 'This sends the form.' : `at ${x}, ${y}`, { check }))) return { declined: true, note: 'The user said no. Don’t try another way; ask or stop.' };
           }
-          await tc.clickAt(x / (tc.scale || 1), y / (tc.scale || 1), { double: !!double });
+          await tc.clickAt(cx, cy, { double: !!double });
           return { clicked: [x, y], ...(await after(tc)) };
         },
       },
@@ -9026,7 +9065,9 @@ export class Agent extends EventTarget {
             url = URL.createObjectURL(src.blob);
             revoke = url;
           }
-          const id = await chrome.downloads.download({ url, filename: String(name).replace(/^[\\/]+/, ''), conflictAction: 'uniquify' });
+          // A name inside Downloads only: no absolute paths, no ".." (Chrome refuses those too).
+          const filename = String(name).split(/[\\/]+/).filter((p) => p && p !== '.' && p !== '..').join('/') || 'download';
+          const id = await chrome.downloads.download({ url, filename, conflictAction: 'uniquify' });
           if (revoke) setTimeout(() => URL.revokeObjectURL(revoke), 60000);
           return { downloading: true, id };
         },
@@ -9071,7 +9112,7 @@ export class Agent extends EventTarget {
       const res = await runChat({ ...settings, _tag: 'agent' }, {
         provider: this.provider,
         system: SYSTEM(who),
-        history: [{ role: 'user', text: `<task>\n${this.task}\n</task>${this.startTabId ? '\nThe tab to work in is already open: start with read_page.' : '\nNo tab was chosen: use list_tabs / open_tab as needed.'}` }],
+        history: [{ role: 'user', text: `<task>\n${fence(this.task)}\n</task>${this.startTabId ? '\nThe tab to work in is already open: start with read_page.' : '\nNo tab was chosen: use list_tabs / open_tab as needed.'}` }],
         tools: this.tools(),
         effort: settings.agentEffort || 'medium',
         maxTokens: 3000,
@@ -9110,7 +9151,7 @@ export class Agent extends EventTarget {
       const tc = this.tab?.attached ? this.tab : null;
       if (tc) {
         const snap = await tc.snapshot({ maxElements: 60, maxText: 2500 });
-        page = `<final_page url="${snap.url}">\n${snap.text}\n${snap.elements.filter((e) => 'value' in e).map((e) => `[${e.n}] ${e.name}: ${e.value}`).join('\n')}\n</final_page>`;
+        page = `<final_page url="${fence(snap.url).replace(/"/g, '%22')}">\n${fence(snap.text)}\n${fence(snap.elements.filter((e) => 'value' in e).map((e) => `[${e.n}] ${e.name}: ${e.value}`).join('\n'))}\n</final_page>`;
       }
     } catch {
       /* the page went away */
@@ -9120,7 +9161,7 @@ export class Agent extends EventTarget {
       const r = await review(this.settings, {
         provider: this.provider,
         what: 'the browser agent’s summary of a finished task',
-        sources: `<task>\n${this.task}\n</task>\n<answers_from_user>\n${(this.answers || []).join('\n') || '(none)'}\n</answers_from_user>\n<actions_taken>\n${actions || '(none)'}\n</actions_taken>\n${page}`,
+        sources: `<task>\n${fence(this.task)}\n</task>\n<answers_from_user>\n${fence((this.answers || []).join('\n') || '(none)')}\n</answers_from_user>\n<actions_taken>\n${fence(actions || '(none)')}\n</actions_taken>\n${page}`,
         text: this.summary,
         hints: failed.length ? [`these steps failed or didn't check out: ${failed.join('; ')}`] : [],
         signal: this.signal,
@@ -10377,7 +10418,7 @@ export function resultText(result, max = 3000) {
 }
 
 
-===== FILE: extension/lib/browser.js (366 lines) =====
+===== FILE: extension/lib/browser.js (385 lines) =====
 // Controls a Chrome tab for the browser agent through the DevTools protocol (chrome.debugger):
 // real (trusted) mouse clicks and key presses, typing, screenshots, and a numbered list of the page's
 // interactive elements, so the AI can act by number instead of guessing coordinates (cheaper and more
@@ -10484,6 +10525,21 @@ function locate(n) {
     payment: /cc-|card/i.test(`${e.getAttribute('autocomplete') || ''} ${e.name || ''} ${e.id || ''}`),
     editable: e.isContentEditable || /^(INPUT|TEXTAREA)$/.test(e.tagName),
     covered,
+  };
+}
+
+/** What is under a point (CSS pixels): the clickable element there, if any (for click_xy's checks). */
+function pointInfo(x, y) {
+  const at = document.elementFromPoint(x, y);
+  if (!at) return null;
+  const e = at.closest('a[href], button, input, select, textarea, [role="button"], [role="link"], [onclick]') || at;
+  const form = e.form || e.closest('form');
+  return {
+    tag: e.tagName.toLowerCase(),
+    name: (e.getAttribute('aria-label') || e.innerText || e.value || e.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+    href: e.href || '',
+    submits: (e.tagName === 'BUTTON' && (e.type || 'submit') === 'submit' && !!form) || (e.tagName === 'INPUT' && /^(submit|image)$/i.test(e.type)),
+    canvas: at.tagName === 'CANVAS' || at.tagName === 'VIDEO' || at.tagName === 'IFRAME',
   };
 }
 
@@ -10666,6 +10722,10 @@ export class TabControl {
     return this.run(locate, n);
   }
 
+  pointInfo(x, y) {
+    return this.run(pointInfo, x, y);
+  }
+
   async mouse(type, x, y, extra = {}) {
     await this.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1, ...extra });
   }
@@ -10746,7 +10806,7 @@ export class TabControl {
 }
 
 
-===== FILE: extension/lib/chat.js (797 lines) =====
+===== FILE: extension/lib/chat.js (824 lines) =====
 // The assistant chat: the user tells the extension, in plain words, what isn't working the way they want,
 // and it changes itself — settings, standing instructions, which documents to use, project memory, folder
 // options and Power Automate flows. Every change goes through a tool here, is logged, and can be undone.
@@ -10776,6 +10836,12 @@ const STR = 'string';
 const INT = 'integer';
 const BOOL = 'boolean';
 const LIST = 'list'; // comma- or line-separated text in, array out
+
+/**
+ * Safety switches: the chat can change them only with the user's click ("Apply" under the reply), so text in a
+ * file, an email or a web page can never talk it out of asking first or into spending more.
+ */
+export const SAFETY_KEYS = new Set(['agentConfirm', 'agentAskSend', 'agentAskSite', 'agentAskUpload', 'agentAskOverwrite', 'chatFileConfirm', 'hpCommandConfirm', 'dailyBudgetUsd']);
 
 /** key: [type, description, {enum|min|max}] — secrets (API keys) are deliberately not here. */
 export const EDITABLE = {
@@ -11004,15 +11070,24 @@ function makeTools(ctx) {
         const s = await getSettings();
         const patch = {};
         const before = {};
+        const safety = {};
         for (const c of changes || []) {
-          patch[c.key] = coerce(c.key, c.value);
-          before[c.key] = s[c.key];
+          const v = coerce(c.key, c.value);
+          if (SAFETY_KEYS.has(c.key)) safety[c.key] = v;
+          else {
+            patch[c.key] = v;
+            before[c.key] = s[c.key];
+          }
+        }
+        if (Object.keys(safety).length) {
+          ctx.pending.push({ id: newRequestId(), kind: 'setting', patch: safety, summary: `Change ${Object.entries(safety).map(([k, v]) => `${k} → ${JSON.stringify(v)}`).join(', ')}` });
+          if (!Object.keys(patch).length) return { awaiting_user: true, note: 'Safety settings change only when the user clicks "Apply" under your reply.' };
         }
         if (!Object.keys(patch).length) return { error: 'nothing to change' };
         await saveSettings(patch);
         await change(`Settings: ${Object.entries(patch).map(([k, v]) => `${k} → ${JSON.stringify(v)}`).join(', ')}`, { settings: before }, 'update_settings');
         if ('nasFolders' in patch || 'excludePatterns' in patch || 'includeExt' in patch) ctx.reindex = true;
-        return { ok: true, now: patch };
+        return { ok: true, now: patch, ...(Object.keys(safety).length ? { awaiting_user: Object.keys(safety), note: 'Safety settings change only when the user clicks "Apply" under your reply.' } : {}) };
       },
     },
     {
@@ -11503,6 +11578,18 @@ export async function runPendingTest(messageId, testId) {
   const p = msg?.pending?.find((x) => x.id === testId);
   if (!p) throw new Error('That test is no longer available');
   if (p.done) return p;
+  if (p.kind === 'setting') {
+    // A safety setting the chat proposed: applied now that the user clicked, with Undo like any change.
+    const s = await getSettings();
+    const before = Object.fromEntries(Object.keys(p.patch || {}).map((k) => [k, s[k]]));
+    await saveSettings(p.patch || {});
+    await recordChange(`Settings: ${Object.entries(p.patch || {}).map(([k, v]) => `${k} → ${JSON.stringify(v)}`).join(', ')}`, { settings: before }, 'update_settings');
+    p.result = 'Applied.';
+    p.ok = true;
+    p.done = true;
+    await put('chat', msg);
+    return p;
+  }
   if (p.kind === 'hp') {
     try {
       const r = await runOnHp(p.command, { cwd: p.folder, timeout: p.timeout });
@@ -15063,7 +15150,7 @@ export async function clearChanges() {
 }
 
 
-===== FILE: extension/lib/mirror.js (327 lines) =====
+===== FILE: extension/lib/mirror.js (329 lines) =====
 // Mirror: make a NAS folder match a local folder, sending only what changed.
 //
 // A small manifest (.nas-uploader-mirror.json) in the NAS folder records the size and modification time each
@@ -15202,6 +15289,8 @@ export function planMirror({ local, remote, manifest, options = {} }) {
   const unreadable = (local.errors || []).map((e) => nfc(e.rel).replace(/^\.\/?/, '').replace(/\/+$/, ''));
   const unreadableAll = unreadable.includes('');
   const isUnreadable = (key) => unreadableAll || unreadable.some((u) => key === u || key.startsWith(u + '/'));
+  // Something inside this folder couldn't be read here: the folder (and what's in it) stays on the NAS.
+  const hasUnreadableInside = (key) => unreadable.some((u) => u.startsWith(key + '/'));
 
   // Ignore things on the NAS that a mirror must never touch.
   const ignoredRemote = (key, isDir) => {
@@ -15307,7 +15396,7 @@ export function planMirror({ local, remote, manifest, options = {} }) {
     const sortedDirs = [...remoteDirs.keys()].sort((a, b) => a.split('/').length - b.split('/').length);
     for (const k of sortedDirs) {
       if (localDirs.has(k)) continue;
-      if (isUnreadable(k)) {
+      if (isUnreadable(k) || hasUnreadableInside(k)) {
         keptDirKeys.add(k);
         continue;
       }
@@ -18950,7 +19039,7 @@ export async function readEntryText(blob, entry) {
 }
 
 
-===== FILE: server/setup-webdav.sh (984 lines) =====
+===== FILE: server/setup-webdav.sh (993 lines) =====
 #!/usr/bin/env bash
 # =============================================================================
 #  NAS Uploader — server setup for a Proxmox LXC container (Debian / Ubuntu)
@@ -19107,6 +19196,7 @@ if [[ $UNINSTALL -eq 1 ]]; then
   fi
   rm -f /etc/sudoers.d/nas-uploader-commands /etc/nas-uploader-command-key /usr/local/lib/nas-uploader/run-command /usr/local/lib/nas-uploader/cgi/run.cgi
   userdel -r nas-runner >/dev/null 2>&1 || true
+  groupdel nas-secrets >/dev/null 2>&1 || true
   rm -rf "$STATE_DIR"
   apache_reload || true
   ok "Removed. Apache itself is still installed (apt-get remove apache2 to remove it too)."
@@ -19279,7 +19369,11 @@ else
   printf '%s' "$WEB_PASS" > "$STATE_DIR/password"
   ok "User $WEB_USER created"
 fi
-chown "root:$RUN_GROUP" "$HTPASSWD"
+# Secrets (the login file, the command key) are readable by the web server's user through a group of their own,
+# not through the web server's group: the "nas-runner" user that runs commands is in that group, for the files.
+groupadd -f nas-secrets
+usermod -a -G nas-secrets "$RUN_USER"
+chown "root:nas-secrets" "$HTPASSWD"
 chmod 640 "$HTPASSWD"
 chmod 600 "$STATE_DIR/password"
 
@@ -19575,6 +19669,10 @@ def main():
     cmd = str(req.get('cmd') or '')
     if not cmd.strip():
         return reply('400 Bad Request', {'error': 'no command'})
+    home = os.path.realpath(os.environ.get('NAS_RUNNER_HOME', '') or '/')
+    cwd = os.path.realpath(str(req.get('cwd') or home))
+    if not (cwd == home or cwd.startswith(home.rstrip('/') + '/')):
+        return reply('400 Bad Request', {'error': f'the folder must be inside the shared folder ({home})'})
     os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
     with open(LOCK_FILE, 'w') as lock:
         # One command at a time; wait up to 10 s for the one before.
@@ -19588,11 +19686,11 @@ def main():
             return reply('409 Conflict', {'error': 'another command is still running'})
         t0 = time.time()
         try:
-            p = subprocess.run(RUNNER, input=json.dumps({'cmd': cmd, 'cwd': req.get('cwd') or os.environ.get('NAS_RUNNER_HOME', ''), 'timeout': req.get('timeout') or 60}).encode(), capture_output=True, timeout=660)
+            p = subprocess.run(RUNNER, input=json.dumps({'cmd': cmd, 'cwd': cwd, 'timeout': req.get('timeout') or 60}).encode(), capture_output=True, timeout=660)
             out = json.loads(p.stdout or b'{}') if p.returncode == 0 else {'error': (p.stderr or b'').decode('utf-8', 'replace')[-2000:] or f'runner failed ({p.returncode})'}
         except (subprocess.TimeoutExpired, ValueError) as e:
             out = {'error': f'runner failed: {e}'}
-    log({'at': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(t0)), 'user': who, 'ip': ip, 'cmd': cmd[:2000], 'cwd': req.get('cwd') or '', 'exit': out.get('exit'), 'ms': out.get('ms'), 'error': out.get('error')})
+    log({'at': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(t0)), 'user': who, 'ip': ip, 'cmd': cmd[:2000], 'cwd': cwd, 'exit': out.get('exit'), 'ms': out.get('ms'), 'error': out.get('error')})
     return reply('200 OK' if 'error' not in out else '500 Internal Server Error', out)
 
 
@@ -19602,7 +19700,7 @@ PYEOF
   chmod 755 "$RUN_DIR/run-command" "$RUN_DIR/cgi/run.cgi"
   chown root:root "$RUN_DIR/run-command" "$RUN_DIR/cgi/run.cgi"
   [[ -s "$CMD_KEY_FILE" ]] || { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$CMD_KEY_FILE"; }
-  chown "root:$RUN_GROUP" "$CMD_KEY_FILE"; chmod 640 "$CMD_KEY_FILE"
+  chown "root:nas-secrets" "$CMD_KEY_FILE"; chmod 640 "$CMD_KEY_FILE"
   CMD_KEY="$(cat "$CMD_KEY_FILE")"
   touch /var/log/nas-uploader-commands.log; chown "$RUN_USER:$RUN_GROUP" /var/log/nas-uploader-commands.log; chmod 640 /var/log/nas-uploader-commands.log
   printf '%s ALL=(nas-runner) NOPASSWD: %s\n' "$RUN_USER" "$RUN_DIR/run-command" > /etc/sudoers.d/nas-uploader-commands.tmp
@@ -19937,7 +20035,7 @@ if [[ $JELLYFIN_HERE -eq 1 ]]; then
 fi
 
 
-===== FILE: server/assistant-ocr-index.py (388 lines) =====
+===== FILE: server/assistant-ocr-index.py (425 lines) =====
 #!/usr/bin/env python3
 """Builds the OCR ("deep") index for Project Assistant on the NAS: scanned PDFs, photos and email archives.
 
@@ -20094,12 +20192,19 @@ def eml_text(path, folder=''):
 
 def mail_pages(path, ext, max_chars, deadline):
     """Unpacks a .pst or .msg into [[n, email text], ...], newest email first."""
+    # Unpacking needs about twice the mailbox's size; it stops at the run's time budget (or 2 h).
+    need = os.path.getsize(path) * 2 + 50_000_000
+    if shutil.disk_usage(tempfile.gettempdir()).free < need:
+        raise RuntimeError(f'not enough free space in {tempfile.gettempdir()} to unpack it ({need // 1_000_000} MB needed)')
+    left = int(deadline - time.time()) if deadline else 7200
+    if left < 30:
+        raise RuntimeError('no time left in this run (it is done next run)')
     tmp = tempfile.mkdtemp(prefix='mail-')
     try:
         if ext == '.pst':
-            run(['readpst', '-e', '-q', '-8', '-t', 'e', '-j', '0', '-o', tmp, path], timeout=7200)
+            run(['readpst', '-e', '-q', '-8', '-t', 'e', '-j', '0', '-o', tmp, path], timeout=min(7200, left))
         else:
-            run(['msgconvert', '--outfile', os.path.join(tmp, 'message.eml'), path], timeout=300)
+            run(['msgconvert', '--outfile', os.path.join(tmp, 'message.eml'), path], timeout=min(300, left))
         mails = []
         for dirpath, _, files in os.walk(tmp):
             for name in files:
@@ -20116,7 +20221,7 @@ def mail_pages(path, ext, max_chars, deadline):
         pages, used = [], 0
         for i, (_, text) in enumerate(mails, start=1):
             if used + len(text) > max_chars:
-                break
+                continue  # too long for what's left: older, shorter emails may still fit
             pages.append([i, text])
             used += len(text)
         return pages, len(mails)
@@ -20130,13 +20235,25 @@ def xml_text(xml):
     return html.unescape(re.sub(r'<[^>]+>', '', xml))
 
 
+MAX_XML_BYTES = 64_000_000  # one part of an Office file, unpacked (a "zip bomb" is skipped, not read)
+
+
 def office_pages(path, ext):
     """Text of a Word / Excel / PowerPoint file: [[page, text]] (slides and sheets count as pages)."""
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
-        read = lambda n: z.read(n).decode('utf-8', 'replace')
+
+        def read(n):
+            if z.getinfo(n).file_size > MAX_XML_BYTES:
+                raise RuntimeError(f'{n} is too large unpacked')
+            return z.read(n).decode('utf-8', 'replace')
+
         if ext in ('.docx', '.docm'):
-            return [[0, xml_text(read('word/document.xml'))]] if 'word/document.xml' in names else []
+            if 'word/document.xml' not in names:
+                return []
+            # The body, then headers, footers, footnotes and endnotes (often where a drawing number or date is).
+            extra = sorted(n for n in names if re.match(r'word/(header|footer)\d*\.xml$|word/(footnotes|endnotes)\.xml$', n))
+            return [[0, '\n'.join(xml_text(read(n)) for n in ['word/document.xml', *extra])]]
         if ext == '.pptx':
             slides = sorted((n for n in names if re.match(r'ppt/slides/slide\d+\.xml$', n)), key=lambda n: int(re.findall(r'\d+', n)[-1]))
             return [[i, xml_text(read(n))] for i, n in enumerate(slides, start=1)]
@@ -20149,7 +20266,14 @@ def office_pages(path, ext):
             rows = []
             for row in re.findall(r'<row[^>]*>(.*?)</row>', read(n), re.S):
                 cells = []
-                for attrs, v in re.findall(r'<c([^>]*)>(?:.*?<v>(.*?)</v>)?', row, re.S):
+                for attrs, body in re.findall(r'<c([^>]*?)(?:/>|>(.*?)</c>)', row, re.S):
+                    if 't="inlineStr"' in attrs:
+                        inline = re.search(r'<is>(.*?)</is>', body or '', re.S)
+                        if inline:
+                            cells.append(xml_text(inline.group(1)))
+                        continue
+                    m = re.search(r'<v>(.*?)</v>', body or '', re.S)
+                    v = m.group(1) if m else ''
                     if not v:
                         continue
                     cells.append(shared[int(v)] if 't="s"' in attrs and v.isdigit() and int(v) < len(shared) else html.unescape(v))
@@ -20205,6 +20329,8 @@ def walk(root, nas_only=False, skip=frozenset()):
         for name in sorted(filenames):
             if name.startswith('.') or name.startswith('~$'):
                 continue
+            if os.path.islink(os.path.join(dirpath, name)):
+                continue  # a link could point outside the shared folder
             ext = os.path.splitext(name)[1].lower()
             if ext in kinds:
                 yield os.path.join(dirpath, name), ext, nas_only
@@ -20220,7 +20346,7 @@ def main():
     ap.add_argument('--folder', action='append', default=[], help='a project folder (NAS path) to include; repeatable')
     ap.add_argument('--max-mail-chars', type=int, default=8_000_000, help='most text kept per mailbox (newest emails first)')
     a = ap.parse_args()
-    root = os.path.abspath(a.root)
+    root = os.path.realpath(a.root)
     out_path = os.path.join(root, OUT_REL)
     folders = list(a.folder)
     nas_only = []
@@ -20235,8 +20361,9 @@ def main():
         log('project-folders.json unreadable:', e)
 
     def inside_root(x):
-        d = os.path.abspath(os.path.join(root, x.strip('/')))
-        return d if (d == root or d.startswith(root + os.sep)) and os.path.isdir(d) and d != root else None
+        # realpath: a folder that is (or goes through) a symlink is judged by where it really is.
+        d = os.path.realpath(os.path.join(root, x.strip('/')))
+        return d if d.startswith(root + os.sep) and os.path.isdir(d) else None
 
     mirrored = list(dict.fromkeys(filter(None, map(inside_root, folders))))
     within = lambda d, parents: any(d == p or d.startswith(p + os.sep) for p in parents)
@@ -20309,11 +20436,19 @@ def main():
             log('failed', rel, e)
     if not scan_dirs and not prev:
         return 0
-    tmp = out_path + '.tmp'
-    with gzip.open(tmp, 'wt', encoding='utf-8') as f:
-        for r in records:
-            f.write(json.dumps(r, ensure_ascii=False) + '\n')
-    os.replace(tmp, out_path)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(out_path), prefix='.deep-index-', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'wb') as raw, gzip.open(raw, 'wt', encoding='utf-8') as f:
+            for r in records:
+                f.write(json.dumps(r, ensure_ascii=False) + '\n')
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, out_path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     if a.owner:
         try:
             shutil.chown(out_path, a.owner, a.owner)

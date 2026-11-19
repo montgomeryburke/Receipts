@@ -587,7 +587,8 @@ const SECRET = new Set(['anthropicKey', 'geminiKey', 'localKey', 'hpCommandKey']
 
 $('exportSetup').addEventListener('click', async () => {
   const s = await getSettings();
-  const out = Object.fromEntries(Object.entries(s).filter(([k]) => !SECRET.has(k) && k !== 'folderPrefs'));
+  // Only known settings, never keys or anything else stored alongside them.
+  const out = Object.fromEntries(Object.entries(s).filter(([k]) => k in DEFAULT_SETTINGS && !SECRET.has(k) && k !== 'folderPrefs'));
   out.rules = await getRules();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify({ projectAssistantSettings: 1, at: new Date().toISOString(), settings: out }, null, 2)], { type: 'application/json' }));
@@ -636,7 +637,11 @@ $('importSetup').addEventListener('click', () => {
   renderProjectMail();
   renderModelPicker('gemini');
   $('nasFolders').value = (settings.nasFolders || []).join('\n');
-  if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+  if (location.hash) {
+    let id = location.hash.slice(1);
+    try { id = decodeURIComponent(id); } catch { /* keep it as is */ }
+    document.getElementById(id)?.scrollIntoView();
+  }
 })();
 
 // ---------------------------------------------------------------- voice

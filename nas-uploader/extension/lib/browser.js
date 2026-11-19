@@ -107,6 +107,21 @@ function locate(n) {
   };
 }
 
+/** What is under a point (CSS pixels): the clickable element there, if any (for click_xy's checks). */
+function pointInfo(x, y) {
+  const at = document.elementFromPoint(x, y);
+  if (!at) return null;
+  const e = at.closest('a[href], button, input, select, textarea, [role="button"], [role="link"], [onclick]') || at;
+  const form = e.form || e.closest('form');
+  return {
+    tag: e.tagName.toLowerCase(),
+    name: (e.getAttribute('aria-label') || e.innerText || e.value || e.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+    href: e.href || '',
+    submits: (e.tagName === 'BUTTON' && (e.type || 'submit') === 'submit' && !!form) || (e.tagName === 'INPUT' && /^(submit|image)$/i.test(e.type)),
+    canvas: at.tagName === 'CANVAS' || at.tagName === 'VIDEO' || at.tagName === 'IFRAME',
+  };
+}
+
 function prepareTyping(n, clear) {
   const e = document.querySelector(`[data-agent-id="${n}"]`);
   if (!e) return { error: 'element not found' };
@@ -284,6 +299,10 @@ export class TabControl {
 
   locate(n) {
     return this.run(locate, n);
+  }
+
+  pointInfo(x, y) {
+    return this.run(pointInfo, x, y);
   }
 
   async mouse(type, x, y, extra = {}) {

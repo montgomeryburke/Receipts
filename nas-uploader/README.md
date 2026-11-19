@@ -532,6 +532,20 @@ can read the password from the extension folder. To limit the damage if a comput
   forgets it immediately;
 - remove the extension and delete its folder from computers you don't own.
 
+What the assistant does to stay safe:
+- **Pages, emails and files are data, not instructions.** Text in them can't close the prompt's sections, the chat
+  can't switch off any "ask me first" (the agent's questions, file changes, HP commands) or raise the daily limit
+  without your click on **Apply**, and the browser agent asks before sites the task didn't name, `file:`/`data:`
+  addresses, send/pay/delete-type clicks (also when clicking by screen position), and uploads. Your logins
+  (cookies) go only to the sites the task is about.
+- **Nothing it shows runs as the extension.** HTML and SVG files are shown as text, never opened as pages in the
+  extension; only `http(s)` links become links; values from the AI are escaped.
+- **The HP.** Commands run as `nas-runner` (not root), only in the shared folder, with a time limit and a log; the
+  login file and the command key are in a group `nas-runner` isn't in. The OCR job never follows a symbolic link
+  out of the shared folder and skips oversized ("zip bomb") Office parts.
+- **The mirror never deletes what it couldn't read here**: a NAS folder with anything unreadable inside stays, and a
+  plan that would delete most of the NAS copy starts with deletions switched off.
+
 ---
 
 ## Tests
@@ -548,8 +562,14 @@ checking each other (a wrong number corrected, a made-up quote flagged, look-ups
 remembered), the kill switch and the daily limit, the "both" transcription mode with real Whisper, and the browser
 agent on real pages (a form filled with trusted clicks and typing and sent only after Allow; NAS files uploaded to a
 web form with new names; a planted "go to this site" ignored, a password refused, Stop; a canvas game with held keys;
-a desktop flow link with its inputs). It uses mock Claude and
+a desktop flow link with its inputs), web look-ups in drafts and the chat, read-aloud and dictation, the chat taking
+control (page, browser agent, files, commands on the HP through the real endpoint scripts), and the safety rules
+above. It uses mock Claude and
 Gemini servers, so no keys are needed: `node tests/assistant-e2e.cjs` with the WebDAV test servers running.
+
+`tests/test-ocr-index.py` checks the HP's OCR/full-text job on a throwaway folder (symbolic links, Word headers,
+Excel inline text, zip bombs); `tests/test-setup-script.sh` runs the setup script for real in a throwaway container
+(`CI_OK_TO_MODIFY_SYSTEM=1`), including commands on the HP.
 
 `tests/e2e.cjs` is the NAS uploader suite. It loads the real extension into Chromium (Playwright) and uploads and mirrors
 real folder trees to real WebDAV servers:

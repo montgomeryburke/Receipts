@@ -208,8 +208,13 @@ check "commands: no NAS login refused (401)" [ "$(curl -sk -o /dev/null -w '%{ht
 check "commands: not root" bash -c "! grep -q '\"stdout\": \"root' <<<'$(run_cmd "$KEY" '{"cmd":"whoami"}')'"
 r="$(run_cmd "$KEY" '{"cmd":"sleep 30","timeout":2}')"
 check "commands: time limit stops it" grep -q '"timed_out": true' <<<"$r"
+check "commands: installed scripts are the ones in server/commands" bash -c "cmp -s /usr/local/lib/nas-uploader/cgi/run.cgi '$HERE/../server/commands/run.cgi' && cmp -s /usr/local/lib/nas-uploader/run-command '$HERE/../server/commands/run-command'"
 check "commands: logged" grep -q '"cmd": "whoami; pwd; id -nG"' /var/log/nas-uploader-commands.log
 check "commands: the key file is not readable by everyone" [ "$(stat -c %a /etc/nas-uploader-command-key)" = 640 ]
+check "commands: nas-runner can't read the command key" bash -c "! runuser -u nas-runner -- cat /etc/nas-uploader-command-key >/dev/null 2>&1"
+check "commands: nas-runner can't read the login file" bash -c "! runuser -u nas-runner -- cat /etc/apache2/nas-uploader.htpasswd >/dev/null 2>&1"
+check "commands: a folder outside the share is refused (400)" [ "$(run_cmd "$KEY" '{"cmd":"pwd","cwd":"/etc"}' | tail -1)" = 400 ]
+check "commands: a folder inside the share is used" grep -q '"cwd": "/srv/test-media/Movies"' <<<"$(run_cmd "$KEY" '{"cmd":"pwd","cwd":"/srv/test-media/Movies"}')"
 out="$("$SCRIPT" --yes --access local --port 18490 --password "$PASS" 2>&1)"
 check "commands: remembered on a later run" [ "$(run_cmd "$KEY" '{"cmd":"echo still"}' | tail -1)" = 200 ]
 out="$("$SCRIPT" --yes --access local --port 18490 --password "$PASS" --disable-commands 2>&1)"
