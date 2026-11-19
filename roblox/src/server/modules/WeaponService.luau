@@ -26,6 +26,7 @@ local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 local FireService = require(script.Parent:WaitForChild("FireService"))
 local BasketballService = require(script.Parent:WaitForChild("BasketballService"))
+local BowlingService = require(script.Parent:WaitForChild("BowlingService"))
 local MedalService = require(script.Parent:WaitForChild("MedalService"))
 local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
@@ -215,6 +216,11 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 
 	-- The basketball. A rifle makes a perfectly good pass.
 	if BasketballService.RegisterHit(result.Instance, player, direction) then
+		return
+	end
+
+	-- A bowling ball or a pin. A strike by rifle is still a strike.
+	if BowlingService.RegisterHit(result.Instance, player, direction) then
 		return
 	end
 

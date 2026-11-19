@@ -1714,6 +1714,16 @@ end
 	Shares the puck's line, because you cannot hold both and two labels in
 	the same place would be a bug waiting to look like one.
 ]]
+--[[ You have a bowling ball. Shares the line, as nothing else can be held. ]]
+function Hud.SetBowlingBall(carrying: boolean)
+	local label = puckLabel
+	if not label then
+		return
+	end
+	label.Visible = carrying
+	label.Text = "HOLD F TO WIND UP — AIM WHERE YOU LOOK"
+end
+
 function Hud.SetBall(carrying: boolean)
 	local label = puckLabel
 	if not label then

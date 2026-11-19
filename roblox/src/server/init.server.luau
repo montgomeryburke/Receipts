@@ -110,6 +110,7 @@ local ArcadeService = tryRequire(modules, "ArcadeService")
 local FireService = tryRequire(modules, "FireService")
 local MedalService = tryRequire(modules, "MedalService")
 local BasketballService = tryRequire(modules, "BasketballService")
+local BowlingService = tryRequire(modules, "BowlingService")
 
 tryStart("GraphicsService", GraphicsService)
 tryStart("TeamService", TeamService)
@@ -122,6 +123,7 @@ tryStart("ArcadeService", ArcadeService)
 tryStart("FireService", FireService)
 tryStart("MedalService", MedalService)
 tryStart("BasketballService", BasketballService)
+tryStart("BowlingService", BowlingService)
 tryStart("MatchService", MatchService)
 
 -- ========================================================= 3. THE HUD FEED ==

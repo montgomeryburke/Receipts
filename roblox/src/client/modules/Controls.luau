@@ -309,6 +309,7 @@ local heldTool: string? = nil
 local inVenue: string? = nil
 local carrying = false
 local carryingBall = false
+local carryingBowling = false
 local pouring = false
 local nextPourAt = 0
 local guardKeyDown = false
@@ -743,9 +744,13 @@ local CONTEXT_BINDINGS: { [string]: { [Enum.KeyCode]: Binding } } = {
 		[Enum.KeyCode.F] = {
 			label = "SHOOT",
 			when = function()
-				return carrying or carryingBall
+				return carrying or carryingBall or carryingBowling
 			end,
 			down = function()
+				if carryingBowling then
+					Remotes.Event("BallCharge"):FireServer(true)
+					return
+				end
 				if carryingBall then
 					-- Held: the wind-up starts now and the power is however
 					-- long it lasts, timed on the server.
@@ -758,10 +763,14 @@ local CONTEXT_BINDINGS: { [string]: { [Enum.KeyCode]: Binding } } = {
 				end
 			end,
 			up = function()
+				local _, direction = currentAimDirection()
+				if carryingBowling then
+					Remotes.Event("RollBall"):FireServer(direction)
+					return
+				end
 				if not carryingBall then
 					return
 				end
-				local _, direction = currentAimDirection()
 				Remotes.Event("BallShoot"):FireServer(direction)
 			end,
 		},
@@ -1549,6 +1558,7 @@ function Controls.SetVenue(id: string?)
 	if not id then
 		carrying = false
 		carryingBall = false
+		carryingBowling = false
 	end
 	refreshActionBar()
 end
@@ -1562,6 +1572,18 @@ end
 --[[ Holding the basketball, which makes F a wind-up rather than a flick. ]]
 function Controls.SetCarryingBall(on: boolean)
 	carryingBall = on
+	refreshActionBar()
+end
+
+--[[
+	Holding a bowling ball.
+
+	Separate from the basketball because the release goes to a different
+	service, not because the key differs -- it is F either way, and the
+	player never has to know there are two systems behind it.
+]]
+function Controls.SetCarryingBowling(on: boolean)
+	carryingBowling = on
 	refreshActionBar()
 end
 

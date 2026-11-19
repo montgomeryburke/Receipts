@@ -802,6 +802,177 @@ do
 end
 
 DUMP("")
+DUMP("Bowling:")
+do
+	--[[
+		Scored per ball, not over ten frames.
+
+		A deliberate departure from the sport: ten frames is a ten-minute
+		commitment and the arena round is already the clock. A player locked
+		into a game longer than the round is a player who cannot be shot at,
+		which is the one thing nothing here is allowed to be.
+	]]
+	local built = BowlingService.Build(1900)
+	check("the alley is built", built ~= nil and built.lanes == Config.Bowling.Lanes,
+		string.format("%d lanes", BowlingService.LaneCount()))
+	check("with ten pins on a lane", BowlingService.PinCount(1) == 10,
+		string.format("%d pins", BowlingService.PinCount(1)))
+	check("all standing to start", BowlingService.StandingCount(1) == 10,
+		string.format("%d up", BowlingService.StandingCount(1)))
+
+	local lane = BowlingService.LaneForTests(1)
+	check("the lane is readable", lane ~= nil, "")
+
+	if lane then
+		--[[
+			The oil.
+
+			Friction near zero is why a bowling ball slides and hooks rather
+			than rolling to a stop in six feet. It is most of what the sport
+			feels like, and it is one number -- so it is worth asserting,
+			because nothing about playing in a terminal would reveal it
+			being wrong.
+		]]
+		local surface
+		for _, child in workspace:FindFirstChild("BowlingAlley"):GetChildren() do
+			if child._props.Name == "BowlingLane" then
+				surface = child
+				break
+			end
+		end
+		check("the lane is oiled", surface ~= nil
+			and surface._props.CustomPhysicalProperties.Friction < 0.1,
+			if surface then string.format("%.3f friction",
+				surface._props.CustomPhysicalProperties.Friction) else "no lane")
+
+		-- Pins must be loose, or they cannot fall into each other and a
+		-- strike becomes ten separate shots.
+		check("the pins are loose, not bolted down",
+			lane.pins[1].part._props.Anchored == false,
+			tostring(lane.pins[1].part._props.Anchored))
+
+		-- Walk up and the ball is yours.
+		local root = killer._props.Character:FindFirstChild("HumanoidRootPart")
+		killer._props.Character:FindFirstChildOfClass("Humanoid")._props.Health = 100
+		root._props.CFrame = CFrame.new(lane.ball.Position)
+		BowlingService.StepForTests()
+		check("walking up to the ball picks it up",
+			BowlingService.HolderLane(killer) == 1,
+			tostring(BowlingService.HolderLane(killer)))
+
+		-- Power from the wind-up, as everywhere else.
+		local function rollAfter(seconds)
+			BowlingService.GiveBallForTests(killer, 1)
+			lane.rolling = false
+			BowlingService.StartCharge(killer)
+			ADVANCE(seconds)
+			BowlingService.Roll(killer, Vector3.new(0, 0, -1))
+			return lane.ball._props.AssemblyLinearVelocity.Magnitude
+		end
+
+		local gentle = rollAfter(0.02)
+		local hard = rollAfter(Config.Bowling.FullChargeSeconds + 0.2)
+		check("a gentle roll is slow", gentle > 0, string.format("%.0f studs/sec", gentle))
+		check("and a full wind-up is fast", hard > gentle * 2,
+			string.format("%.0f vs %.0f studs/sec", hard, gentle))
+
+		-- A bowling ball goes DOWN the lane, not into the air.
+		check("the roll stays on the ground",
+			math.abs(lane.ball._props.AssemblyLinearVelocity.Y) < 0.01,
+			string.format("%.2f studs/sec vertical",
+				lane.ball._props.AssemblyLinearVelocity.Y))
+
+		--[[
+			A pin is down by TILT, not by height.
+
+			A pin shunted flat along the deck without toppling would read as
+			standing if this measured height, and that is exactly what a
+			ball clipping the base does.
+		]]
+		local rolled = {}
+		BowlingService.Rolled.Connect(function(who, pins, isStrike)
+			table.insert(rolled, { who = who, pins = pins, strike = isStrike })
+		end)
+
+		-- Tip one over and nothing else.
+		lane.pins[1].part._props.CFrame = lane.pins[1].home * CFrame.Angles(math.rad(85), 0, 0)
+		check("a toppled pin counts as down", BowlingService.StandingCount(1) == 9,
+			string.format("%d up", BowlingService.StandingCount(1)))
+
+		-- Settle the roll: one pin, no strike.
+		BowlingService.GiveBallForTests(killer, 1)
+		lane.rolling = false
+		BowlingService.StartCharge(killer)
+		ADVANCE(0.4)
+		BowlingService.Roll(killer, Vector3.new(0, 0, -1))
+		ADVANCE(Config.Bowling.SettleSeconds + 0.1)
+		BowlingService.StepForTests()
+		RUN_SPAWNED()
+		check("the roll is counted once it settles", #rolled == 1,
+			string.format("%d rolls", #rolled))
+		if #rolled == 1 then
+			check("one pin is one pin, not a strike",
+				rolled[1].pins == 1 and not rolled[1].strike,
+				string.format("%d pins, strike=%s", rolled[1].pins, tostring(rolled[1].strike)))
+		end
+
+		--[[
+			Pins left standing stay standing for the second ball.
+
+			The only part of real bowling's structure worth keeping: two
+			pins at the back is a different and harder shot than a full
+			rack, and resetting between balls would throw that away.
+		]]
+		check("a partial knock leaves a second ball", lane.secondBall,
+			tostring(lane.secondBall))
+
+		-- Now flatten the lot: that is a strike only on the FIRST ball.
+		lane.secondBall = false
+		for _, pin in lane.pins do
+			pin.part._props.CFrame = pin.home * CFrame.Angles(math.rad(90), 0, 0)
+		end
+		check("all ten down reads as all ten", BowlingService.StandingCount(1) == 0,
+			string.format("%d up", BowlingService.StandingCount(1)))
+
+		rolled = {}
+		FIRED = {}
+		local before = PlayerState.Get(killer).points
+		BowlingService.GiveBallForTests(killer, 1)
+		lane.rolling = false
+		BowlingService.StartCharge(killer)
+		ADVANCE(Config.Bowling.FullChargeSeconds)
+		BowlingService.Roll(killer, Vector3.new(0, 0, -1))
+		ADVANCE(Config.Bowling.SettleSeconds + 0.1)
+		BowlingService.StepForTests()
+		RUN_SPAWNED()
+
+		check("clearing the rack is a strike",
+			#rolled == 1 and rolled[1].strike,
+			string.format("%d rolls, strike=%s", #rolled,
+				tostring(rolled[1] and rolled[1].strike)))
+		check("and it scores through the arena scoreboard",
+			PlayerState.Get(killer).points > before
+				and PlayerState.Get(killer).scoredBy["strike"] ~= nil,
+			string.format("%d -> %d", before, PlayerState.Get(killer).points))
+
+		-- A strike resets the rack, or the next ball scores ten free pins.
+		check("a strike racks them up again", BowlingService.StandingCount(1) == 10,
+			string.format("%d up", BowlingService.StandingCount(1)))
+		check("and it is a fresh first ball", not lane.secondBall,
+			tostring(lane.secondBall))
+
+		-- Shooting the ball down the lane is a legitimate roll.
+		lane.rolling = false
+		local handled = BowlingService.RegisterHit(lane.ball, prey, Vector3.new(0, 0, -1))
+		check("shooting the ball rolls it", handled and lane.roller == prey,
+			string.format("handled=%s roller=%s", tostring(handled),
+				tostring(lane.roller and lane.roller._props.Name)))
+	end
+
+	BowlingService.Clear()
+end
+
+DUMP("")
 DUMP("Medals and the goalie:")
 do
 	--[[
@@ -1260,7 +1431,7 @@ def strip(s):
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
 SERVER = ['PlayerState', 'MedalService', 'TeamService', 'BotService', 'ArcadeService', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
-          'CarnivalService', 'BasketballService', 'FireService', 'ProjectileService', 'WeaponService', 'PickupService',
+          'CarnivalService', 'BasketballService', 'BowlingService', 'FireService', 'ProjectileService', 'WeaponService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',
           'GraphicsService']
 

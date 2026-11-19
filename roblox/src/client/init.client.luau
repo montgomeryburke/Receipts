@@ -311,8 +311,15 @@ Remotes.Event("BallCarry").OnClientEvent:Connect(function(payload)
 		return
 	end
 	local holding = payload.carrying == true
-	Controls.SetCarryingBall(holding)
-	Hud.SetBall(holding)
+	-- The same remote serves both, flagged, so the client does not need a
+	-- second message for a second ball-shaped thing.
+	if payload.bowling == true then
+		Controls.SetCarryingBowling(holding)
+		Hud.SetBowlingBall(holding)
+	else
+		Controls.SetCarryingBall(holding)
+		Hud.SetBall(holding)
+	end
 end)
 
 Remotes.Event("HockeyScore").OnClientEvent:Connect(function(payload)

@@ -200,7 +200,27 @@ UDim2 = {
 	fromScale = function(x, y) return { X = udim(x, 0), Y = udim(y, 0) } end,
 	fromOffset = function(x, y) return { X = udim(0, x), Y = udim(0, y) } end,
 }
-PhysicalProperties = { new = function(...) return { ... } end }
+--[[
+	PhysicalProperties, with its fields named.
+
+	It used to return a bare positional list, so a test could set friction
+	but never read it back -- which put every material property in the game
+	beyond the reach of a check. That matters more here than it sounds: the
+	oiled bowling lane, the mud's lost grip and the tires' friction are all
+	ONE number each, invisible from a terminal, and a wrong one is a
+	completely different game that still passes every behavioural test.
+]]
+PhysicalProperties = {
+	new = function(density, friction, elasticity, frictionWeight, elasticityWeight)
+		return {
+			Density = density or 0.7,
+			Friction = friction or 0.3,
+			Elasticity = elasticity or 0.5,
+			FrictionWeight = frictionWeight or 1,
+			ElasticityWeight = elasticityWeight or 1,
+		}
+	end,
+}
 
 -- ------------------------------------------------------------------- Random
 local RNG = {}

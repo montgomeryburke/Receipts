@@ -35,6 +35,8 @@ local EVENT_NAMES = {
 	"BallCharge",
 	"BallShoot",
 	"BallCarry",
+	-- Bowling: the roll.
+	"RollBall",
 	"PourGas",
 	-- What is in your hands, so the action bar can change to suit it.
 	"CarryItem",

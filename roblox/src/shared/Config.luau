@@ -559,6 +559,7 @@ Config.Wildlife = {
 Config.Medals = {
 	Headshot = { name = "HEADSHOT", points = 15, sound = "Headshot" },
 	ThreePointer = { name = "FROM THE ARC", points = 25, sound = "Bell" },
+	Strike = { name = "STRIKE", points = 30, sound = "PinCrash" },
 	Knockout = { name = "KNOCKOUT", points = 40, sound = "MeleeHit" },
 	AirborneKill = { name = "AIRBORNE KILL", points = 35, sound = "Medal" },
 	ChainReaction = { name = "CHAIN REACTION", points = 50, sound = "ExplosionBig" },
@@ -618,6 +619,14 @@ Config.Sounds = {
 	-- A rifle crack is the snap, not the boom. The boom is ShotSniper; this
 	-- is the layer on top that makes it read as a high-powered rifle.
 	SniperCrack = { Asset = "rbxasset://sounds/snap.wav", Volume = 0.8, Pitch = { 2.2, 2.4 } },
+	--[[
+		Ten pins going over.
+
+		Played several times at once by the caller, because one collide is
+		one thing falling over and a strike is ten -- the clatter IS the
+		layering.
+	]]
+	PinCrash = { Asset = "rbxasset://sounds/collide.wav", Volume = 0.8, Pitch = { 0.8, 1.4 } },
 	-- The turret winding up before it fires, and the rattle while it does.
 	TurretSpool = { Asset = "rbxasset://sounds/swoosh.wav", Volume = 0.7, Pitch = { 0.5, 0.6 } },
 	TurretRattle = { Asset = "rbxasset://sounds/clickfast.wav", Volume = 0.5, Pitch = { 0.9, 1.1 } },
@@ -803,6 +812,53 @@ Config.Arcade = {
 	makes a soft shot float and a hard one skim, so the arc would change
 	shape at every power and aiming would be unlearnable.
 ]]
+--[[
+	Bowling.
+
+	Scored per BALL rather than over ten frames, which is a deliberate
+	departure from how the sport works. Ten frames is a ten-minute
+	commitment and this map's round is already the clock -- a player locked
+	into a game longer than the round is a player who cannot be shot at,
+	which is the one thing no activity here is allowed to be.
+
+	The second ball at a gap is kept, though, because that is the only part
+	of the structure that changes the shot: picking off two pins at the back
+	is a different and harder problem than hitting a full rack.
+
+	The oil is the feel of the sport. Friction near zero is why a bowling
+	ball slides and hooks rather than rolling to a stop in six feet.
+]]
+Config.Bowling = {
+	Lanes = 2,
+	LaneLength = 150,
+	LaneWidth = 16,
+	PinSpacing = 4.2,
+	PinHeight = 5,
+
+	PickupRange = 12,
+	FullChargeSeconds = 1,
+	RollSpeed = 150,
+	--[[
+		How long after the roll the pins are counted.
+
+		A fixed delay rather than waiting for stillness: a ball in the
+		gutter never stops and a strike dead centre stops almost at once, so
+		waiting would mean a different delay for every roll and none at all
+		for the worst ones.
+	]]
+	SettleSeconds = 3.5,
+
+	-- A pin is down when it has tipped past this, or been knocked this far
+	-- off its spot. Tilt catches the ones that matter; height alone would
+	-- miss a pin shunted flat along the deck.
+	DownTilt = 0.72,
+	DownDistance = 3.5,
+
+	PointsPerPin = 12,
+	StrikeBonus = 120,
+	SpareBonus = 60,
+}
+
 Config.Basketball = {
 	CourtWidth = 70,
 	CourtLength = 120,
@@ -965,6 +1021,14 @@ Config.Help = {
 			.. "so the useful shot is in between. Behind the painted arc is worth "
 			.. "three. You can also just shoot the ball with a gun.",
 		keywords = { "basketball", "hoop", "ball", "court", "dunk", "three", "shoot" },
+	},
+	{
+		question = "How do I bowl?",
+		answer = "Walk up to a ball at the end of a lane, HOLD F to wind up and let go "
+			.. "to roll -- you aim where you look, and the lane is oiled so the ball "
+			.. "slides. Ten pins; clear them all for a strike. Any pins left get a "
+			.. "second ball. Shooting the ball down the lane also counts.",
+		keywords = { "bowling", "bowl", "pins", "lane", "strike", "spare", "ball", "alley" },
 	},
 	{
 		question = "What is there at the carnival?",
@@ -1544,6 +1608,13 @@ export type ConfigType = {
 		OfferRadius: number, ReofferSeconds: number,
 		BeaconHeight: number, BeaconNameDistance: number,
 		SoloFillSeconds: number,
+	},
+	Bowling: {
+		Lanes: number, LaneLength: number, LaneWidth: number,
+		PinSpacing: number, PinHeight: number,
+		PickupRange: number, FullChargeSeconds: number, RollSpeed: number,
+		SettleSeconds: number, DownTilt: number, DownDistance: number,
+		PointsPerPin: number, StrikeBonus: number, SpareBonus: number,
 	},
 	Basketball: {
 		CourtWidth: number, CourtLength: number, ThreeLine: number,
