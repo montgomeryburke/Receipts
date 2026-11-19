@@ -466,6 +466,36 @@ end
 
 do
 	--[[
+		A zero vector's Unit is nan, as it is in Roblox.
+
+		The engine divides by the magnitude without checking it, so
+		Vector3.zero.Unit is (nan, nan, nan). The harness used to hand back
+		(0, 0, 0), which is tidier and wrong in the one direction a harness
+		must never be wrong in: forgiving. Code that normalises an unchecked
+		vector looked correct here and would not have been in the game.
+
+		It matters because of how the two behave in a comparison. A dot
+		product against (0,0,0) is 0, which compares cleanly; against nan
+		every comparison is false. So a direction test written as
+		`if dot <= 0 then skip` silently stops skipping -- and that is
+		exactly how deliberately breaking the goalie's save check failed to
+		fail a single test.
+	]]
+	local zero = Vector3.new(0, 0, 0).Unit
+	check("a zero vector's Unit is not a tidy zero", zero.X ~= zero.X,
+		string.format("%s", tostring(zero.X)))
+	check("and every comparison against it is false",
+		not (zero:Dot(Vector3.new(0, 0, 1)) <= 0),
+		tostring(zero:Dot(Vector3.new(0, 0, 1))))
+
+	-- An ordinary vector still normalises properly.
+	local along = Vector3.new(0, 0, 8).Unit
+	check("an ordinary vector still normalises", math.abs(along.Z - 1) < 1e-9,
+		string.format("%.4f", along.Z))
+end
+
+do
+	--[[
 		ChildAdded, ChildRemoved and Destroying fire.
 
 		None of the three existed here. Reading `.ChildAdded` handed back

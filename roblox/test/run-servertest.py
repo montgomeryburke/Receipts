@@ -1814,13 +1814,23 @@ do
 		check("and wears " .. tostring(Config.Goalie.Number), numbered == 2,
 			string.format("%d of 2 numbered", numbered))
 
-		-- He tracks the puck sideways, but stays on his line.
+		--[[
+			He tracks the puck sideways, but stays on his line.
+
+			Driven a frame at a time now, not on the thinking interval. At
+			four hertz he crossed the crease in visible jumps, and a keeper
+			who teleports is both worse to watch and worse to play against
+			than one who slides -- so goaltending came out of the shared bot
+			brain and into its own per-frame loop. There are two of him; a
+			per-frame loop over two bots costs nothing worth measuring.
+		]]
 		local keeper = goalies[1]
 		local line = keeper.home.Z
 		BotService.PuckPosition = Vector3.new(keeper.home.X + 400, 4, line)
-		for _ = 1, 40 do
-			ADVANCE(Config.Bots.ThinkInterval + 0.01)
-			BotService.StepForTests()
+		BotService.PuckVelocity = nil
+		for _ = 1, 120 do
+			ADVANCE(1 / 60)
+			BotService.StepGoaliesForTests(1 / 60)
 		end
 		local moved = keeper.root._props.CFrame.Position
 		check("the keeper slides across to cover a shot",
@@ -1834,7 +1844,213 @@ do
 			math.abs(moved.Z - line) < 1,
 			string.format("%.1f studs off the line", math.abs(moved.Z - line)))
 
+		--[[
+			And he moves SMOOTHLY, not in jumps.
+
+			The thing the per-frame loop was for. A step of more than a
+			stride or two in one frame is the jump it replaced, so this
+			pins it rather than trusting the loop stayed where it was put.
+		]]
+		BotService.PuckPosition = Vector3.new(keeper.home.X - 400, 4, line)
+		local biggestStep, previous = 0, keeper.root._props.CFrame.Position
+		for _ = 1, 120 do
+			ADVANCE(1 / 60)
+			BotService.StepGoaliesForTests(1 / 60)
+			local here = keeper.root._props.CFrame.Position
+			biggestStep = math.max(biggestStep, (here - previous).Magnitude)
+			previous = here
+		end
+		local ceiling = Config.Goalie.TrackSpeed / 60 + 0.01
+		check("and slides rather than jumping across",
+			biggestStep <= ceiling,
+			string.format("worst frame %.3f studs, limit %.3f", biggestStep, ceiling))
+
+		--[[
+			He plays slightly AHEAD of the puck.
+
+			Tracking where the puck IS makes him unbeatable except by raw
+			speed: he is always already there. Leading it is what makes a
+			change of direction work against him, and that is the
+			difference between beating him feeling earned and feeling lucky.
+		]]
+		BotService.PuckPosition = Vector3.new(keeper.home.X, 4, line)
+		BotService.PuckVelocity = nil
+		for _ = 1, 120 do
+			ADVANCE(1 / 60)
+			BotService.StepGoaliesForTests(1 / 60)
+		end
+		local onTheSpot = keeper.root._props.CFrame.Position.X
+
+		-- Same position, but now it is travelling. He should be ahead of it.
+		BotService.PuckVelocity = Vector3.new(60, 0, 0)
+		for _ = 1, 120 do
+			ADVANCE(1 / 60)
+			BotService.StepGoaliesForTests(1 / 60)
+		end
+		local leading = keeper.root._props.CFrame.Position.X
+		check("and plays ahead of a moving puck, not on it",
+			leading > onTheSpot + 1,
+			string.format("%.1f vs %.1f", leading, onTheSpot))
+
 		BotService.PuckPosition = nil
+		BotService.PuckVelocity = nil
+
+		--[[
+			THE CLAIM: Milo cannot stop a shot.
+
+			He could not. He slid along his line and the puck went straight
+			past him, because nothing in the game ever asked whether he was
+			in the way -- `grep -i save` across the whole of src returned
+			nothing at all. A keeper who cannot make a save is scenery, and
+			worse than scenery: he made the net look harder to score in
+			than it was.
+
+			The save is decided on proximity AND direction rather than left
+			to Roblox's collision response, because he is moved by writing
+			his CFrame each frame -- that is what keeps him on his line
+			instead of pathing out to meet the puck -- and a body moved
+			that way carries no velocity. A physical bounce off him would
+			be a dead, random deflection off a teleporting wall.
+		]]
+		local saveTarget = goalies[1]
+		local live = HockeyService.PuckForTests()
+		check("there is a puck to shoot", live ~= nil)
+
+		if live and saveTarget then
+			local keeperAt = saveTarget.root._props.CFrame.Position
+			local before = HockeyService.SaveCount(saveTarget.name)
+
+			-- Puck just short of him, travelling straight at him.
+			live._props.CFrame = CFrame.new(keeperAt + Vector3.new(0, 0, -4))
+			live._props.AssemblyLinearVelocity = Vector3.new(0, 0, 80)
+			HockeyService.StepSavesForTests()
+
+			check("a shot straight at the keeper is saved",
+				HockeyService.SaveCount(saveTarget.name) == before + 1,
+				string.format("%d saves, was %d",
+					HockeyService.SaveCount(saveTarget.name), before))
+
+			--[[
+				And it is announced.
+
+				Without any feedback the puck simply changed direction for
+				no visible reason, which reads as the physics glitching
+				rather than as a save. The signal is what the HUD hangs
+				off, so a counter going up with nothing fired would be the
+				feature half-wired -- which is indistinguishable from
+				finished until somebody plays it.
+			]]
+			local announced = nil
+			-- Signal.Connect hands back a disconnect FUNCTION, not a
+			-- connection object: it is this project's own Signal, not an
+			-- RBXScriptSignal.
+			local stopListening = HockeyService.Save.Connect(function(_who, named)
+				announced = named
+			end)
+			ADVANCE(Config.Goalie.SaveCooldown + 0.1)
+			live._props.CFrame = CFrame.new(keeperAt + Vector3.new(0, 0, -4))
+			live._props.AssemblyLinearVelocity = Vector3.new(0, 0, 80)
+			HockeyService.StepSavesForTests()
+			RUN_SPAWNED()
+			stopListening()
+			check("and the save is announced, with his name on it",
+				announced == Config.Goalie.Name,
+				tostring(announced))
+
+			--[[
+				And the puck comes back OUT.
+
+				A save that does not change the puck's direction is not a
+				save, it is a counter going up while the puck carries on
+				into the net.
+			]]
+			local after = live._props.AssemblyLinearVelocity
+			check("and the puck comes off him, not through him",
+				after.Z < 0,
+				string.format("z velocity %.0f, was +80", after.Z))
+
+			--[[
+				Not straight back to the shooter's stick.
+
+				Dead-straight back is a tap-in. Some angle on it puts the
+				rebound in the slot, where it is something somebody has to
+				win.
+			]]
+			check("with some angle on the rebound",
+				math.abs(after.X) > 0.01,
+				string.format("x velocity %.1f", after.X))
+
+			--[[
+				One shot, one save.
+
+				Without a cooldown a puck resting against his pads
+				registers a save every frame -- sixty a second, and a save
+				counter that reads like a scoreboard bug.
+			]]
+			local counted = HockeyService.SaveCount(saveTarget.name)
+			live._props.CFrame = CFrame.new(keeperAt + Vector3.new(0, 0, -4))
+			live._props.AssemblyLinearVelocity = Vector3.new(0, 0, 80)
+			for _ = 1, 10 do
+				HockeyService.StepSavesForTests()
+			end
+			check("a puck sitting on his pads is not sixty saves",
+				HockeyService.SaveCount(saveTarget.name) == counted,
+				string.format("%d saves, was %d",
+					HockeyService.SaveCount(saveTarget.name), counted))
+
+			--[[
+				A puck already past him and leaving is not a save.
+
+				Without the direction test he would "save" a puck going
+				away from him, which reads as the net being closed from the
+				inside -- and would steal the credit for a goal that had
+				already gone in.
+			]]
+			ADVANCE(Config.Goalie.SaveCooldown + 0.1)
+			local leavingFrom = HockeyService.SaveCount(saveTarget.name)
+			live._props.CFrame = CFrame.new(keeperAt + Vector3.new(0, 0, -4))
+			live._props.AssemblyLinearVelocity = Vector3.new(0, 0, -80)
+			HockeyService.StepSavesForTests()
+			check("a puck travelling away from him is not a save",
+				HockeyService.SaveCount(saveTarget.name) == leavingFrom,
+				string.format("%d saves, was %d",
+					HockeyService.SaveCount(saveTarget.name), leavingFrom))
+
+			--[[
+				And he does not save a shot nowhere near him.
+
+				SideToSide is 11 studs for a reason: picking a corner is
+				the way past him, and if the radius reached the posts there
+				would be no way past him at all.
+			]]
+			ADVANCE(Config.Goalie.SaveCooldown + 0.1)
+			local wideFrom = HockeyService.SaveCount(saveTarget.name)
+			live._props.CFrame = CFrame.new(
+				keeperAt + Vector3.new(Config.Goalie.SaveRadius + 6, 0, -4)
+			)
+			live._props.AssemblyLinearVelocity = Vector3.new(0, 0, 80)
+			HockeyService.StepSavesForTests()
+			check("a shot to the corner beats him",
+				HockeyService.SaveCount(saveTarget.name) == wideFrom,
+				string.format("%d saves, was %d",
+					HockeyService.SaveCount(saveTarget.name), wideFrom))
+
+			--[[
+				A stationary puck in the crease is not a shot.
+
+				Otherwise every puck dropped at centre ice that drifted
+				near him would count, and a save would mean nothing.
+			]]
+			ADVANCE(Config.Goalie.SaveCooldown + 0.1)
+			local stillFrom = HockeyService.SaveCount(saveTarget.name)
+			live._props.CFrame = CFrame.new(keeperAt + Vector3.new(0, 0, -4))
+			live._props.AssemblyLinearVelocity = Vector3.new()
+			HockeyService.StepSavesForTests()
+			check("and a puck sitting still is not a shot at all",
+				HockeyService.SaveCount(saveTarget.name) == stillFrom,
+				string.format("%d saves, was %d",
+					HockeyService.SaveCount(saveTarget.name), stillFrom))
+		end
 	end
 end
 

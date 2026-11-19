@@ -1,9 +1,25 @@
 -- Minimal Roblox stand-ins: enough to actually RUN the map generator outside
 -- Roblox and see whether it errors and what geometry it produces.
 
+--[[
+	Vector3.Unit, including the awkward case.
+
+	Roblox divides by the magnitude without checking it, so a zero vector's
+	Unit is (nan, nan, nan) -- not (0, 0, 0). Handing back zero here was
+	more forgiving than the engine, and that is the one direction a harness
+	must never be forgiving in: it made code that normalises an unchecked
+	vector look correct. A dot product against (0,0,0) is 0, which compares
+	cleanly; against nan every comparison is false, which is how a direction
+	test silently stops testing anything.
+
+	The goalie's save check is where this surfaced. Removing its speed guard
+	deliberately -- so a motionless puck resting in the crease would count
+	as a shot -- did not fail a single test, because the stub's tidy zero
+	let the direction check catch it instead. In the real engine it would
+	not have.
+]]
 local function approxUnit(x, y, z)
 	local m = math.sqrt(x * x + y * y + z * z)
-	if m < 1e-9 then return 0, 0, 0, 0 end
 	return x / m, y / m, z / m, m
 end
 

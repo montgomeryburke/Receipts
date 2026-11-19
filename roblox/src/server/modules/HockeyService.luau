@@ -45,6 +45,14 @@ local HockeyService = {}
 --[[ Fired as (scorer, teamIndex, points) when the puck goes in. ]]
 HockeyService.Goal = Signal.new()
 
+--[[
+	Fired as (shooter|nil, goalieName) when the keeper stops one.
+
+	Announced rather than acted on, the way the goal is, so the HUD and
+	anything else that wants to react does not have to be known about here.
+]]
+HockeyService.Save = Signal.new()
+
 --[[ Fired as (winner, loser, brokeStick) when a fight is settled. ]]
 HockeyService.FightOver = Signal.new()
 
@@ -58,6 +66,11 @@ HockeyService.FightOver = Signal.new()
 ]]
 local puckOwner: Player? = nil
 local pickupBlockedUntil: { [Player]: number } = {}
+-- When the keeper may make another save, and how many each has made. The
+-- cooldown is what stops one shot sitting against his pads registering
+-- sixty saves a second.
+local nextSaveAt = 0
+local saveCounts: { [string]: number } = {}
 local goalLights: { [number]: BasePart } = {}
 local penaltyBox = Vector3.new()
 
@@ -504,12 +517,124 @@ end
 --[[
 	Tell the bots where the puck is.
 
-	One fact, pushed rather than pulled, so BotService never has to know
-	what hockey is -- a goalie needs the puck's position and nothing else.
+	Pushed rather than pulled, so BotService never has to know what hockey
+	is -- a goalie needs where the puck is and where it is going, and
+	nothing else about the sport.
+
+	The velocity is there so he can play slightly ahead of it. Tracking the
+	position alone makes him unbeatable by anything but raw speed.
 ]]
 local function publishPuck()
 	local live = puck
-	BotService.PuckPosition = if live and live.Parent then live.Position else nil
+	local alive = live ~= nil and live.Parent ~= nil
+	BotService.PuckPosition = if alive and live then live.Position else nil
+	BotService.PuckVelocity = if alive and live then live.AssemblyLinearVelocity else nil
+end
+
+--[[
+	Who last touched the puck, if they are still here.
+
+	Declared up here, above the save and goal checks that both call it,
+	because a `local function` called from a function defined earlier in the
+	file is not an upvalue -- it compiles to a global lookup, reads nil at
+	runtime and throws. Nothing typechecks that, and it is the second time
+	it has bitten this module.
+]]
+local function lastToucher(): Player?
+	if not puck then
+		return nil
+	end
+	local userId = puck:GetAttribute("LastTouchUserId")
+	if typeof(userId) ~= "number" then
+		return nil
+	end
+	for _, player in Players:GetPlayers() do
+		if player.UserId == userId then
+			return player
+		end
+	end
+	return nil
+end
+
+--[[
+	Did the keeper stop it?
+
+	Decided here, on proximity and direction, rather than left to Roblox's
+	collision response. The goalie is moved by writing his CFrame each frame
+	-- that is what keeps him on his line rather than pathing out to meet
+	the puck -- and a body moved that way carries no velocity, so a physical
+	bounce off him would be a dead, random deflection off a teleporting
+	wall. Deciding it means the puck comes off him like a puck comes off
+	pads, every time.
+
+	The direction test is what stops him "saving" a puck that is already
+	behind him and travelling away, which would otherwise read as the net
+	being closed from the inside.
+]]
+local function checkSaves()
+	local live = puck
+	if not live or not live.Parent then
+		return
+	end
+
+	local now = os.clock()
+	if now < nextSaveAt then
+		return
+	end
+
+	local travel = live.AssemblyLinearVelocity
+	local speed = travel.Magnitude
+	if speed < 1 then
+		-- Sitting still in the crease is not a shot.
+		return
+	end
+
+	for _, keeper in BotService.Goalies("hockey") do
+		local toKeeper = keeper.root.Position - live.Position
+		if toKeeper.Magnitude > Config.Goalie.SaveRadius then
+			continue
+		end
+		-- Coming at him, not leaving.
+		if toKeeper.Magnitude > 0.01 and travel.Unit:Dot(toKeeper.Unit) <= 0 then
+			continue
+		end
+
+		nextSaveAt = now + Config.Goalie.SaveCooldown
+		saveCounts[keeper.name] = (saveCounts[keeper.name] or 0) + 1
+
+		--[[
+			Off the pads and back out, with a bit of angle on it.
+
+			Straight back the way it came would return it to the shooter's
+			stick, which turns one save into a tap-in. A deflection with
+			some sideways on it puts it into the slot, where it is a
+			rebound somebody has to win.
+		]]
+		local out = -travel.Unit
+		local sideways = Vector3.new(-out.Z, 0, out.X) * ((math.random() - 0.5) * 1.1)
+		local away = (out + sideways)
+		if away.Magnitude < 0.01 then
+			away = out
+		end
+		live.AssemblyLinearVelocity = away.Unit * Config.Goalie.DeflectSpeed
+			+ Vector3.new(0, 7, 0)
+		-- Nobody owns a deflected puck, and nobody gets credit for the goal
+		-- if it goes in off somebody else later.
+		live:SetAttribute("LastTouchUserId", 0)
+
+		local shooter = lastToucher()
+		Sound.At("MeleeHit", keeper.root.Position, 0.85)
+		--[[
+			No points for a save.
+
+			Milo is a bot, so there is nobody to pay -- and paying the
+			defending TEAM for their robot keeper doing his job would mean a
+			team scoring points by not being in the rink. The save is a
+			denial, and the reward for beating him is the goal.
+		]]
+		HockeyService.Save.Fire(shooter, keeper.name)
+		return
+	end
 end
 
 local function stepPossession()
@@ -588,27 +713,26 @@ function HockeyService.ShootPuck(player: Player, direction: any)
 	Sound.At("MeleeHit", live.Position, 1.1)
 end
 
+--[[ How many a keeper has stopped this round. ]]
+function HockeyService.SaveCount(name: string): number
+	return saveCounts[name] or 0
+end
+
+--[[ The puck itself, for tests. ]]
+function HockeyService.PuckForTests(): BasePart?
+	return puck
+end
+
+--[[ One pass of the save check, for tests. ]]
+function HockeyService.StepSavesForTests()
+	checkSaves()
+end
+
 --[[ Who has it, for tests. ]]
 function HockeyService.PuckOwner(): Player?
 	return puckOwner
 end
 
---[[ Who last touched the puck, if they are still here. ]]
-local function lastToucher(): Player?
-	if not puck then
-		return nil
-	end
-	local userId = puck:GetAttribute("LastTouchUserId")
-	if typeof(userId) ~= "number" then
-		return nil
-	end
-	for _, player in Players:GetPlayers() do
-		if player.UserId == userId then
-			return player
-		end
-	end
-	return nil
-end
 
 --[[ Did the puck cross a goal line? ]]
 local function checkGoals()
@@ -1065,6 +1189,9 @@ function HockeyService.Start()
 	end)
 
 	RunService.Heartbeat:Connect(function()
+		-- Saves before goals: a puck stopped on the goal line has to be a
+		-- save rather than a goal, and whichever runs first decides.
+		checkSaves()
 		checkGoals()
 		stepPossession()
 		publishPuck()

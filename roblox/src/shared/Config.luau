@@ -1021,6 +1021,42 @@ Config.Goalie = {
 	-- How quickly he tracks across. Fast enough to cover a pass, slow
 	-- enough that a hard shot to the far corner beats him.
 	TrackSpeed = 14,
+	--[[
+		A save.
+
+		Until this existed Milo was scenery: he slid along his line and the
+		puck went straight past him, because nothing in the game looked at
+		whether he was in the way. A keeper who cannot stop a shot is not a
+		keeper, and his being there made the net look harder to score in
+		than it was.
+
+		The save is decided by PROXIMITY AND DIRECTION rather than by
+		collision, deliberately. He is moved by writing his CFrame each
+		frame -- that is what keeps him on his line instead of pathing out
+		to meet the puck -- and a body moved that way carries no velocity,
+		so leaving it to Roblox's collision response would give a dead,
+		random bounce off a teleporting wall. Deciding it here means the
+		puck comes off him the way a puck comes off pads, every time.
+	]]
+	-- A little wider than his body, because a goalie in pads is wider than
+	-- a goalie.
+	SaveRadius = 7.5,
+	-- How hard it comes off the pads. Enough to clear the slot, not enough
+	-- to send it the length of the ice.
+	DeflectSpeed = 42,
+	-- One shot cannot register twice. Long enough for the puck to get clear
+	-- of him before he can make another.
+	SaveCooldown = 0.45,
+	--[[
+		How far ahead of the puck he plays.
+
+		Zero means he tracks where the puck IS, which sounds right and makes
+		him unbeatable by anything except raw speed -- he is always already
+		there. Playing slightly ahead of it is what makes a change of
+		direction work against him, which is the thing that makes beating
+		him feel earned rather than lucky.
+	]]
+	LeadSeconds = 0.18,
 }
 
 --[[
@@ -1976,7 +2012,16 @@ export type ConfigType = {
 		FullChargeSeconds: number, ThrowSpeed: number, LiftFactor: number,
 		ShotNudge: number,
 	},
-	Goalie: { Name: string, Number: number, SideToSide: number, TrackSpeed: number },
+	Goalie: {
+		Name: string,
+		Number: number,
+		SideToSide: number,
+		TrackSpeed: number,
+		SaveRadius: number,
+		DeflectSpeed: number,
+		SaveCooldown: number,
+		LeadSeconds: number,
+	},
 	Dummies: { Count: number, Radius: number, WanderSeconds: number },
 	Bots: {
 		Health: number,

@@ -586,6 +586,24 @@ function MatchService.Start()
 		end
 	end)
 
+	--[[
+		The keeper stopped one.
+
+		Told to the shooter rather than to everybody: a save matters to the
+		person who just lost the puck, and a rink-wide announcement every
+		time Milo does his job would be noise. Without any feedback at all
+		the puck simply changed direction for no visible reason, which reads
+		as the physics glitching rather than as a save.
+	]]
+	HockeyService.Save.Connect(function(shooter: Player?, keeper: string)
+		if shooter and shooter.Parent then
+			Remotes.Event("Notify"):FireClient(
+				shooter,
+				`SAVE — {string.upper(keeper)} #{Config.Goalie.Number}`
+			)
+		end
+	end)
+
 	FlagService.Start()
 	ResortService.Start()
 

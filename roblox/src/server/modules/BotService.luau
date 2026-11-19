@@ -373,6 +373,15 @@ end
 	face-off is.
 ]]
 BotService.PuckPosition = nil :: Vector3?
+--[[
+	And how fast it is going.
+
+	A goalie who tracks where the puck IS is unbeatable except by raw speed:
+	he is always already there. Playing slightly ahead of it is what makes a
+	change of direction work against him, and that needs the velocity, not
+	just the position.
+]]
+BotService.PuckVelocity = nil :: Vector3?
 
 --[[
 	Walk somewhere, using the Humanoid's own pathing.
@@ -491,31 +500,10 @@ local function step()
 			corner rather than waiting for him to wander off.
 		]]
 		if bot.role == "goalie" then
-			local home = bot.home
-			if home then
-				local puck = BotService.PuckPosition
-				local target = home
-				if puck then
-					local across = math.clamp(
-						puck.X - home.X,
-						-Config.Goalie.SideToSide,
-						Config.Goalie.SideToSide
-					)
-					target = Vector3.new(home.X + across, home.Y, home.Z)
-				end
-
-				-- Moved by hand rather than by MoveTo, because the whole
-				-- point is that he does not path.
-				local here = bot.root.Position
-				local step = target - here
-				if step.Magnitude > 0.2 then
-					local travel = math.min(
-						step.Magnitude,
-						Config.Goalie.TrackSpeed * Config.Bots.ThinkInterval
-					)
-					bot.root.CFrame = CFrame.new(here + step.Unit * travel)
-				end
-			end
+			-- Tracked every frame in stepGoalies, not here: moving him on
+			-- the think interval made him jump across the crease in visible
+			-- steps, and a keeper who teleports is worse to watch and worse
+			-- to play against than one who slides.
 			continue
 		end
 
@@ -532,8 +520,75 @@ local function step()
 	end
 end
 
+--[[
+	The goalies, every frame.
+
+	Separate from the thinking loop above, which runs a few times a second
+	because a bot deciding where to walk sixty times a second is
+	indistinguishable from one deciding four times a second. Tracking a puck
+	is not that: at four hertz a keeper jumps across his crease in visible
+	steps, and a keeper who teleports is both worse to watch and worse to
+	play against than one who slides. There are two of them, so a per-frame
+	loop over goalies costs nothing worth measuring.
+
+	He plays slightly AHEAD of the puck rather than on it. Tracking where
+	the puck is makes him unbeatable except by raw speed -- he is always
+	already there. Leading it is what makes a change of direction work, and
+	that is the difference between beating him feeling earned and feeling
+	lucky.
+]]
+local function stepGoalies(deltaTime: number)
+	local puck = BotService.PuckPosition
+	local drift = BotService.PuckVelocity
+
+	for _, bot in bots do
+		if bot.role ~= "goalie" or bot.dead or not bot.model.Parent then
+			continue
+		end
+		local home = bot.home
+		if not home then
+			continue
+		end
+
+		local target = home
+		if puck then
+			local lead = if drift then drift * Config.Goalie.LeadSeconds else Vector3.zero
+			local across = math.clamp(
+				(puck.X + lead.X) - home.X,
+				-Config.Goalie.SideToSide,
+				Config.Goalie.SideToSide
+			)
+			target = Vector3.new(home.X + across, home.Y, home.Z)
+		end
+
+		-- Moved by hand rather than by MoveTo, because the whole point is
+		-- that he does not path: MoveTo would have him leave the crease to
+		-- meet the puck, which is the one thing a goalie must not do.
+		local here = bot.root.Position
+		local stride = target - here
+		if stride.Magnitude > 0.05 then
+			local travel = math.min(stride.Magnitude, Config.Goalie.TrackSpeed * deltaTime)
+			bot.root.CFrame = CFrame.new(here + stride.Unit * travel)
+		end
+	end
+end
+
+--[[ The keepers, so the rink can ask whether one is in the way of a shot. ]]
+function BotService.Goalies(venue: string?): { Bot }
+	local keepers = {}
+	for _, bot in bots do
+		if bot.role == "goalie" and not bot.dead and bot.model.Parent then
+			if venue == nil or bot.venue == venue then
+				table.insert(keepers, bot)
+			end
+		end
+	end
+	return keepers
+end
+
 function BotService.Start()
 	RunService.Heartbeat:Connect(step)
+	RunService.Heartbeat:Connect(stepGoalies)
 end
 
 --[[ One tick, for tests. ]]
@@ -545,6 +600,11 @@ end
 function BotService.StepForTests()
 	lastStep = 0
 	step()
+end
+
+--[[ One frame of goaltending, for tests. ]]
+function BotService.StepGoaliesForTests(deltaTime: number?)
+	stepGoalies(deltaTime or 1 / 60)
 end
 
 return BotService
