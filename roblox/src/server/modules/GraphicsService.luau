@@ -21,6 +21,9 @@
 
 local Lighting = game:GetService("Lighting")
 local MaterialService = game:GetService("MaterialService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 
 local GraphicsService = {}
 
@@ -75,45 +78,47 @@ function GraphicsService.Start()
 	end)
 
 	--[[
-		Mid-afternoon, not golden hour.
+		The grade comes from Config now, not from here.
 
-		This used to be a warm 16:20 sunset, which looked handsome in a
-		screenshot and was bad to play in: long raking shadows swallowed
-		whole streets, and a warm grade on mud-coloured terrain turned the
-		map into one brown mass. A competitive shooter wants a readable
-		frame first -- a higher sun with a crisp, nearly-hard shadow, cool
-		sky fill so shadowed faces stay legible instead of going black, and
-		saturation in the grade rather than in the sunlight.
+		Every one of these numbers used to be hardcoded in this module,
+		which made it the only one in the game that never read Config -- in
+		a project whose premise is that Config is the one file you tune. The
+		reasoning behind the default lives with the numbers, in
+		Config.Look: mid-afternoon rather than golden hour, because a low
+		sun on a map of mud and concrete turns the whole thing into one
+		brown mass, and because lifted shadow fill is not a preference when
+		pitch-black shade is where players disappear.
+
+		A second preset keeps the golden-hour version, for when the point is
+		to look at the game rather than play it.
 	]]
-	Lighting.Brightness = 3.0
-	Lighting.ClockTime = 14.5
-	Lighting.GeographicLatitude = 38
-	Lighting.ExposureCompensation = 0.15
+	local look = Config.CurrentLook()
+
+	Lighting.Brightness = look.Brightness
+	Lighting.ClockTime = look.ClockTime
+	Lighting.GeographicLatitude = look.GeographicLatitude
+	Lighting.ExposureCompensation = look.ExposureCompensation
 	Lighting.EnvironmentDiffuseScale = 0.85
 	Lighting.EnvironmentSpecularScale = 1.0
 	Lighting.GlobalShadows = true
 	pcall(function()
-		-- Sharp enough to read as a shadow edge rather than a smudge.
-		Lighting.ShadowSoftness = 0.15
+		Lighting.ShadowSoftness = look.ShadowSoftness
 	end)
 
-	-- Shadow fill is lifted deliberately. Pitch-black shade is where players
-	-- disappear, and a player you cannot see is not a difficulty setting.
-	Lighting.Ambient = Color3.fromRGB(70, 80, 95)
-	Lighting.OutdoorAmbient = Color3.fromRGB(110, 125, 145)
-	Lighting.ColorShift_Top = Color3.fromRGB(255, 250, 240)
-	Lighting.ColorShift_Bottom = Color3.fromRGB(85, 105, 130)
+	Lighting.Ambient = look.Ambient
+	Lighting.OutdoorAmbient = look.OutdoorAmbient
+	Lighting.ColorShift_Top = look.ColorShiftTop
+	Lighting.ColorShift_Bottom = look.ColorShiftBottom
 
 	-- Atmospheric scattering and distance perspective.
 	local atmosphere = Instance.new("Atmosphere")
-	-- Enough haze to give the 2000-stud map depth, cool rather than dusty so
-	-- it reads as distance instead of as fog you are standing in.
+	-- Enough haze to give the 2000-stud map depth.
 	atmosphere.Density = 0.24
-	atmosphere.Offset = 0.25
-	atmosphere.Color = Color3.fromRGB(195, 220, 255)
-	atmosphere.Decay = Color3.fromRGB(120, 145, 185)
-	atmosphere.Glare = 0.25
-	atmosphere.Haze = 0.8
+	atmosphere.Offset = look.AtmosphereOffset
+	atmosphere.Color = look.AtmosphereColor
+	atmosphere.Decay = look.AtmosphereDecay
+	atmosphere.Glare = look.AtmosphereGlare
+	atmosphere.Haze = look.AtmosphereHaze
 	tag(atmosphere)
 
 	-- Clear physical sky dome with crisp celestial bodies.
@@ -141,29 +146,28 @@ function GraphicsService.Start()
 		terrain.WaterColor = Color3.fromRGB(36, 108, 128)
 	end
 
-	-- Selective bloom: high threshold prevents sunlit concrete from clipping to
-	-- flat white while Neon tracers, headlights, and explosions glow vividly.
-	-- Tight bloom. A large radius is what makes a bright scene look like it
-	-- is behind greased glass; 16 keeps the glow on the thing that is
-	-- glowing -- neon scopes, muzzle flashes, headlights, goal lamps.
+	-- Selective bloom: a high threshold keeps sunlit concrete from clipping
+	-- to flat white while neon, headlights and explosions still glow. The
+	-- radius is the part that matters -- a large one is what makes a bright
+	-- scene look like it is behind greased glass.
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.35
-	bloom.Size = 16
-	bloom.Threshold = 1.25
+	bloom.Intensity = look.BloomIntensity
+	bloom.Size = look.BloomSize
+	bloom.Threshold = look.BloomThreshold
 	tag(bloom)
 
 	local sunRays = Instance.new("SunRaysEffect")
-	sunRays.Intensity = 0.12
-	sunRays.Spread = 0.55
+	sunRays.Intensity = look.SunRaysIntensity
+	sunRays.Spread = look.SunRaysSpread
 	tag(sunRays)
 
 	-- The punch lives here rather than in the sun, so colours pop without
 	-- blowing out lit concrete or tinting everything one shade.
 	local grade = Instance.new("ColorCorrectionEffect")
-	grade.Brightness = 0.03
-	grade.Contrast = 0.18
-	grade.Saturation = 0.22
-	grade.TintColor = Color3.fromRGB(250, 252, 255)
+	grade.Brightness = look.GradeBrightness
+	grade.Contrast = look.GradeContrast
+	grade.Saturation = look.GradeSaturation
+	grade.TintColor = look.GradeTint
 	tag(grade)
 
 	-- Kept disabled by default to avoid wasting a full-screen GPU pass during

@@ -392,6 +392,99 @@ print("Floating labels:")
 --[[LABELCHECK]]
 
 print("")
+print("The look:")
+do
+	--[[
+		Both grades are complete, and they really differ.
+
+		GraphicsService had every lighting number hardcoded -- the only
+		module in the game that never read Config, in a project whose
+		premise is that Config is the one file you tune. Now it reads a
+		named preset, which means a preset missing a key assigns nil to a
+		Lighting property and the whole look silently collapses. Nothing
+		typechecks a table literal against its uses.
+	]]
+	local readable = Config.Look.Presets.Readable
+	local cinematic = Config.Look.Presets.Cinematic
+	check("there are two grades to choose between",
+		readable ~= nil and cinematic ~= nil)
+
+	if readable and cinematic then
+		local missing = {}
+		for key in readable do
+			if cinematic[key] == nil then
+				table.insert(missing, "Cinematic." .. key)
+			end
+		end
+		for key in cinematic do
+			if readable[key] == nil then
+				table.insert(missing, "Readable." .. key)
+			end
+		end
+		table.sort(missing)
+		check("and neither is missing a value the other has", #missing == 0,
+			table.concat(missing, ", "))
+
+		-- Nothing may be nil, because nil goes straight onto a Lighting
+		-- property and the look collapses without an error.
+		local blank = {}
+		for name, preset in Config.Look.Presets do
+			for key, value in preset do
+				if value == nil then
+					table.insert(blank, name .. "." .. key)
+				end
+			end
+		end
+		check("and nothing in either is empty", #blank == 0,
+			table.concat(blank, ", "))
+
+		--[[
+			The default keeps players visible.
+
+			This is the whole reason Readable is the default rather than a
+			matter of taste: pitch-black shade is where players disappear,
+			and a player you cannot see is not a difficulty setting. If
+			somebody lowers the default's shadow fill to the cinematic
+			one's, that is the thing that breaks.
+		]]
+		local function fillOf(preset)
+			local c = preset.OutdoorAmbient
+			return (c.R + c.G + c.B) / 3
+		end
+		local defaultFill = fillOf(Config.CurrentLook())
+
+		-- An absolute floor, so neither grade can go to pitch black...
+		check("the default grade lifts shadow fill off black",
+			defaultFill > 0.3,
+			string.format("%.2f average fill", defaultFill))
+
+		--[[
+			...and a comparison, which is the claim that actually matters.
+
+			A floor alone passed when the default's fill was lowered to the
+			cinematic grade's value -- which is precisely the regression
+			worth catching, because lifting fill further than the pretty
+			grade does is the whole reason this one is the default.
+		]]
+		check("and lifts it further than the cinematic grade does",
+			defaultFill > fillOf(cinematic) * 1.2,
+			string.format("%.2f vs %.2f", defaultFill, fillOf(cinematic)))
+
+		-- And the two are actually different looks, not a copied table.
+		check("the two grades are genuinely different",
+			math.abs(readable.ClockTime - cinematic.ClockTime) > 1,
+			string.format("%.1f vs %.1f", readable.ClockTime, cinematic.ClockTime))
+
+		-- A nonsense preset name falls back rather than erroring.
+		local was = Config.Look.Preset
+		Config.Look.Preset = "NoSuchGrade"
+		check("an unknown grade falls back to the readable one",
+			Config.CurrentLook() == readable, "")
+		Config.Look.Preset = was
+	end
+end
+
+print("")
 print("The harness itself:")
 
 do

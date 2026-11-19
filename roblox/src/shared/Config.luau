@@ -1224,6 +1224,101 @@ Config.Help = {
 	},
 }
 
+--[[
+	The look of the world, as numbers rather than as code.
+
+	GraphicsService had every one of these hardcoded, which made it the only
+	module in the game that did not read Config -- in a project whose whole
+	premise is that Config is the one file you tune. Moving them here is the
+	fix for that, and it also settles an argument.
+
+	The two presets differ on a real trade-off, not on quality. Cinematic is
+	a late-afternoon golden hour: a low sun, long raking shadows across the
+	streets, warm key against cool shade. It photographs beautifully.
+	Readable is mid-afternoon: a higher sun, a crisp nearly-hard shadow edge,
+	and -- the part that matters -- shadow fill lifted well off black, with
+	the colour punch moved into the grade instead of into the sunlight.
+
+	Readable is the default because this is a competitive shooter on a map
+	made of mud, concrete and brown terrain. Golden hour on that palette
+	turns the whole map into one brown mass, and lifted shadow fill is not an
+	aesthetic preference: pitch-black shade is where players disappear, and a
+	player you cannot see is not a difficulty setting.
+
+	Both are kept because the argument is legitimate and the answer depends
+	on whether you are playing the game or showing it to somebody. Switching
+	is one word here.
+]]
+Config.Look = {
+	Preset = "Readable",
+
+	Presets = {
+		Readable = {
+			Brightness = 3.0,
+			ClockTime = 14.5,
+			GeographicLatitude = 38,
+			ExposureCompensation = 0.15,
+			ShadowSoftness = 0.15,
+			Ambient = Color3.fromRGB(70, 80, 95),
+			OutdoorAmbient = Color3.fromRGB(110, 125, 145),
+			ColorShiftTop = Color3.fromRGB(255, 250, 240),
+			ColorShiftBottom = Color3.fromRGB(85, 105, 130),
+			AtmosphereOffset = 0.25,
+			AtmosphereColor = Color3.fromRGB(195, 220, 255),
+			AtmosphereDecay = Color3.fromRGB(120, 145, 185),
+			AtmosphereGlare = 0.25,
+			AtmosphereHaze = 0.8,
+			BloomIntensity = 0.35,
+			BloomSize = 16,
+			BloomThreshold = 1.25,
+			SunRaysIntensity = 0.12,
+			SunRaysSpread = 0.55,
+			GradeBrightness = 0.03,
+			GradeContrast = 0.18,
+			GradeSaturation = 0.22,
+			GradeTint = Color3.fromRGB(250, 252, 255),
+		},
+
+		--[[
+			The golden-hour grade, kept as it was proposed.
+
+			Worth having as a preset and worth not being the default: the
+			darker ambient and the long shadows are exactly what makes a
+			screenshot and exactly what loses a player in shade.
+		]]
+		Cinematic = {
+			Brightness = 2.85,
+			ClockTime = 16.2,
+			GeographicLatitude = 26,
+			ExposureCompensation = 0.0,
+			ShadowSoftness = 0.22,
+			Ambient = Color3.fromRGB(38, 44, 58),
+			OutdoorAmbient = Color3.fromRGB(76, 86, 108),
+			ColorShiftTop = Color3.fromRGB(255, 224, 176),
+			ColorShiftBottom = Color3.fromRGB(58, 68, 88),
+			AtmosphereOffset = 0.2,
+			AtmosphereColor = Color3.fromRGB(210, 206, 198),
+			AtmosphereDecay = Color3.fromRGB(96, 108, 130),
+			AtmosphereGlare = 0.34,
+			AtmosphereHaze = 0.95,
+			BloomIntensity = 0.38,
+			BloomSize = 24,
+			BloomThreshold = 1.45,
+			SunRaysIntensity = 0.16,
+			SunRaysSpread = 0.85,
+			GradeBrightness = 0.01,
+			GradeContrast = 0.14,
+			GradeSaturation = 0.16,
+			GradeTint = Color3.fromRGB(255, 248, 238),
+		},
+	},
+}
+
+--[[ The grade in force, or the Readable one if the name is nonsense. ]]
+function Config.CurrentLook()
+	return Config.Look.Presets[Config.Look.Preset] or Config.Look.Presets.Readable
+end
+
 Config.Visuals = {
 	-- Wider than Roblox's 70. More of the map on screen and a stronger
 	-- sense of speed, which is most of why a modern shooter feels quick.
