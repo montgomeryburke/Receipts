@@ -55,6 +55,7 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
+local Lifetime = require(script.Parent:WaitForChild("Lifetime"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
 local Signal = require(Shared:WaitForChild("Signal"))
@@ -3026,7 +3027,7 @@ function VehicleService.Eject(player: Player)
 	Remotes.Event("Notify"):FireClient(player, "Parachute open — steer with WASD.")
 
 	-- Let the launch carry you upward first, then open.
-	task.delay(0.7, function()
+	Lifetime.Delay(0.7, function()
 		if descent.Parent then
 			descent.Enabled = true
 		end

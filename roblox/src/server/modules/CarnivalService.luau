@@ -19,6 +19,7 @@ local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
+local Lifetime = require(script.Parent:WaitForChild("Lifetime"))
 local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
 local BotService = require(script.Parent:WaitForChild("BotService"))
 
@@ -599,7 +600,7 @@ local function popBalloon(part: BasePart, shooter: Player?): boolean
 	if #balloonBoard == 0 and container then
 		award(shooter, Config.Carnival.BalloonClearBonus, "FULL BOARD CLEARED!")
 		local parent = container
-		task.delay(1.6, function()
+		Lifetime.Delay(1.6, function()
 			if parent.Parent then
 				fillBalloons(parent)
 			end
@@ -705,7 +706,7 @@ local function knockBottle(part: BasePart, shooter: Player?, direction: Vector3?
 			Sound.At("RoundEnd", stack.shelf, 0.9)
 
 			local parent = container
-			task.delay(Config.Carnival.ResetSeconds, function()
+			Lifetime.Delay(Config.Carnival.ResetSeconds, function()
 				if parent and parent.Parent then
 					for _, old in stack.bottles do
 						if old.Parent then
@@ -951,7 +952,7 @@ local function checkCrateStacks()
 			Sound.At("RoundEnd", stack.base, 1)
 
 			local parent = container
-			task.delay(Config.Carnival.ResetSeconds, function()
+			Lifetime.Delay(Config.Carnival.ResetSeconds, function()
 				if parent and parent.Parent then
 					for _, old in stack.crates do
 						if old.Parent then

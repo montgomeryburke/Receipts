@@ -18,6 +18,7 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
+local Lifetime = require(script.Parent:WaitForChild("Lifetime"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
@@ -419,10 +420,10 @@ local function beginReload(player: Player, weaponName: string)
 	slot.reloadingUntil = expectedUntil
 	PlayerState.Changed.Fire(player)
 
-	task.delay(spec.ReloadTime, function()
-		if not player.Parent then
-			return
-		end
+	-- Not round-guarded: a player keeps playing across a round change, so a
+	-- reload started before it should still finish after it. The token
+	-- compare below is what stops a stale one filling the magazine twice.
+	Lifetime.DelayFor(player, spec.ReloadTime, function()
 		local current = PlayerState.Get(player)
 		local currentSlot = current.weapons[weaponName]
 		if currentSlot and currentSlot.reloadingUntil == expectedUntil then

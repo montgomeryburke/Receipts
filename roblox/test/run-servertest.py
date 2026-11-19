@@ -361,6 +361,84 @@ do
 end
 
 DUMP("")
+DUMP("Nothing from the last round lands in this one:")
+do
+	--[[
+		THE CLAIM: a gas can shot at the end of a round reappears in the
+		next map, at the old map's coordinates.
+
+		It did, and the call site looked careful. FireService's three
+		respawns all check `if holder and holder.Parent` before putting
+		anything back -- but `holder` is the MODULE-level handle, so by the
+		time the callback runs it points at the NEW map's folder, which is
+		alive. The guard was answering the wrong question: not "is the thing
+		I was scheduled for still here" but "does a thing of that sort
+		exist". So the can came back, in a map it had never been in, often
+		floating in the air or inside a building.
+
+		The ones that captured their own folder -- the carnival's stall
+		resets -- were saved by accident, because Destroy nils Parent all
+		the way down. Which is the worst way for a rule to hold: it works
+		until somebody writes the next one slightly differently.
+	]]
+	FireService.Build(1900)
+	local before = #FireService.CansForTests()
+	check("the map has gas cans on it", before > 0,
+		string.format("%d cans", before))
+
+	-- Shoot one. It schedules its own return.
+	local shot = FireService.CansForTests()[1]
+	check("there is a can to shoot", shot ~= nil)
+	if shot then
+		FireService.Detonate(shot, killer, 0)
+		RUN_SPAWNED()
+	end
+
+	--[[
+		The round ends and a different map goes up. The scheduled return is
+		still pending, and it belongs to a world that no longer exists.
+	]]
+	Lifetime.Bump()
+	FireService.Build(1500)
+	local fresh = #FireService.CansForTests()
+
+	ADVANCE(Config.Fire.CanRespawnSeconds + 1)
+	RUN_DELAYED()
+	RUN_SPAWNED()
+
+	check("the old round's can does not come back into the new one",
+		#FireService.CansForTests() == fresh,
+		string.format("%d cans, was %d", #FireService.CansForTests(), fresh))
+
+	--[[
+		And within one round it still works.
+
+		A generation guard that refuses everything would pass the test above
+		and break the game, so this is the half that matters: shoot a can,
+		wait, and it is back.
+	]]
+	local again = nil
+	for _, can in FireService.CansForTests() do
+		if not can.gone then
+			again = can
+			break
+		end
+	end
+	if again then
+		local standing = #FireService.CansForTests()
+		FireService.Detonate(again, killer, 0)
+		RUN_SPAWNED()
+		ADVANCE(Config.Fire.CanRespawnSeconds + 1)
+		RUN_DELAYED()
+		RUN_SPAWNED()
+		check("but a can shot inside this round does come back",
+			#FireService.CansForTests() >= standing,
+			string.format("%d cans, %d before it was shot",
+				#FireService.CansForTests(), standing))
+	end
+end
+
+DUMP("")
 DUMP("You hold the gun you are holding:")
 do
 	--[[
@@ -449,12 +527,15 @@ do
 	check("the map starts with poop on it", seeded > 0,
 		string.format("%d piles", seeded))
 
-	-- Walk over the lot of them.
-	for _ = 1, seeded do
+	-- Walk over the lot of them. Looped until empty rather than a fixed
+	-- count, because the renewal clock is allowed to drop a fresh one in
+	-- the middle of the sweep -- that is the feature, not a miscount.
+	for _ = 1, seeded + 40 do
 		local pile = WildlifeService.NearestPoopForTests(Vector3.new(0, 0, 0))
-		if pile then
-			pile:Destroy()
+		if not pile then
+			break
 		end
+		pile:Destroy()
 		RunService.Heartbeat._fire(1 / 60)
 	end
 	check("and they can all be taken", WildlifeService.PoopCount() == 0,
@@ -2108,7 +2189,7 @@ def strip(s):
     return '\n'.join(out)
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
-SERVER = ['PlayerState', 'MedalService', 'TeamService', 'BotService', 'ArcadeService', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
+SERVER = ['Lifetime', 'PlayerState', 'MedalService', 'TeamService', 'BotService', 'ArcadeService', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'BasketballService', 'BowlingService', 'FireService', 'ProjectileService', 'WeaponService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',
           'GraphicsService']

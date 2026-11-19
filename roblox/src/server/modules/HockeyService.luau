@@ -30,6 +30,7 @@ local Signal = require(Shared:WaitForChild("Signal"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
+local Lifetime = require(script.Parent:WaitForChild("Lifetime"))
 local MedalService = require(script.Parent:WaitForChild("MedalService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 -- Required, and it was not. TeamService.IndexOf is called when a goal goes
@@ -645,7 +646,7 @@ local function checkGoals()
 				if glow then
 					glow.Brightness = 6
 				end
-				task.delay(2.5, function()
+				Lifetime.Delay(2.5, function()
 					if lamp.Parent then
 						lamp.Color = Color3.fromRGB(70, 14, 14)
 						local dim = lamp:FindFirstChildOfClass("PointLight")
@@ -675,7 +676,7 @@ local function checkGoals()
 				instead of a goal.
 			]]
 			Sound.At("GoalHorn", live.Position, 1.2)
-			task.delay(0.35, function()
+			Lifetime.Delay(0.35, function()
 				Sound.Chorus("CrowdVoice", zone.part.Position, 6, 0.9)
 			end)
 			dropPuck()
@@ -861,7 +862,7 @@ function HockeyService.EndFight(fight: Fight, winner: Player, loser: Player)
 	local loserHumanoid = loserCharacter and loserCharacter:FindFirstChildOfClass("Humanoid")
 	if loserHumanoid then
 		loserHumanoid.PlatformStand = true
-		task.delay(Config.Hockey.KnockdownSeconds, function()
+		Lifetime.Delay(Config.Hockey.KnockdownSeconds, function()
 			if loserHumanoid and loserHumanoid.Parent then
 				loserHumanoid.PlatformStand = false
 			end
@@ -1094,6 +1095,11 @@ function HockeyService.Start()
 	Players.PlayerRemoving:Connect(function(player)
 		fightOf[player] = nil
 		lastPunchAt[player] = nil
+		-- Was missed, and it is the one of the three that outlives a round:
+		-- a penalty runs for Config.Hockey.PenaltySeconds, so a player sent
+		-- off and then leaving stayed in here with a Player key holding them
+		-- alive for as long as the server ran.
+		pickupBlockedUntil[player] = nil
 	end)
 end
 

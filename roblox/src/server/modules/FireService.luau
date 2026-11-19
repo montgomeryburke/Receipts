@@ -37,6 +37,7 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
+local Lifetime = require(script.Parent:WaitForChild("Lifetime"))
 local BotService = require(script.Parent:WaitForChild("BotService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local MedalService = require(script.Parent:WaitForChild("MedalService"))
@@ -134,7 +135,7 @@ local function spawnCan(at: Vector3, parent: Instance): Can
 		part:Destroy()
 
 		-- It comes back, so the map does not run out of them.
-		task.delay(Config.Fire.CanRespawnSeconds, function()
+		Lifetime.Delay(Config.Fire.CanRespawnSeconds, function()
 			if holder and holder.Parent then
 				table.insert(cans, spawnCan(at, holder))
 			end
@@ -199,7 +200,7 @@ local function launchFireball(from: Vector3, by: Player?)
 		fires immediately against whatever it was launched from. A flight
 		time is both predictable to tune and impossible to trigger early.
 	]]
-	task.delay(Config.Fire.FireballFlightSeconds, function()
+	Lifetime.Delay(Config.Fire.FireballFlightSeconds, function()
 		if not ball.Parent then
 			return
 		end
@@ -283,7 +284,7 @@ function FireService.Ignite(puddle: Puddle, by: Player?)
 
 	Sound.At("Splash", part.Position, 0.5)
 
-	task.delay(Config.Fire.SpreadDelay, function()
+	Lifetime.Delay(Config.Fire.SpreadDelay, function()
 		for _, other in puddles do
 			if other.burning or not other.part.Parent then
 				continue
@@ -455,7 +456,7 @@ function FireService.Detonate(can: Can, by: Player?, depth: number?)
 			end
 			if (other.part.Position - at).Magnitude <= Config.Fire.CanChainRadius then
 				local victim = other
-				task.delay(Config.Fire.ChainDelay, function()
+				Lifetime.Delay(Config.Fire.ChainDelay, function()
 					FireService.Detonate(victim, by, level)
 				end)
 			end
@@ -463,7 +464,7 @@ function FireService.Detonate(can: Can, by: Player?, depth: number?)
 	end
 
 	-- It comes back, in its original spot.
-	task.delay(Config.Fire.CanRespawnSeconds, function()
+	Lifetime.Delay(Config.Fire.CanRespawnSeconds, function()
 		if holder and holder.Parent then
 			table.insert(cans, spawnCan(can.home, holder))
 		end
@@ -523,7 +524,7 @@ function FireService.Detonate_Mine(mine: Mine, by: Player?)
 
 	-- And it comes back, because a minefield that empties out stops being
 	-- a thing you have to think about.
-	task.delay(Config.Fire.MineRespawnSeconds, function()
+	Lifetime.Delay(Config.Fire.MineRespawnSeconds, function()
 		if holder and holder.Parent then
 			FireService.PlaceMine(mine.home)
 		end

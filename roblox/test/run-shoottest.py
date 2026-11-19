@@ -33,7 +33,7 @@ def strip(s):
 
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
-SERVER = ['PlayerState', 'TeamService', 'BotService', 'ArcadeService', 'HockeyService',
+SERVER = ['Lifetime', 'PlayerState', 'TeamService', 'BotService', 'ArcadeService', 'HockeyService',
           'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
           'CarnivalService', 'ProjectileService', 'WeaponService', 'PickupService',
           'EffectService', 'FlagService']

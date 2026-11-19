@@ -14,6 +14,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 
+local Lifetime = require(script.Parent:WaitForChild("Lifetime"))
 local MapService = require(script.Parent:WaitForChild("MapService"))
 local PickupService = require(script.Parent:WaitForChild("PickupService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
@@ -142,6 +143,12 @@ local function buildArena(entry: { map: Config.MapSpec, mode: typeof(Config.Mode
 	local spec = entry.map
 	currentMapSpec = spec
 	currentMode = entry.mode
+
+	-- Everything the old arena scheduled for later is now void: a gas can
+	-- that was about to respawn, a stall about to reset, a bot about to come
+	-- back. This is the only place the round generation moves, which is what
+	-- makes it reliable.
+	Lifetime.Bump()
 
 	ProjectileService.ClearAll()
 	VehicleService.ClearAll()
@@ -295,7 +302,7 @@ function MatchService.SpawnMapVehicles()
 				return
 			end
 			vehicle.Destroying:Connect(function()
-				task.delay(respawnDelay, place)
+				Lifetime.Delay(respawnDelay, place)
 			end)
 		end
 

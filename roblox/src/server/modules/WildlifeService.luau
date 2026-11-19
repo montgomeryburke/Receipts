@@ -24,11 +24,11 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
+local Lifetime = require(script.Parent:WaitForChild("Lifetime"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
 local WildlifeService = {}
-local populationGeneration = 0
 
 type Dweller = {
 	kind: string,
@@ -595,12 +595,13 @@ local function kill(dweller: Dweller, attacker: Player?)
 	Debris:AddItem(anchor, 2.5)
 
 	local kind = dweller.kind
-	local gen = populationGeneration
 	dweller.model:Destroy()
-	task.delay(Config.Population.RespawnDelay, function()
-		if gen == populationGeneration then
-			respawnOne(kind)
-		end
+	-- The round guard used to be this module's own populationGeneration,
+	-- which only moved when Clear was called -- so it caught a repopulate
+	-- and missed every other way the world goes away. Lifetime moves on one
+	-- step from the one place that rebuilds the arena, for every system.
+	Lifetime.Delay(Config.Population.RespawnDelay, function()
+		respawnOne(kind)
 	end)
 end
 
@@ -871,7 +872,6 @@ function WildlifeService.Populate(mapSize: number)
 end
 
 function WildlifeService.Clear()
-	populationGeneration += 1
 	for _, dweller in dwellers do
 		if dweller.model.Parent then
 			dweller.model:Destroy()

@@ -126,6 +126,19 @@ function DamageService.ClearDeathRecord(victim: Player)
 	diedAt[victim] = nil
 end
 
+--[[
+	Forget a player who has left.
+
+	This table is keyed by Player and had nothing clearing it, which on a
+	server that runs for hours means every player who has ever been here is
+	still in it -- and a Player key holds the Player, which holds its last
+	Character and everything welded to it. A slow leak that looks like
+	nothing at all for the first half hour.
+]]
+Players.PlayerRemoving:Connect(function(player: Player)
+	diedAt[player] = nil
+end)
+
 function DamageService.HandleDeath(victim: Player, killer: Player?, cause: string)
 	diedAt[victim] = os.clock()
 	if victim.Parent then

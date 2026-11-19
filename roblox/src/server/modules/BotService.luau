@@ -27,6 +27,7 @@ local Signal = require(Shared:WaitForChild("Signal"))
 local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 
+local Lifetime = require(script.Parent:WaitForChild("Lifetime"))
 local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
 local BotService = {}
@@ -325,7 +326,7 @@ function BotService.RegisterHit(part: BasePart, damage: number, attacker: Player
 	-- Gone after a moment, then back where it started, so a venue stays
 	-- populated for whoever is still playing.
 	local model = bot.model
-	task.delay(Config.Bots.RespawnDelay, function()
+	Lifetime.Delay(Config.Bots.RespawnDelay, function()
 		if model.Parent then
 			model:Destroy()
 		end

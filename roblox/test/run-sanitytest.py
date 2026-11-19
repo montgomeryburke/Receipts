@@ -290,6 +290,14 @@ print("Lighting ownership:")
 --[[LIGHTINGCHECK]]
 
 print("")
+print("Round boundaries:")
+--[[DELAYCHECK]]
+
+print("")
+print("Per-player tables:")
+--[[LEAKCHECK]]
+
+print("")
 print("The harness itself:")
 
 do
@@ -470,6 +478,113 @@ def lighting_trespassers():
     return offenders
 
 
+# ----------------------------------------------------------------------------
+# Who schedules work that can outlive its round?
+#
+# At a round change MatchService tears the arena down and builds a new one,
+# and every task.delay still pending from the old round then fires into it.
+# Some of those are harmless and some are not, and from the call site the two
+# look identical: a respawn that captured its own folder finds the folder
+# destroyed and bails, while one that reads a MODULE-level handle finds the
+# NEW map's folder, perfectly alive, and puts a gas can in it at the old
+# map's coordinates. The careful-looking check is answering the wrong
+# question.
+#
+# So the rule is the mechanism, not the care: world-scoped waits go through
+# Lifetime.Delay, which compares a generation, and player-scoped ones through
+# Lifetime.DelayFor, which checks the player is still here. A bare task.delay
+# on the server is the thing to catch, and only reading the source catches it
+# -- a leak like this needs a round change AND a pending callback AND somebody
+# standing where the stale thing lands.
+DELAY_OWNER = "Lifetime.luau"
+
+
+def unguarded_delays():
+    offenders = []
+    base = os.path.join(SRC, "server")
+    if not os.path.isdir(base):
+        return offenders
+    for root, _dirs, names in os.walk(base):
+        for name in sorted(names):
+            if not name.endswith(".luau") or name == DELAY_OWNER:
+                continue
+            path = os.path.join(root, name)
+            with open(path, encoding="utf-8") as handle:
+                for number, line in enumerate(handle, 1):
+                    stripped = line.strip()
+                    # Prose about the rule is not a breach of it.
+                    if stripped.startswith("--"):
+                        continue
+                    if re.search(r"\btask\.delay\s*\(", line):
+                        offenders.append("%s:%d" % (name, number))
+    return offenders
+
+
+# ----------------------------------------------------------------------------
+# Which per-player tables are never emptied?
+#
+# A Roblox server runs for hours and players come and go the whole time. A
+# table keyed by Player with nothing clearing it therefore grows for the life
+# of the server, and the key is not a name but the Player itself -- so it
+# holds that player, their last Character, and everything welded to it. It
+# looks like nothing at all for the first half hour.
+#
+# Two were already leaking when this check was written: DamageService's record
+# of when each player last went down, in a module with no PlayerRemoving
+# handler at all, and the hockey penalty clock. Neither is reachable by a
+# test: nothing goes wrong, there is just more of it.
+#
+# The rule is that a `local x: { [Player]: ... }` on the server has a matching
+# `x[player] = nil` somewhere. Crude, and it holds: the cheapest way to pass
+# it is to write the clear.
+# re.M matters: without it `^` anchors to the start of the whole file, the
+# pattern finds nothing, and the check passes while testing nothing at all.
+# Which is what it did until a mutation showed the pass was free.
+PLAYER_TABLE = re.compile(r"^local (\w+)\s*:\s*\{\s*\[Player\]", re.M)
+
+
+def unswept_player_tables():
+    offenders = []
+    base = os.path.join(SRC, "server")
+    if not os.path.isdir(base):
+        return offenders
+    for root, _dirs, names in os.walk(base):
+        for name in sorted(names):
+            if not name.endswith(".luau"):
+                continue
+            with open(os.path.join(root, name), encoding="utf-8") as handle:
+                body = handle.read()
+            for match in PLAYER_TABLE.finditer(body):
+                table = match.group(1)
+                # Cleared directly, or handed to a Clear function that owns
+                # the whole state (PlayerState keeps one table and clears it
+                # through its own named function).
+                cleared = re.search(
+                    r"\b%s\s*\[\s*\w+\s*\]\s*=\s*nil" % re.escape(table), body
+                ) or re.search(r"table\.clear\(\s*%s\s*\)" % re.escape(table), body)
+                if not cleared:
+                    offenders.append("%s.%s" % (name[:-5], table))
+    return offenders
+
+
+UNSWEPT = unswept_player_tables()
+LEAK_CHECK = (
+    'check("every per-player table on the server is emptied again", %s, %s)'
+    % (
+        "true" if not UNSWEPT else "false",
+        '""' if not UNSWEPT else '"' + ", ".join(UNSWEPT) + '"',
+    )
+)
+
+LOOSE_DELAYS = unguarded_delays()
+DELAY_CHECK = (
+    'check("every delayed callback on the server goes through Lifetime", %s, %s)'
+    % (
+        "true" if not LOOSE_DELAYS else "false",
+        '""' if not LOOSE_DELAYS else '"' + ", ".join(LOOSE_DELAYS) + '"',
+    )
+)
+
 TRESPASSERS = lighting_trespassers()
 LIGHTING_CHECK = (
     'check("GraphicsService is the only module that touches Lighting", %s, %s)'
@@ -558,6 +673,8 @@ harness = (
     TEMPLATE
     .replace("--[[REMOTECHECKS]]", REMOTE_CHECKS)
     .replace("--[[LIGHTINGCHECK]]", LIGHTING_CHECK)
+    .replace("--[[DELAYCHECK]]", DELAY_CHECK)
+    .replace("--[[LEAKCHECK]]", LEAK_CHECK)
     .replace("--[[STUBS]]", read(HERE, "stubs.luau"))
     .replace("--[[CONFIG]]", strip(read(SRC, "shared", "Config.luau")))
     .replace("--[[SOUND]]", strip(read(SRC, "shared", "Sound.luau")))
