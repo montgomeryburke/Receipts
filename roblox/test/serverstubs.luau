@@ -232,12 +232,40 @@ service("TweenService", {
 		local done = signal()
 		return {
 			Play = function()
+				--[[
+					The goal lands at once; Completed arrives later.
+
+					Two separate compromises, and they are both deliberate.
+
+					A test cannot wait a quarter of a second of wall clock
+					for an animation, so the goal is fast-forwarded: what
+					matters is that the right target was asked for, not the
+					interpolation, which is Roblox's job and not this
+					game's.
+
+					Completed, though, must NOT fire inside Play. Every one
+					of this game's three Completed listeners is attached on
+					the line AFTER Play -- which is perfectly correct
+					against a tween that takes time, and would silently
+					never fire against one that finishes instantly. A test
+					would then conclude the cleanup does not happen when in
+					the real engine it does. So it goes on the spawn queue
+					and arrives when the test drains it, which is also when
+					a test gets to observe the mid-animation state if it
+					wants to.
+				]]
 				if target and goals then
 					for key, value in goals do
 						target[key] = value
 					end
 				end
-				done._fire()
+				if SPAWNED then
+					table.insert(SPAWNED, { fn = function()
+						done._fire()
+					end, args = table.pack() })
+				else
+					done._fire()
+				end
 			end,
 			Cancel = function() end,
 			Pause = function() end,

@@ -445,6 +445,7 @@ function Hud.Build()
 
 	-- Floating damage numbers, stacked up beside the crosshair.
 	damageHolder = makeFrame(screen, {
+		Name = "DamageNumbers",
 		Size = UDim2.fromOffset(160, 150),
 		Position = UDim2.new(0.5, 40, 0.5, -40),
 		BackgroundTransparency = 1,
@@ -1471,6 +1472,11 @@ function Hud.ShowHurtFrom(from: Vector3?)
 			blade.Visible = false
 		end
 	end)
+end
+
+--[[ For tests: where the floating damage numbers live. ]]
+function Hud.DamageNumbersForTests(): Frame?
+	return damageHolder
 end
 
 --[[ For tests: the arcs, so a test can see which one lit and where. ]]
