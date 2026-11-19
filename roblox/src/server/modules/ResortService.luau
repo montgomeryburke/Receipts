@@ -30,8 +30,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Sound = require(Shared:WaitForChild("Sound"))
 local Util = require(Shared:WaitForChild("Util"))
 local ArcadeService = require(script.Parent:WaitForChild("ArcadeService"))
+local PlayerState = require(script.Parent:WaitForChild("PlayerState"))
 
 local ResortService = {}
 
@@ -60,6 +64,7 @@ type LiftSystem = {
 
 local activeLift: LiftSystem? = nil
 local liftStarted = false
+local finishGate: BasePart? = nil
 local CARRIER_COUNT = 6
 local CARRIER_SPEED = 0.028 -- full loop fraction per second (~18s one-way)
 local STATION_DWELL = 0.045 -- slow boarding zone at each end
@@ -828,11 +833,108 @@ function ResortService.Clear()
 	end
 end
 
+--[[
+	Who is on the hill, and when the line was last taken.
+
+	A run starts the moment somebody is high up on the piste and ends when
+	they cross the line at the bottom, with no queue and nothing to join.
+	The alternative -- a formal 1v1 with a countdown -- would mean standing
+	about waiting on a mountain, and would take you out of the round, which
+	is the one thing nothing here is allowed to do.
+]]
+local runStartedAt: { [Player]: number } = {}
+local lineClaimedAt = 0
+
+local function stepRace()
+	local gate = finishGate
+	if not gate or not gate.Parent then
+		return
+	end
+
+	local now = os.clock()
+
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not root or not root:IsA("BasePart") or not humanoid or humanoid.Health <= 0 then
+			runStartedAt[player] = nil
+			continue
+		end
+
+		local here = root.Position
+		local offset = here - gate.Position
+
+		--[[
+			Started: well above the line, anywhere on the hill.
+
+			Measured by HEIGHT rather than by touching a start gate at the
+			summit, because people drop onto the piste halfway down from the
+			chairlift or off a glider, and a run that only counts from the
+			very top would quietly refuse most of them.
+		]]
+		if not runStartedAt[player] then
+			if here.Y > gate.Position.Y + Config.SkiRace.MinimumHeightDrop then
+				runStartedAt[player] = now
+			end
+			continue
+		end
+
+		-- Crossed it.
+		local across = math.abs(offset.X) < Config.SkiRace.FinishWidth * 0.5
+			or math.abs(offset.Z) < Config.SkiRace.FinishWidth * 0.5
+		local atTheBottom = math.abs(offset.Y) < 30
+		if not (across and atTheBottom) then
+			continue
+		end
+
+		local took = now - runStartedAt[player]
+		runStartedAt[player] = nil
+
+		-- Sliding over the line from a standing start is not a run.
+		if took < Config.SkiRace.MinimumRunSeconds then
+			continue
+		end
+
+		local first = now - lineClaimedAt > Config.SkiRace.FirstDownSeconds
+		lineClaimedAt = now
+
+		local points = Config.SkiRace.FinishPoints
+		if first then
+			points += Config.SkiRace.FirstDownBonus
+		end
+		PlayerState.AwardPoints(
+			player,
+			points,
+			if first then "first down the hill" else "a run down the hill"
+		)
+
+		Sound.At("Bell", gate.Position, 0.9)
+		if first then
+			Remotes.Event("KillFeed"):FireAllClients(
+				`{player.DisplayName} took the hill in {string.format("%.1f", took)}s`,
+				false
+			)
+		end
+	end
+end
+
+--[[ One tick of the race, for tests. ]]
+function ResortService.StepRaceForTests()
+	stepRace()
+end
+
 function ResortService.Start()
 	if liftStarted then
 		return
 	end
 	liftStarted = true
+
+	RunService.Heartbeat:Connect(stepRace)
+
+	Players.PlayerRemoving:Connect(function(player)
+		runStartedAt[player] = nil
+	end)
 
 	RunService.Heartbeat:Connect(function(deltaTime: number)
 		local lift = activeLift
@@ -994,6 +1096,40 @@ function ResortService.Build(mapSize: number, parent: Instance): ResortBuild
 	-- ride a tube off the mountain and straight into the river.
 	local riverEntry = Vector3.new(-ringRadius, WATER_LEVEL, 0)
 	local jumps = skiRun(summit, riverEntry, parent)
+
+	--[[
+		The finish line, across the bottom of the piste.
+
+		A banner rather than a wall: it has to be something you ski THROUGH,
+		and a solid gate at the bottom of a long run would be the single
+		most annoying object on the map.
+	]]
+	finishGate = Util.Part({
+		Name = "SkiFinish",
+		Size = Vector3.new(Config.SkiRace.FinishWidth, 3, 3),
+		CFrame = CFrame.new(riverEntry + Vector3.new(0, 14, 10)),
+		Color = Color3.fromRGB(255, 200, 40),
+		Material = Enum.Material.Neon,
+		Anchored = true,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = parent,
+	})
+
+	for _, side in { -1, 1 } do
+		Util.Part({
+			Name = "SkiFinishPost",
+			Size = Vector3.new(2, 14, 2),
+			CFrame = CFrame.new(
+				riverEntry
+					+ Vector3.new(side * Config.SkiRace.FinishWidth * 0.5, 7, 10)
+			),
+			Color = Color3.fromRGB(200, 60, 40),
+			Material = Enum.Material.Metal,
+			Anchored = true,
+			Parent = parent,
+		})
+	end
 
 	-- The chairlift runs up the other side, with decks you can drive onto.
 	local liftBottom = mountainCentre + Vector3.new(mountainRadius * 1.05, 0, -mountainRadius * 0.5)

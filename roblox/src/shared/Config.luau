@@ -1011,7 +1011,8 @@ Config.Help = {
 		answer = "Take the chairlift or drive an off-roader up the mountain, then "
 			.. "grab gear from the rack at the summit. E shoves and boosts, space "
 			.. "bails out. Hit the table-top jumps for tricks -- spin in the air and "
-			.. "it scores. A tube goes straight off the bottom into the lazy river.",
+			.. "it scores. Crossing the line at the bottom scores the run, and first "
+			.. "one down gets a bonus. A tube goes off the bottom into the river.",
 		keywords = { "ski", "snowboard", "tube", "mountain", "jump", "trick", "slope", "river", "bike" },
 	},
 	{
@@ -1210,6 +1211,52 @@ Config.Fire = {
 	FireballBlastRadius = 18,
 	FireballBlastDamage = 60,
 	ScorchSeconds = 5,
+}
+
+--[[
+	The ski run as a race, not just a way down.
+
+	The pasted ski battle built a formal 1v1: a queue, a countdown, a
+	lockout and a winner. That is the same mistake bowling's ten frames
+	would have been -- an activity that takes you out of the round is the
+	one thing nothing here is allowed to do, and a queue for two means
+	standing about waiting on a mountain with a view of the whole map.
+
+	So instead the run is always open and always timed. Cross the line at
+	the bottom and you score for the descent; the first one down since the
+	line last went quiet gets the bonus. That keeps the race -- somebody to
+	beat, and a reason to take the jumps rather than the safe line -- with
+	nothing to join and nothing to wait for.
+
+	The shove and the boost are what make it a fight rather than two solo
+	runs, and those already exist.
+]]
+Config.SkiRace = {
+	-- Points for finishing at all, and for being first down.
+	FinishPoints = 55,
+	FirstDownBonus = 95,
+	--[[
+		How long the line stays "claimed" after somebody crosses it.
+
+		Short, because the bonus is for winning a race against whoever is on
+		the hill WITH you -- not for being the only person who has skied all
+		round. Long enough that two people seconds apart are clearly first
+		and second.
+	]]
+	FirstDownSeconds = 25,
+	-- Minimum time on the hill to count, so sliding over the line at the
+	-- bottom from a standing start is not a free score.
+	MinimumRunSeconds = 4,
+	FinishWidth = 90,
+	--[[
+		How far above the line counts as "on the hill".
+
+		By HEIGHT rather than by a start gate at the summit, because people
+		drop onto the piste halfway down off the chairlift or a glider, and
+		a run that only counted from the very top would quietly refuse most
+		of them.
+	]]
+	MinimumHeightDrop = 120,
 }
 
 Config.Riding = {
@@ -1715,6 +1762,11 @@ export type ConfigType = {
 		FireballLift: number, FireballSpread: number,
 		FireballFlightSeconds: number, FireballBlastRadius: number,
 		FireballBlastDamage: number, ScorchSeconds: number,
+	},
+	SkiRace: {
+		FinishPoints: number, FirstDownBonus: number,
+		FirstDownSeconds: number, MinimumRunSeconds: number,
+		FinishWidth: number, MinimumHeightDrop: number,
 	},
 	Riding: {
 		BoostSeconds: number, BoostMultiplier: number,

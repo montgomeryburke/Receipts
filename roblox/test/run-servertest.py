@@ -646,6 +646,90 @@ do
 end
 
 DUMP("")
+DUMP("The hill as a race:")
+do
+	--[[
+		Always open, always timed.
+
+		The pasted ski battle built a formal 1v1 with a queue, a countdown
+		and a lockout. That is the same mistake bowling's ten frames would
+		have been: an activity that takes you out of the round is the one
+		thing nothing here is allowed to be, and a queue for two means
+		standing about on a mountain. So the run is always open -- cross the
+		line and you score, and first down since the line went quiet gets
+		the bonus. Nothing to join, nothing to wait for.
+	]]
+	local gate
+	for _, thing in workspace:GetDescendants() do
+		if thing._props.Name == "SkiFinish" then
+			gate = thing
+			break
+		end
+	end
+	check("there is a line at the bottom of the run", gate ~= nil, "")
+
+	if gate then
+		-- You must be able to ski THROUGH it. A solid gate at the bottom of
+		-- a long run would be the most annoying object on the map.
+		check("it is something you ski through, not into",
+			gate._props.CanCollide == false, tostring(gate._props.CanCollide))
+
+		local root = killer._props.Character:FindFirstChild("HumanoidRootPart")
+		killer._props.Character:FindFirstChildOfClass("Humanoid")._props.Health = 100
+
+		local function skiDown(seconds)
+			-- Start high on the hill.
+			root._props.CFrame =
+				CFrame.new(gate.Position + Vector3.new(0, Config.SkiRace.MinimumHeightDrop + 40, 0))
+			ResortService.StepRaceForTests()
+			-- Then cross the line.
+			ADVANCE(seconds)
+			root._props.CFrame = CFrame.new(gate.Position)
+			local before = PlayerState.Get(killer).points
+			ResortService.StepRaceForTests()
+			RUN_SPAWNED()
+			return PlayerState.Get(killer).points - before
+		end
+
+		--[[
+			Sliding over the line from a standing start is not a run.
+
+			Without a minimum time, the bottom of the piste is a points
+			button you can stand next to.
+		]]
+		local instant = skiDown(0.1)
+		check("sliding over the line is not a run", instant == 0,
+			string.format("%d points", instant))
+
+		-- A real descent scores, and the first one gets the bonus.
+		local first = skiDown(Config.SkiRace.MinimumRunSeconds + 2)
+		check("a real run down scores", first > 0, string.format("%d points", first))
+		check("and the first one down gets the bonus",
+			first >= Config.SkiRace.FinishPoints + Config.SkiRace.FirstDownBonus,
+			string.format("%d points, bonus is %d",
+				first, Config.SkiRace.FirstDownBonus))
+
+		--[[
+			The next one down shortly after is second, not first.
+
+			The bonus is for beating whoever is on the hill WITH you -- not
+			for being the only person who has skied all round.
+		]]
+		local second = skiDown(Config.SkiRace.MinimumRunSeconds + 1)
+		check("the next one down is not also first", second < first,
+			string.format("%d vs %d points", second, first))
+		check("but still scores for the run", second > 0,
+			string.format("%d points", second))
+
+		-- Once the line has been quiet long enough, it is first again.
+		ADVANCE(Config.SkiRace.FirstDownSeconds + 1)
+		local later = skiDown(Config.SkiRace.MinimumRunSeconds + 1)
+		check("and first is up for grabs again later", later == first,
+			string.format("%d vs %d points", later, first))
+	end
+end
+
+DUMP("")
 DUMP("The cheap shot:")
 do
 	--[[
