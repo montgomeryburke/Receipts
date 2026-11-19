@@ -306,11 +306,22 @@ Remotes.Event("CarryItem").OnClientEvent:Connect(function(payload)
 	end
 end)
 
+Remotes.Event("BallCarry").OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local holding = payload.carrying == true
+	Controls.SetCarryingBall(holding)
+	Hud.SetBall(holding)
+end)
+
 Remotes.Event("HockeyScore").OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
 	end
 	Hud.SetPuck(payload.carrying == true)
+	-- Carrying is what makes F worth offering on the action bar.
+	Controls.SetCarrying(payload.carrying == true)
 end)
 
 Remotes.Event("ArcadeMenu").OnClientEvent:Connect(function(payload)
@@ -354,11 +365,14 @@ Remotes.Event("ArcadeJoined").OnClientEvent:Connect(function(payload)
 	Controls.SetMouseFree(false)
 	-- The objective is the whole of the game's instructions, so it is worth
 	-- putting on screen at the moment somebody arrives in one.
+	Controls.SetVenue(tostring(payload.id))
 	Hud.Toast(`{string.upper(tostring(payload.name or "GAME"))} — {tostring(payload.objective or "")}`)
 end)
 
 Remotes.Event("ArcadeLeft").OnClientEvent:Connect(function()
 	Controls.SetPendingOffer(nil)
+	Controls.SetVenue(nil)
+	Hud.SetPuck(false)
 	Hud.HideArcadeOffer()
 end)
 

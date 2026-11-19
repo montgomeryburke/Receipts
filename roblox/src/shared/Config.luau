@@ -558,6 +558,7 @@ Config.Wildlife = {
 ]]
 Config.Medals = {
 	Headshot = { name = "HEADSHOT", points = 15, sound = "Headshot" },
+	ThreePointer = { name = "FROM THE ARC", points = 25, sound = "Bell" },
 	Knockout = { name = "KNOCKOUT", points = 40, sound = "MeleeHit" },
 	AirborneKill = { name = "AIRBORNE KILL", points = 35, sound = "Medal" },
 	ChainReaction = { name = "CHAIN REACTION", points = 50, sound = "ExplosionBig" },
@@ -787,6 +788,44 @@ Config.Arcade = {
 	Both nets get a Milo. Two of him, one at each end, which is funnier than
 	picking a side.
 ]]
+--[[
+	Basketball.
+
+	The charged shot is the whole sport here: a tap drops the ball at your
+	feet, a full wind-up sails over the backboard, and the useful shot is
+	somewhere in between. That makes shooting a judgement rather than a
+	button, which is the only way a basketball court earns its place in a
+	shooter -- and the wind-up is timed on the server, because a client that
+	simply announced "full power" would be claiming a wind-up it never
+	waited through.
+
+	Lift scales WITH the throw rather than being a constant. A constant lift
+	makes a soft shot float and a hard one skim, so the arc would change
+	shape at every power and aiming would be unlearnable.
+]]
+Config.Basketball = {
+	CourtWidth = 70,
+	CourtLength = 120,
+	-- Far enough out that a three is a decision, close enough that it is
+	-- not a novelty.
+	ThreeLine = 30,
+	TwoPoints = 45,
+	ThreePoints = 80,
+
+	PickupRange = 8,
+	CarryDistance = 4,
+	-- Cannot scoop up your own shot instantly, or a tap next to the hoop
+	-- becomes an infinite dunk.
+	ReclaimDelay = 0.9,
+
+	FullChargeSeconds = 1.1,
+	ThrowSpeed = 95,
+	LiftFactor = 0.55,
+	-- How hard a bullet shoves the ball. Shooting it is legitimate: a rifle
+	-- makes a perfectly good pass.
+	ShotNudge = 60,
+}
+
 Config.Goalie = {
 	Name = "Milo",
 	Number = 29,
@@ -890,10 +929,11 @@ Config.Help = {
 	},
 	{
 		question = "How do I play hockey, and how do fights work?",
-		answer = "Skate over the puck to pick it up and left click to shoot it. Get "
-			.. "next to an opponent to drop the gloves. In a fight: F punches, hold "
-			.. "Q to guard. Punching into a raised guard barely hurts, so watch for "
-			.. "theirs to drop. Your gun still works the whole time.",
+		answer = "Skate over the puck to pick it up, then F to shoot it -- or just "
+			.. "shoot the loose puck with any gun, which works fine. Get next to an "
+			.. "opponent to drop the gloves. In a fight: F punches, hold Q to guard. "
+			.. "Punching into a raised guard barely hurts, so watch for theirs to "
+			.. "drop. Your gun works the whole time, and X leaves a game.",
 		keywords = { "hockey", "ice", "puck", "fight", "punch", "block", "guard", "stick", "rink" },
 	},
 	{
@@ -917,6 +957,14 @@ Config.Help = {
 			.. "for it: Q changes drivetrain, E locks the diff, C hooks the winch to "
 			.. "a tree and holding X reels you out of the mud.",
 		keywords = { "drive", "car", "truck", "vehicle", "stuck", "winch", "mud", "diff", "4wd", "gear" },
+	},
+	{
+		question = "How do I play basketball?",
+		answer = "Walk into the ball to pick it up, then HOLD F to wind up and let go "
+			.. "to shoot -- a tap drops it at your feet and a full charge sails over, "
+			.. "so the useful shot is in between. Behind the painted arc is worth "
+			.. "three. You can also just shoot the ball with a gun.",
+		keywords = { "basketball", "hoop", "ball", "court", "dunk", "three", "shoot" },
 	},
 	{
 		question = "What is there at the carnival?",
@@ -1496,6 +1544,13 @@ export type ConfigType = {
 		OfferRadius: number, ReofferSeconds: number,
 		BeaconHeight: number, BeaconNameDistance: number,
 		SoloFillSeconds: number,
+	},
+	Basketball: {
+		CourtWidth: number, CourtLength: number, ThreeLine: number,
+		TwoPoints: number, ThreePoints: number,
+		PickupRange: number, CarryDistance: number, ReclaimDelay: number,
+		FullChargeSeconds: number, ThrowSpeed: number, LiftFactor: number,
+		ShotNudge: number,
 	},
 	Goalie: { Name: string, Number: number, SideToSide: number, TrackSpeed: number },
 	Dummies: { Count: number, Radius: number, WanderSeconds: number },

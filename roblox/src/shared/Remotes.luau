@@ -31,6 +31,10 @@ local EVENT_NAMES = {
 	"ShoveBoost",
 	-- A held tool's second action: lighting a poured gas trail, so far.
 	"ToolSecondary",
+	-- Basketball: the wind-up, and the release.
+	"BallCharge",
+	"BallShoot",
+	"BallCarry",
 	"PourGas",
 	-- What is in your hands, so the action bar can change to suit it.
 	"CarryItem",

@@ -646,6 +646,162 @@ do
 end
 
 DUMP("")
+DUMP("Basketball:")
+do
+	--[[
+		The charged shot is the sport.
+
+		A tap drops the ball at your feet, a full wind-up sails over the
+		backboard, and the useful shot is in between -- which makes shooting
+		a judgement rather than a button. The wind-up is timed on the SERVER
+		because a client announcing "full power" would be claiming a wind-up
+		it never waited through.
+	]]
+	local built = BasketballService.Build(1900)
+	check("the court is built", built ~= nil and built.ball ~= nil, "")
+	check("with a hoop at each end", BasketballService.HoopCount() == 2,
+		string.format("%d hoops", BasketballService.HoopCount()))
+
+	local ballPart = BasketballService.Ball()
+	check("and a ball", ballPart ~= nil, "")
+
+	if ballPart and built then
+		--[[
+			The ball is PHYSICAL, which is the entire point of putting a
+			court in a shooter: it can be shot out of the air, run over and
+			blown up. An anchored ball would be a scoreboard with a prop.
+		]]
+		check("the ball is a physical object, not scenery",
+			ballPart._props.Anchored == false, tostring(ballPart._props.Anchored))
+
+		-- Walk into it to pick it up. Possession is proximity, like the
+		-- puck: there is nothing to learn.
+		local root = killer._props.Character:FindFirstChild("HumanoidRootPart")
+		killer._props.Character:FindFirstChildOfClass("Humanoid")._props.Health = 100
+		root._props.CFrame = CFrame.new(ballPart.Position)
+		BasketballService.StepForTests()
+		check("walking into the ball picks it up",
+			BasketballService.Holder() == killer,
+			tostring(BasketballService.Holder() and BasketballService.Holder()._props.Name))
+
+		--[[
+			Power comes from how long you held it.
+
+			Checked by throwing twice from the same spot and comparing the
+			speed: a tap must be clearly weaker than a full wind-up, or the
+			charge is decoration.
+		]]
+		local function throwAfter(seconds)
+			BasketballService.GiveBallForTests(killer)
+			BasketballService.StartCharge(killer)
+			ADVANCE(seconds)
+			BasketballService.Release(killer, Vector3.new(0, 0, -1))
+			return ballPart._props.AssemblyLinearVelocity.Magnitude
+		end
+
+		local tap = throwAfter(0.02)
+		local full = throwAfter(Config.Basketball.FullChargeSeconds + 0.2)
+		check("a tap is a weak throw", tap > 0, string.format("%.0f studs/sec", tap))
+		check("and a full wind-up is much harder", full > tap * 2,
+			string.format("%.0f vs %.0f studs/sec", full, tap))
+
+		-- Charging longer than full does not keep helping, or the shot
+		-- would reward holding the key down forever.
+		local overcharged = throwAfter(Config.Basketball.FullChargeSeconds * 3)
+		check("holding it longer than full earns nothing extra",
+			math.abs(overcharged - full) < 1,
+			string.format("%.0f vs %.0f studs/sec", overcharged, full))
+
+		-- The throw arcs: it must leave your hands going upward, or every
+		-- shot would be a flat pass at the floor.
+		check("the throw arcs upward",
+			ballPart._props.AssemblyLinearVelocity.Y > 0,
+			string.format("%.0f studs/sec vertical",
+				ballPart._props.AssemblyLinearVelocity.Y))
+
+		--[[
+			A basket only counts on the way DOWN.
+
+			The sensor sits below the rim, so without the direction check a
+			ball thrown up through the net from underneath would score --
+			which is not a basket in any version of the sport.
+		]]
+		local scored = {}
+		BasketballService.Scored.Connect(function(who, points, fromThree)
+			table.insert(scored, { who = who, points = points, fromThree = fromThree })
+		end)
+
+		local hoopSensor
+		for _, child in built and workspace:FindFirstChild("BasketballCourt"):GetChildren() do
+			if child._props.Name == "HoopSensor" then
+				hoopSensor = child
+				break
+			end
+		end
+		check("the hoop has a sensor under the rim", hoopSensor ~= nil, "")
+
+		if hoopSensor then
+			--[[
+				Shot, then in flight -- not held.
+
+				My first version of this kept the ball in the shooter's
+				hands while placing it at the hoop, and possession dragged
+				it DOWNWARD onto the sensor, so a ball thrown upwards
+				scored. That was the test's fault rather than the code's,
+				but it is worth doing it the real way: release the ball
+				through the actual shooting path, then move it.
+			]]
+			BasketballService.GiveBallForTests(killer)
+			BasketballService.StartCharge(killer)
+			ADVANCE(Config.Basketball.FullChargeSeconds)
+			BasketballService.Release(killer, Vector3.new(0, 0, -1))
+			check("shooting releases the ball", BasketballService.Holder() == nil, "")
+
+			-- Rising through it: not a basket.
+			ballPart._props.CFrame = CFrame.new(hoopSensor.Position)
+			ballPart._props.AssemblyLinearVelocity = Vector3.new(0, 40, 0)
+			BasketballService.StepForTests()
+			check("a ball going UP through the net is not a basket", #scored == 0,
+				string.format("%d baskets", #scored))
+
+			-- Falling through it: a basket.
+			ADVANCE(2)
+			ballPart._props.CFrame = CFrame.new(hoopSensor.Position)
+			ballPart._props.AssemblyLinearVelocity = Vector3.new(0, -40, 0)
+			BasketballService.StepForTests()
+			RUN_SPAWNED()
+			check("and falling through it is", #scored == 1,
+				string.format("%d baskets", #scored))
+
+			if #scored == 1 then
+				check("credited to whoever touched it last",
+					scored[1].who == killer,
+					tostring(scored[1].who and scored[1].who._props.Name))
+				-- Through the one scoring path, so it reaches the round.
+				check("and worth points on the arena scoreboard",
+					PlayerState.Get(killer).scoredBy["basket"] ~= nil
+						or PlayerState.Get(killer).scoredBy["three pointer"] ~= nil,
+					"")
+			end
+
+			-- The ball resets, or the next basket is scored by whoever is
+			-- standing under the hoop.
+			check("scoring returns the ball to the middle",
+				BasketballService.Holder() == nil, "")
+		end
+
+		-- A bullet moves the ball, same as the puck.
+		local before = ballPart._props.AssemblyLinearVelocity.Magnitude
+		local handled = BasketballService.RegisterHit(ballPart, prey, Vector3.new(1, 0, 0))
+		check("shooting the ball moves it", handled
+			and ballPart._props.AssemblyLinearVelocity.Magnitude ~= before,
+			string.format("handled=%s", tostring(handled)))
+	end
+
+	BasketballService.Clear()
+end
+
+DUMP("")
 DUMP("Medals and the goalie:")
 do
 	--[[
@@ -1104,7 +1260,7 @@ def strip(s):
 
 SHARED = ['Config', 'Signal', 'Util', 'Remotes', 'Sound', 'Shot']
 SERVER = ['PlayerState', 'MedalService', 'TeamService', 'BotService', 'ArcadeService', 'ResortService', 'HockeyService', 'MapService', 'VehicleService', 'DamageService', 'WildlifeService',
-          'CarnivalService', 'FireService', 'ProjectileService', 'WeaponService', 'PickupService',
+          'CarnivalService', 'BasketballService', 'FireService', 'ProjectileService', 'WeaponService', 'PickupService',
           'EffectService', 'FlagService', 'MonetizationService', 'ScoreboardService', 'MatchService',
           'GraphicsService']
 

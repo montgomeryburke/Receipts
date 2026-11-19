@@ -25,6 +25,7 @@ local VehicleService = require(script.Parent:WaitForChild("VehicleService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
 local FireService = require(script.Parent:WaitForChild("FireService"))
+local BasketballService = require(script.Parent:WaitForChild("BasketballService"))
 local MedalService = require(script.Parent:WaitForChild("MedalService"))
 local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 
@@ -209,6 +210,11 @@ local function fireHitscanRay(player: Player, spec: Config.WeaponSpec, origin: V
 	-- perfectly good stick and there is no stick-handling simulation to get
 	-- in the way of it.
 	if HockeyService.RegisterHit(result.Instance, player, direction) then
+		return
+	end
+
+	-- The basketball. A rifle makes a perfectly good pass.
+	if BasketballService.RegisterHit(result.Instance, player, direction) then
 		return
 	end
 

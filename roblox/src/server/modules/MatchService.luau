@@ -23,6 +23,7 @@ local HockeyService = require(script.Parent:WaitForChild("HockeyService"))
 local WildlifeService = require(script.Parent:WaitForChild("WildlifeService"))
 local FlagService = require(script.Parent:WaitForChild("FlagService"))
 local CarnivalService = require(script.Parent:WaitForChild("CarnivalService"))
+local BasketballService = require(script.Parent:WaitForChild("BasketballService"))
 local FireService = require(script.Parent:WaitForChild("FireService"))
 local ProjectileService = require(script.Parent:WaitForChild("ProjectileService"))
 local DamageService = require(script.Parent:WaitForChild("DamageService"))
@@ -157,6 +158,7 @@ local function buildArena(entry: { map: Config.MapSpec, mode: typeof(Config.Mode
 	-- Gas cans out in the open where routes cross, so they get used and
 	-- shot rather than sitting unfound inside a building.
 	FireService.Build(spec.Size)
+	BasketballService.Build(spec.Size)
 	-- And the rink, which builds its own model beside the arena.
 	HockeyService.Build(spec.Size)
 

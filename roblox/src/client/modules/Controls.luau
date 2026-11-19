@@ -306,6 +306,9 @@ local nextShotFeedback = 0
 local inFight = false
 local guardUp = false
 local heldTool: string? = nil
+local inVenue: string? = nil
+local carrying = false
+local carryingBall = false
 local pouring = false
 local nextPourAt = 0
 local guardKeyDown = false
@@ -572,7 +575,7 @@ end
 	stale one to trust least -- and being unable to punch is more confusing
 	than being unable to change gear.
 ]]
-local CONTEXT_PRIORITY = { "Fight", "Vehicle", "Riding", "Tool" }
+local CONTEXT_PRIORITY = { "Fight", "Vehicle", "Riding", "Tool", "Sport" }
 
 -- Which VehicleKind counts as driving, and which counts as riding. Anything
 -- unlisted is treated as a vehicle, because a seat you steer is the common
@@ -600,6 +603,8 @@ local function contextActive(name: string): boolean
 		return inFight
 	elseif name == "Tool" then
 		return heldTool ~= nil
+	elseif name == "Sport" then
+		return inVenue ~= nil
 	end
 
 	local model = vehicleModel()
@@ -714,6 +719,60 @@ local CONTEXT_BINDINGS: { [string]: { [Enum.KeyCode]: Binding } } = {
 		},
 	},
 
+	--[[
+		Playing one of the sub-games, on foot.
+
+		Lowest priority of the lot, so a car or a fight always wins -- being
+		on the rink matters less than being in the thing you are driving.
+
+		The ball and puck shot is on F rather than the mouse for the same
+		reason as everything else here: the mouse is the gun, always. You can
+		shoot the puck with a rifle too, which is the older and better joke,
+		but once you are CARRYING it you need a way to let go of it that is
+		not "put your gun down".
+	]]
+	Sport = {
+		--[[
+			One key for both, chosen by what is in your hands.
+
+			A puck is a flick and a basketball is a wind-up, so the same key
+			behaves differently -- but it is the same key, because "the
+			thing you do with the thing you are holding" should not be two
+			bindings to remember. The action bar says which one is live.
+		]]
+		[Enum.KeyCode.F] = {
+			label = "SHOOT",
+			when = function()
+				return carrying or carryingBall
+			end,
+			down = function()
+				if carryingBall then
+					-- Held: the wind-up starts now and the power is however
+					-- long it lasts, timed on the server.
+					Remotes.Event("BallCharge"):FireServer(true)
+					return
+				end
+				local _, direction = currentAimDirection()
+				if direction then
+					Remotes.Event("HockeyShoot"):FireServer(direction)
+				end
+			end,
+			up = function()
+				if not carryingBall then
+					return
+				end
+				local _, direction = currentAimDirection()
+				Remotes.Event("BallShoot"):FireServer(direction)
+			end,
+		},
+		[Enum.KeyCode.X] = {
+			label = "LEAVE",
+			down = function()
+				Remotes.Event("LeaveArcade"):FireServer()
+			end,
+		},
+	},
+
 	Riding = {
 		[Enum.KeyCode.E] = {
 			label = "SHOVE",
@@ -774,6 +833,9 @@ local BASE_ACTIONS: { [string]: { { key: string, label: string } } } = {
 		{ key = "MOUSE", label = "SHOOT" },
 	},
 	Tool = {
+		{ key = "MOUSE", label = "STILL SHOOTS" },
+	},
+	Sport = {
 		{ key = "MOUSE", label = "STILL SHOOTS" },
 	},
 }
@@ -1472,6 +1534,34 @@ function Controls.SetTool(name: string?)
 		-- keeps going out every frame for the rest of the round.
 		pouring = false
 	end
+	refreshActionBar()
+end
+
+--[[
+	Which sub-game we are in, if any.
+
+	Drives the Sport context, which is what puts LEAVE on the action bar --
+	without it the server had a handler for leaving a game that nothing
+	could ever trigger, so the only way out was to walk far enough away.
+]]
+function Controls.SetVenue(id: string?)
+	inVenue = id
+	if not id then
+		carrying = false
+		carryingBall = false
+	end
+	refreshActionBar()
+end
+
+--[[ Carrying the puck, which is what makes F worth offering. ]]
+function Controls.SetCarrying(on: boolean)
+	carrying = on
+	refreshActionBar()
+end
+
+--[[ Holding the basketball, which makes F a wind-up rather than a flick. ]]
+function Controls.SetCarryingBall(on: boolean)
+	carryingBall = on
 	refreshActionBar()
 end
 

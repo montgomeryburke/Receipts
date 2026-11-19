@@ -527,6 +527,17 @@ HEARD_UP = scan(["server"], ON_SERVER)
 DEAF_CLIENT = sorted(SENT_DOWN - HEARD_DOWN)
 DEAF_SERVER = sorted(SENT_UP - HEARD_UP)
 
+# And the other way round: a handler nobody ever triggers.
+#
+# The first version of this check only looked for messages with no reader.
+# It missed the mirror image -- a READER with no message -- which is how
+# HockeyShoot survived: the server had a handler for shooting the puck, the
+# client never sent it, and the only symptom was that you could pick the
+# puck up and then not do anything with it. A feature that is half wired is
+# indistinguishable from a feature that is finished until somebody tries it.
+UNTRIGGERED_SERVER = sorted(HEARD_UP - SENT_UP)
+UNTRIGGERED_CLIENT = sorted(HEARD_DOWN - SENT_DOWN)
+
 
 def verdict(label, missing):
     return 'check("%s", %s, %s)' % (
@@ -539,6 +550,8 @@ def verdict(label, missing):
 REMOTE_CHECKS = "\n".join([
     verdict("every remote the server fires has a client listening", DEAF_CLIENT),
     verdict("every remote the client fires has a server listening", DEAF_SERVER),
+    verdict("every server handler is actually reachable", UNTRIGGERED_SERVER),
+    verdict("every client handler is actually reachable", UNTRIGGERED_CLIENT),
 ])
 
 harness = (

@@ -181,7 +181,23 @@ service("Players", {
 		end
 		return nil
 	end,
-	GetPlayerByUserId = function() return nil end,
+	--[[
+		Find a player by user id.
+
+		Returned nil unconditionally, which made every piece of
+		ATTRIBUTION untestable -- anything that records "who touched this
+		last" as a user id and looks the player up later got nobody. A
+		basket credited to nil looks identical to a basket credited
+		correctly unless the test checks the name.
+	]]
+	GetPlayerByUserId = function(_, userId)
+		for _, player in (PLAYERS_FOR_TEAMS or {}) do
+			if rawget(player, "_props").UserId == userId then
+				return player
+			end
+		end
+		return nil
+	end,
 	CharacterAutoLoads = true,
 })
 service("RunService", {

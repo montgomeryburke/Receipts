@@ -1698,11 +1698,29 @@ function Hud.SetPuck(carrying: boolean)
 		return
 	end
 	label.Visible = carrying
-	label.Text = "YOU HAVE THE PUCK — CLICK TO SHOOT"
+	-- F, not the mouse. The mouse is the gun, which is the one rule this
+	-- game does not bend -- and a rifle moves the puck perfectly well
+	-- anyway, so clicking is never wasted.
+	label.Text = "YOU HAVE THE PUCK — F TO SHOOT"
 end
 
 function Hud.PuckShownForTests(): boolean
 	return puckLabel ~= nil and puckLabel.Visible
+end
+
+--[[
+	You have the ball.
+
+	Shares the puck's line, because you cannot hold both and two labels in
+	the same place would be a bug waiting to look like one.
+]]
+function Hud.SetBall(carrying: boolean)
+	local label = puckLabel
+	if not label then
+		return
+	end
+	label.Visible = carrying
+	label.Text = "YOU HAVE THE BALL — HOLD F TO WIND UP"
 end
 
 -- ==================================================================== HELP ==
