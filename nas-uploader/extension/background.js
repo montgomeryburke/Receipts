@@ -93,15 +93,49 @@ const openMeeting = () => openWindow(MEETING_URL, 460, 780);
 const openRecorder = () => openWindow(RECORDER_URL, 420, 640);
 
 /** The agent window, set to work in the tab the user was looking at. */
-async function openAgent() {
+async function openAgent({ task = '' } = {}) {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true, windowType: 'normal' }).catch(() => []);
   const existing = await findTab(AGENT_URL);
   if (existing) {
     if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
+    // A task from the chat: the open agent window takes it (unless it is busy with another one).
+    if (task) {
+      const r = await chrome.runtime.sendMessage({ to: 'agent', type: 'agent.task', task, tabId: tab?.id }).catch(() => null);
+      return { ...existing, ...(r || {}) };
+    }
     return existing;
   }
-  const win = await chrome.windows.create({ url: `${AGENT_URL}${tab?.id ? `#tab=${tab.id}` : ''}`, type: 'popup', width: 500, height: 840 });
-  return { windowId: win.id, tabId: win.tabs?.[0]?.id };
+  const hash = new URLSearchParams();
+  if (tab?.id) hash.set('tab', String(tab.id));
+  if (task) {
+    hash.set('task', task);
+    hash.set('go', '1');
+  }
+  const win = await chrome.windows.create({ url: `${AGENT_URL}${hash.size ? `#${hash}` : ''}`, type: 'popup', width: 500, height: 840 });
+  return { windowId: win.id, tabId: win.tabs?.[0]?.id, started: Boolean(task) };
+}
+
+/** The page the user has open (the last focused normal window): title, address, visible and selected text. */
+async function readOpenPage() {
+  // The active tab; when that isn't a web page (an extension page, chrome://), the web page used last in that window.
+  const tabs = await chrome.tabs.query({ lastFocusedWindow: true, windowType: 'normal' }).catch(() => []);
+  const web = tabs.filter((t) => /^https?:/i.test(t.url || ''));
+  const tab = web.find((t) => t.active) || web.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+  if (!tab?.id) return { error: 'No web page is open in Chrome (open the page, then ask again).' };
+  try {
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (max) => {
+        const sel = String(window.getSelection?.() || '').trim();
+        const text = (document.body?.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
+        return { title: document.title, url: location.href, selected: sel.slice(0, 4000), text: text.length > max ? `${text.slice(0, max)}\n[…shortened]` : text };
+      },
+      args: [12000],
+    });
+    return res?.result || { error: 'The page could not be read.' };
+  } catch (err) {
+    return { error: `Chrome doesn't let extensions read this page (${err.message}).`, title: tab.title, url: tab.url };
+  }
 }
 
 // ---------- Outlook ----------
@@ -211,10 +245,11 @@ const handlers = {
     await openRecorder();
     return { ok: true };
   },
-  'agent.open': async () => {
-    await openAgent();
-    return { ok: true };
+  'agent.open': async (m) => {
+    const r = await openAgent({ task: m.task || '' });
+    return { ok: true, started: !!r.started, busy: !!r.busy };
   },
+  'page.read': () => readOpenPage(),
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

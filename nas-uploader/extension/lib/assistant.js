@@ -9,7 +9,7 @@
 
 import { get, put, getAll, del, kvGet, getSettings, log } from './db.js';
 import { search, selectQueryTerms, leadChunks, RECENCY_WORDS } from './index.js';
-import { callLLM, costOf, activeModel } from './llm.js';
+import { callLLM, costOf, activeModel, generateText, hasKey } from './llm.js';
 import { canCrossCheck, review, reviewBlock, unsupportedNumbers, providerName } from './crosscheck.js';
 import { cleanEmailBody, threadOf, emailId, tokenize, splitList, hashString, pageLabel } from './text.js';
 import { detectProjects } from './projects.js';
@@ -70,8 +70,9 @@ export const DRAFT_SCHEMA = {
     },
     draft_reply: { type: 'string' },
     confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    web_queries: { type: 'array', items: { type: 'string' } },
   },
-  required: ['needs_reply', 'category', 'summary', 'thread_summary', 'requests', 'missing_info', 'search_terms', 'data_requests', 'draft_reply', 'confidence'],
+  required: ['needs_reply', 'category', 'summary', 'thread_summary', 'requests', 'missing_info', 'search_terms', 'data_requests', 'draft_reply', 'confidence', 'web_queries'],
   additionalProperties: false,
 };
 
@@ -89,6 +90,8 @@ How to work:
 - Cite excerpt tags (or the action name for data results) in each request's "sources". Do not cite anything you did not use.
 - "search_terms": up to 6 short terms (document names, spec sections, drawing numbers, keywords) that could find missing information in the project files. Empty if nothing is missing.
 - "data_requests": empty unless data actions are listed below and one of them can supply missing information.
+- "web_queries": up to 3 short web searches for missing information that is public — a standard or code clause, a regulation, a product's published data, a public organisation's details. Empty when nothing is missing or what is missing is specific to this project (its dates, quantities, prices, decisions, people).
+- Web results tagged [W1], [W2]…, when given, come from public web pages: use them only for public facts, cite the tag, and say in the reply where such a fact comes from when it matters (e.g. "per CSA S6:19, cl. 12.4").
 - "draft_reply": the reply body only (no subject line), in the user's voice: a complete, professional reply that is ready to send once checked. Greet the sender by name; answer every question and request in the newest email, in the order asked (numbered when there are several); give each answer with enough context to stand on its own (what it refers to, the figure and its source document when useful); say what happens next only when the sources, the thread or the user's notes support it; close courteously. Match the thread's formality and language. Clear and concise — no filler such as "I hope this email finds you well". Where information is missing, write a clear placeholder like [MISSING: concrete pour date for Level 2] so the user can fill it in. ${s.signature ? 'End with the signature given below.' : 'End with a simple sign-off and the user\'s name if known.'}
 - If the email needs no reply (newsletter, notification, FYI, automated message, or the user is only cc'd for information), set needs_reply false, give a one-line summary, and leave draft_reply empty.
 - "summary": one sentence, under 25 words.
@@ -250,8 +253,51 @@ function addUsage(item, res, settings, { reviewer = false } = {}) {
 //    same sources, and if it finds problems the first AI revises the draft once with those findings.
 
 function sourcesText(item, settings) {
-  return [snippetsBlock(item.snippets || []), emailBlock(item), dataBlock(item), item.notes ? `<user_notes>\n${item.notes}\n</user_notes>` : '', settings.signature ? `<signature>\n${settings.signature}\n</signature>` : '']
+  return [snippetsBlock(item.snippets || []), emailBlock(item), dataBlock(item), webBlock(item), item.notes ? `<user_notes>\n${item.notes}\n</user_notes>` : '', settings.signature ? `<signature>\n${settings.signature}\n</signature>` : '']
     .filter(Boolean).join('\n\n');
+}
+
+function webBlock(item) {
+  const w = item.web;
+  if (!w?.text) return '';
+  return `<web_results note="public web pages, not the user's files: public facts only">\n${w.text}\n\nSources:\n${w.sources.map((s, i) => `[W${i + 1}] ${s.title || s.url} — ${s.url}`).join('\n')}\n</web_results>`;
+}
+
+const WEB_FILL_SYSTEM = `You look up public facts for a project manager in engineering and construction. Search the web and answer each numbered question in one or two lines: the exact figure, clause or fact, and where it comes from (document, edition, clause, or the organisation). Prefer official sources: standards bodies, governments, manufacturers. When a question can't be answered from what you find, write "not found" for it — never guess. Under 150 words.`;
+
+/**
+ * Public facts the user's files don't have (a standard, a code clause, product data): one short web search, then
+ * the draft is updated from the email, the current draft and the results — not all the files again (tokens).
+ * Runs only when the drafting call itself said what to search for.
+ */
+async function webFill(item, settings) {
+  const provider = settings.provider === 'gemini' ? 'gemini' : 'anthropic';
+  if (!hasKey(settings, provider)) return;
+  const queries = item.webQueries.slice(0, 3);
+  const res = await generateText({ ...settings, _tag: 'email' }, { provider, web: true, effort: 'low', maxTokens: 700, system: WEB_FILL_SYSTEM, prompt: queries.map((q, i) => `${i + 1}. ${q}`).join('\n') });
+  addUsage(item, res, settings, { reviewer: true });
+  const text = String(res.text || '').trim();
+  const sources = (res.sources || []).filter((s) => /^https?:\/\//i.test(s.url || '')).slice(0, 5);
+  const found = text && sources.length && !text.split('\n').filter((l) => l.trim()).every((l) => /not found/i.test(l));
+  if (!found) {
+    item.web = { queries, found: false };
+    history(item, 'looked on the web: nothing found');
+    return;
+  }
+  item.web = { queries, found: true, text: text.slice(0, 2500), sources, by: res.provider || provider };
+  const keep = { summary: item.summary, threadSummary: item.threadSummary };
+  const parts = [
+    `<email from="${String(item.from).replace(/"/g, "'")}" subject="${String(item.subject).replace(/"/g, "'")}">\n${String(item.bodyClean || '').slice(0, 3000)}\n</email>`,
+    keep.threadSummary ? `<thread_summary>${keep.threadSummary}</thread_summary>` : '',
+    `<current_result note="written from the user's files and the thread">\n${JSON.stringify({ requests: item.requests, missing_info: item.missing, draft_reply: item.draft })}\n</current_result>`,
+    webBlock(item),
+    'Update the current result with what the web results answer: cite [W…] in those requests\' sources and keep every other answer and source as it is. Keep [MISSING: …] for anything still unknown. Leave web_queries empty. Return the complete JSON again.',
+  ].filter(Boolean);
+  await callDraft(item, settings, parts);
+  // The short update didn't see the whole thread: its summaries stay as first written.
+  item.summary = keep.summary || item.summary;
+  item.threadSummary = keep.threadSummary || item.threadSummary;
+  history(item, `looked up on the web (${sources.length} source${sources.length === 1 ? '' : 's'}) and updated the draft (${item.status})`);
 }
 
 function draftForReview(item) {
@@ -316,6 +362,7 @@ function applyResult(item, data, settings) {
   item.confidence = data.confidence || '';
   item.needsReply = data.needs_reply !== false;
   item.draft = data.draft_reply || '';
+  item.webQueries = Array.isArray(data.web_queries) ? data.web_queries.filter(Boolean).slice(0, 3) : [];
   item.draftEdited = false;
   // Merge new data requests (known actions only, no duplicates, at most 3 open).
   const reqs = item.dataRequests || (item.dataRequests = []);
@@ -484,6 +531,11 @@ export async function processEmail(email, { force = false, onChange = () => {} }
         await callDraft(item, settings, [...parts, recheck]);
         history(item, `refined with ${extra.length} more excerpts (${item.status})`);
       }
+    }
+
+    // Still missing something public (a standard, a code clause, product data)? Look it up on the web.
+    if (settings.emailWebLookup && item.needsReply && item.missing.length && (item.webQueries || []).length) {
+      await webFill(item, settings).catch((err) => history(item, `web look-up failed: ${err.message}`));
     }
 
     if (await runReadyRequests(item, settings)) await redraftWithData(item, settings);

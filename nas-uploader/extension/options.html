@@ -117,6 +117,7 @@
           <tr><td>Look standards up twice and compare</td><td>+1 web search per look-up</td><td><input type="checkbox" data-key="dualLookUp"></td></tr>
           <tr><td>Meeting prompts</td><td>automatic: at most one every 20 s, only on a question or technical talk</td><td><select data-key="meetingPrompts"><option value="auto">automatic</option><option value="manual">only when I click</option><option value="off">off</option></select></td></tr>
           <tr><td>Look things up online in meetings when the files don't have it</td><td>+1 web search when needed</td><td><input type="checkbox" data-key="meetingWebLookup"></td></tr>
+          <tr><td>Email drafts: look up public facts the files don't have (a standard, product data)</td><td>+1 web search and a short update, only when needed</td><td><input type="checkbox" data-key="emailWebLookup"></td></tr>
           <tr><td>Minutes and summary when a meeting ends</td><td>1 call per meeting</td><td><input type="checkbox" data-key="meetingSummary"></td></tr>
           <tr><td>Meeting transcription</td><td>free on this computer; Gemini ≈ a few cents an hour</td><td><select data-key="meetingStt"><option value="whisper">free (this computer)</option><option value="gemini">Gemini</option><option value="both">Gemini + free check</option></select></td></tr>
           <tr><td>Daily spending limit (USD; 0 = none)</td><td>everything stops for the day when reached</td><td><input type="number" min="0" step="0.5" data-key="dailyBudgetUsd" style="width:6em"></td></tr>
@@ -131,6 +132,7 @@
       <p id="xcState" class="small"></p>
       <label class="check small"><input type="checkbox" data-key="crossCheck"> Second check: every email draft, meeting prompt, private answer, meeting summary and agent result is checked against the same sources — by the other AI with both keys, by a separate review with one (about double the AI cost)</label>
       <label class="check small"><input type="checkbox" data-key="crossCheckRevise"> When it finds a problem in an email draft, the first AI corrects the draft once (one more call)</label>
+      <label class="check small"><input type="checkbox" data-key="chatFileConfirm"> File changes the chat makes on the NAS (write, move, rename, copy, delete) wait for my click</label>
       <label class="check small"><input type="checkbox" data-key="dualLookUp"> Standards are looked up online twice, independently, and their numbers compared (by both, Anthropic's web search and Google Search, with both keys)</label>
       <label class="field"><span>One key: model for the second review (optional; empty = the same model)</span><input type="text" data-key="selfCheckModel" placeholder="e.g. claude-sonnet-5-5 or gemini-3.5-pro" list="selfCheckModels"></label>
       <datalist id="selfCheckModels"><option value="claude-opus-5-5"></option><option value="claude-sonnet-5-5"></option></datalist>
@@ -204,6 +206,29 @@
       </div>
       <label class="field"><span>OCR index on the NAS (built by the HP for scanned PDFs; NAS path)</span><input type="text" data-key="deepIndexFile"></label>
       <p class="small muted">Indexing runs on this computer and costs no AI tokens. Only short excerpts of the best-matching files are ever sent to the AI.</p>
+    </section>
+
+    <section id="voice" class="panel stack">
+      <h2>Voice</h2>
+      <p class="small muted">Speech both ways, on this computer for free or by the AI. Meeting transcription has its own choice under Meetings.</p>
+      <div class="grid2">
+        <label class="field"><span>Read aloud (🔊 on answers, prompts and drafts)</span>
+          <select data-key="ttsEngine" id="ttsEngine">
+            <option value="computer">This computer's voices — free, works offline</option>
+            <option value="gemini">Gemini voice — more natural, about a cent a minute (needs a Gemini key)</option>
+          </select>
+        </label>
+        <label class="field"><span>Dictation (🎤 in the chat and the meeting question box)</span>
+          <select data-key="dictationStt">
+            <option value="computer">This computer — Whisper, free (the speech model downloads once)</option>
+            <option value="gemini">Gemini — better with accents and noise (needs a Gemini key)</option>
+          </select>
+        </label>
+        <label class="field"><span>This computer's voice</span><select data-key="ttsVoice" id="ttsVoice"><option value="">Default voice</option></select></label>
+        <label class="field"><span>Gemini voice</span><select data-key="ttsGeminiVoice" id="ttsGeminiVoice"></select></label>
+        <label class="field"><span>Speed</span><input type="number" min="0.5" max="2" step="0.1" data-key="ttsRate"></label>
+        <div class="field"><span>&nbsp;</span><button type="button" id="ttsTest">🔊 Test the voice</button></div>
+      </div>
     </section>
 
     <section id="meetings" class="panel stack">

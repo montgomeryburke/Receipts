@@ -5,6 +5,7 @@ import { nasClient } from './lib/nas.js';
 import { pageLabel, parseCopiedEmail } from './lib/text.js';
 import { updateItem, deleteItem, summarize, emailId } from './lib/assistant.js';
 import { paramSpec, defaultParams } from './lib/automate.js';
+import { speak, stopSpeaking, attachDictation } from './lib/voice.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -259,6 +260,10 @@ function checkHtml(c) {
 
 function cardBody(it) {
   const parts = [];
+  // Public facts looked up on the web (the files didn't have them).
+  if (it.web?.queries?.length) {
+    parts.push(`<h3>From the web</h3>${it.web.found ? `<div class="small" data-web>${esc(it.web.text).replace(/\n/g, '<br>')}</div>${it.web.sources.map((s, i) => `<div class="small">[W${i + 1}] <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></div>`).join('')}` : `<div class="small muted" data-web>Looked on the web for ${esc(it.web.queries.join('; '))}: nothing found.</div>`}`);
+  }
   // What the drafter read: the thread's history and earlier related emails.
   const nThread = (it.thread || []).length;
   const nRelated = (it.related?.tracker || []).length + (it.related?.archive || []).length;
@@ -329,6 +334,7 @@ function cardBody(it) {
       btns.push('<button class="primary" data-act="insert">Insert into Outlook reply</button>');
       btns.push('<button data-act="copy">Copy</button>');
     }
+    btns.push('<button data-act="speak" title="Read the draft aloud">🔊</button>');
   }
   if (['ready', 'needs-info', 'inserted', 'error', 'needs-approval'].includes(it.status)) btns.push('<button data-act="deeper" title="Redraft with more thinking">Redraft (deeper)</button>');
   if (['skipped', 'error', 'no-reply', 'dismissed'].includes(it.status)) btns.push('<button data-act="reprocess">Draft anyway</button>');
@@ -537,6 +543,9 @@ async function onListClick(e) {
   if (act === 'draft') return;
   switch (act) {
     case 'insert': await insertDraft(it); break;
+    case 'speak':
+      readAloud(btn, it.draft || '');
+      break;
     case 'copy':
       await navigator.clipboard.writeText(it.draft || '');
       toast('Draft copied.');
@@ -1064,6 +1073,8 @@ const STEP_LABEL = {
   add_document_hint: 'taught a document', forget_document_rule: 'removed a document rule', set_folder_options: 'changed a folder', reindex: 'asked to reindex',
   automate_list: 'read flows', automate_save: 'saved a flow action', automate_remove: 'removed a flow action', automate_flow_schema: 'built the flow schema',
   automate_test: 'tested a flow', record_change_request: 'saved a change request', undo_last_change: 'undid a change',
+  search_web: 'searched the web', read_page: 'read the page', browser_task: 'started the browser agent', find_files: 'found files',
+  list_folder: 'listed a folder', read_file: 'read a file', change_files: 'prepared file changes',
 };
 
 function chatNode(m) {
@@ -1076,12 +1087,31 @@ function chatNode(m) {
   }
   const steps = (m.steps || []).map((st) => `<span class="pill ${st.ok ? '' : 'bad'}" title="${esc(st.note || '')}">${esc(STEP_LABEL[st.name] || st.name)}</span>`).join(' ');
   const changes = (m.changes || []).map((c) => `<div class="change" data-change="${esc(c.id)}">✎ ${esc(c.summary)} <button class="link" data-act="undo">Undo</button></div>`).join('');
-  const pending = (m.pending || []).map((p) => `<div class="dreq" data-test="${esc(p.id)}"><b>Test ${esc(p.action)}</b> <span class="mono muted">${esc(Object.entries(p.params || {}).map(([k, v]) => `${k}=${v}`).join(', '))}</span>
-      ${p.done ? `<pre class="preview">${esc(p.result || '')}</pre>` : '<div class="small muted">This flow changes records. Check the values, then:</div><button class="primary" data-act="runTest">Run test</button>'}</div>`).join('');
+  const pending = (m.pending || []).map((p) => (p.kind === 'file' ? `<div class="dreq" data-test="${esc(p.id)}"><b>${esc(p.summary)}</b>${p.change?.op === 'write' ? `<pre class="preview">${esc(String(p.change.text || '').slice(0, 1500))}</pre>` : ''}
+      ${p.done ? `<div class="small ${p.ok ? '' : 'err'}">${esc(p.result || '')}</div>` : `<button class="${p.change?.op === 'delete' ? 'danger' : 'primary'}" data-act="runTest">Do it</button>`}</div>` : `<div class="dreq" data-test="${esc(p.id)}"><b>Test ${esc(p.action)}</b> <span class="mono muted">${esc(Object.entries(p.params || {}).map(([k, v]) => `${k}=${v}`).join(', '))}</span>
+      ${p.done ? `<pre class="preview">${esc(p.result || '')}</pre>` : '<div class="small muted">This flow changes records. Check the values, then:</div><button class="primary" data-act="runTest">Run test</button>'}</div>`)).join('');
   el.innerHTML = `<div class="bubble">${m.working && !m.text ? '<span class="muted">Working…</span>' : ''}${m.error ? `<div class="err">${esc(m.error)}</div>` : mdLite(m.text)}</div>
     ${steps ? `<div class="steps">${steps}</div>` : ''}${changes}${pending}
-    ${m.cost != null ? `<div class="usage">${esc(m.model || '')} · ${money(m.cost)}</div>` : ''}`;
+    ${m.cost != null || m.text ? `<div class="usage">${m.text ? '<button class="link" data-act="speak" title="Read aloud">🔊</button> ' : ''}${m.cost != null ? `${esc(m.model || '')} · ${money(m.cost)}` : ''}</div>` : ''}`;
   return el;
+}
+
+/** Reads text aloud; a second click on the same button stops it. */
+async function readAloud(btn, text) {
+  if (btn.dataset.speaking) {
+    stopSpeaking();
+    return;
+  }
+  document.querySelectorAll('[data-speaking]').forEach((b) => { delete b.dataset.speaking; b.textContent = '🔊'; });
+  btn.dataset.speaking = '1';
+  btn.textContent = '■';
+  try {
+    const r = await speak(text, await getSettings());
+    if (r.fallback) toast(`The Gemini voice couldn't be used (${r.fallback}); this computer's voice was used.`);
+  } finally {
+    delete btn.dataset.speaking;
+    btn.textContent = '🔊';
+  }
 }
 
 function renderChatLog(scroll = true) {
@@ -1170,6 +1200,11 @@ $('chatClear').addEventListener('click', async () => {
 async function onChatClick(e) {
   const b = e.target.closest('[data-act]');
   if (!b) return;
+  if (b.dataset.act === 'speak') {
+    const m = chatMessages.find((x) => String(x.id) === b.closest('.msg')?.dataset.id);
+    if (m) readAloud(b, m.text);
+    return;
+  }
   if (b.dataset.act === 'undo') {
     const id = Number(b.closest('[data-change]').dataset.change);
     const res = await engine('changes.undo', { id });
@@ -1181,7 +1216,7 @@ async function onChatClick(e) {
     const msgEl = b.closest('.msg');
     const box = b.closest('[data-test]');
     b.disabled = true;
-    toast('Running the flow…');
+    toast(box.querySelector('b')?.textContent?.startsWith('Test ') ? 'Running the flow…' : 'Working…');
     const res = await engine('chat.runTest', { messageId: Number(msgEl.dataset.id), testId: box.dataset.test });
     if (res?.error) toast(res.error, 6000);
     await loadChat();
@@ -1256,3 +1291,6 @@ loadChat();
 $('filter').value = sessionStorage.getItem('mm_filter') || 'active';
 updateSetupLabels();
 refresh();
+
+// ---- dictation into the chat ----
+attachDictation($('chatMic'), $('chatInput'), { getSettings, onError: (m) => toast(m, 6000) });

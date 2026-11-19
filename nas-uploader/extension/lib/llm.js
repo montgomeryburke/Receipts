@@ -532,6 +532,7 @@ export async function resolveGeminiModel(settings) {
 export function pickGeminiFlash(models) {
   const scored = [];
   for (const name of models) {
+    if (/tts|image|audio|live|embedding/i.test(name)) continue; // not text models
     const m = /^gemini-(\d+(?:\.\d+)?)-flash(-preview(?:-[\w-]+)?|-\d{3}|-latest)?$/.exec(name);
     if (!m) continue;
     const stable = !m[2] || /^-\d{3}$/.test(m[2]);

@@ -7,6 +7,7 @@ import { listInstructions, addInstruction, removeInstruction } from './lib/memor
 import { CONFIG, loadConfig, forgetSavedConfig } from './lib/config-store.js';
 import { modelChoices, fillModelSelect } from './lib/models.js';
 import { suggestKeywords } from './lib/projects.js';
+import { speak, computerVoices, GEMINI_VOICES } from './lib/voice.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -30,7 +31,7 @@ function flashSaved() {
 
 // ---------------------------------------------------------------- simple fields
 
-const NUMERIC = new Set(['localContextChars', 'snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'meetingMinGapSec', 'dailyBudgetUsd', 'maxThreadChars']);
+const NUMERIC = new Set(['ttsRate', 'localContextChars', 'snippetCount', 'snippetCharBudget', 'maxEmailChars', 'maxFileMB', 'maxCharsPerFile', 'autoIndexMinutes', 'meetingMinGapSec', 'dailyBudgetUsd', 'maxThreadChars']);
 const NULLABLE = new Set(['priceInPerM', 'priceOutPerM']);
 
 function readField(el) {
@@ -110,9 +111,9 @@ async function renderSpend() {
 }
 
 const PRESETS = {
-  saver: { processOnOpen: false, autoScan: false, emailEffort: 'low', refinePass: false, crossCheck: false, crossCheckRevise: false, dualLookUp: false, meetingPrompts: 'manual', meetingWebLookup: false, meetingSummary: false, meetingStt: 'whisper', effort: 'low' },
-  balanced: { processOnOpen: true, autoScan: false, emailEffort: 'medium', refinePass: true, crossCheck: true, crossCheckRevise: true, dualLookUp: false, meetingPrompts: 'auto', meetingWebLookup: true, meetingSummary: true, meetingStt: 'whisper', effort: 'low' },
-  best: { processOnOpen: true, autoScan: true, emailEffort: 'high', refinePass: true, crossCheck: true, crossCheckRevise: true, dualLookUp: true, meetingPrompts: 'auto', meetingWebLookup: true, meetingSummary: true, effort: 'medium' },
+  saver: { processOnOpen: false, autoScan: false, emailEffort: 'low', refinePass: false, crossCheck: false, crossCheckRevise: false, dualLookUp: false, meetingPrompts: 'manual', meetingWebLookup: false, emailWebLookup: false, meetingSummary: false, meetingStt: 'whisper', effort: 'low' },
+  balanced: { processOnOpen: true, autoScan: false, emailEffort: 'medium', refinePass: true, crossCheck: true, crossCheckRevise: true, dualLookUp: false, meetingPrompts: 'auto', meetingWebLookup: true, emailWebLookup: true, meetingSummary: true, meetingStt: 'whisper', effort: 'low' },
+  best: { processOnOpen: true, autoScan: true, emailEffort: 'high', refinePass: true, crossCheck: true, crossCheckRevise: true, dualLookUp: true, meetingPrompts: 'auto', meetingWebLookup: true, emailWebLookup: true, meetingSummary: true, effort: 'medium' },
 };
 document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', async () => {
   const patch = { ...PRESETS[b.dataset.preset] };
@@ -637,3 +638,25 @@ $('importSetup').addEventListener('click', () => {
   $('nasFolders').value = (settings.nasFolders || []).join('\n');
   if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
 })();
+
+// ---------------------------------------------------------------- voice
+
+(async () => {
+  const sel = $('ttsVoice');
+  const gem = $('ttsGeminiVoice');
+  const s = await getSettings();
+  gem.innerHTML = GEMINI_VOICES.map((v) => `<option value="${v}">${v}</option>`).join('');
+  gem.value = s.ttsGeminiVoice || 'Kore';
+  const voices = await computerVoices();
+  for (const v of voices) {
+    const o = document.createElement('option');
+    o.value = v.name;
+    o.textContent = `${v.name} (${v.lang})${v.localService ? '' : ' — online'}`;
+    sel.append(o);
+  }
+  sel.value = s.ttsVoice || '';
+})();
+$('ttsTest').addEventListener('click', async () => {
+  const r = await speak('This is how answers will sound when they are read aloud.', await getSettings());
+  if (r.fallback) toast(`The Gemini voice couldn't be used (${r.fallback}); this computer's voice was used.`);
+});

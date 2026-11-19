@@ -200,6 +200,13 @@ export const DEFAULT_SETTINGS = {
   meetingProvider: '',                // '' = same as provider; or 'anthropic' | 'gemini'
   meetingMinGapSec: 20,               // at most one automatic prompt every N seconds (saves tokens)
   meetingWebLookup: true,             // look a standard up online when the project files don't have it
+  ttsEngine: 'computer',              // read aloud: 'computer' (Chrome/Windows voices, free) | 'gemini' (Gemini voice)
+  ttsVoice: '',                       // this computer's voice ('' = the default voice)
+  ttsGeminiVoice: 'Kore',
+  ttsRate: 1,
+  dictationStt: 'computer',           // dictation (🎤): 'computer' (Whisper here, free) | 'gemini'
+  chatFileConfirm: true,              // file changes the chat makes on the NAS wait for a click
+  emailWebLookup: true,               // email drafts: public facts the files don't have (a standard, product data) looked up online — only when the draft asks for it
   meetingFolder: '/Meetings',         // transcripts are saved here on the NAS
   meetingSummary: true,               // one call at the end for a summary, decisions and action items
   myVoiceLabel: 'Me',

@@ -272,6 +272,11 @@ medium thinking effort by default (Settings → Background tasks & cost).
 draft new mail by itself — Settings → Background tasks & cost). The draft lists what was asked, the answers and the files they came
 from; anything it couldn't find is marked `[MISSING: …]` and shown under **Questions**, where your answer
 rewrites the draft. 👍 / 👎 on a source teaches it which document to use for emails like that one.
+When what's missing is public (a standard or code clause, a regulation, a product's published data), the draft
+looks it up on the web and fills it in with the link (card → *From the web*). It costs a little only when needed:
+one short web search, then a small update that sends the email, the draft and the results, not all your files
+again. Project facts (dates, quantities, prices) are never looked up online. Switch: Background tasks & cost.
+**🔊** reads a draft aloud.
 **Insert into Outlook reply** puts the text into the reply box. It never sends anything.
 
 **Outlook desktop app** (a Chrome extension can't reach into it, and no add-in is needed): open the email, click in
@@ -368,9 +373,28 @@ The side panel's **Chat** tab talks to the extension itself. Examples:
   click-by-click steps in make.powerautomate.com with the exact JSON schema, asks for the flow's URL, and offers a
   test. Flows that change records only ever run when you click.
 
+- "What's on this page?" / "Summarise this page" → it reads the page open in Chrome (and anything you selected).
+- "Fill in this form with Dana's details but don't send it" → it hands the task to the **browser agent**, which
+  takes control of the tab in its own window and asks before risky steps (like Claude in Chrome).
+- "What's the barrier height in CSA S6?" → it searches your files first, then the web, and gives the links.
+- Files, like Desktop Commander but inside Chrome: "find the latest pour schedule", "list the Alert folder on the
+  NAS", "read the geotech report", "save these notes as /Notes/plan.txt", "rename … to …", "make a folder …".
+  Project folders on this computer can be read (Chrome gives read access); writing, moving, renaming, copying and
+  deleting happen on the NAS, each with a **Do it** button (Settings → Accuracy & safety can switch the clicks off). The chat
+  can't run programs or commands on this computer: Chrome doesn't allow it.
+- **🎤** dictates your message; **🔊** reads a reply aloud.
+
 Every change appears under the reply with **Undo** (and under *Changes made from the chat*). API keys are never
 taken in the chat. If something needs a change to the extension's code, it says so and saves a change request to
 `/.assistant/change-requests.md` on the NAS — paste that into Claude Code.
+
+## 7a. Voice
+
+**Settings → Voice.** Read aloud (🔊 on chat replies, drafts, meeting prompts and private answers) with this
+computer's voices, free and offline, or a Gemini voice (more natural, about a cent a minute; if it can't be used
+the computer's voice takes over). Dictation (🎤 in the chat and the meeting's question box) with Whisper on this
+computer (free; the speech model downloads once) or Gemini. Meeting transcription has its own choice (Meetings).
+In a meeting, use a headset when reading aloud, so the meeting doesn't hear it.
 
 ## 6c. To do: priorities and invoices
 

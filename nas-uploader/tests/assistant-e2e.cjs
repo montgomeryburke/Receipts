@@ -2333,6 +2333,200 @@ test('email chain: Outlook history opened and read, older messages of the conver
   eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
 });
 
+test('web when the files lack it: an email draft looks up a public fact (one web search, a short update without the files), never for project facts; the chat searches the web', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const b = await launch();
+  await mirrorProjects(b, { pdf: false });
+  await waitIndexed(b, 5);
+  const panel = await b.open('sidepanel.html');
+  await setSettings(panel, keys({ myName: 'Monty', crossCheck: false, emailWebLookup: true }));
+  const isWeb = (body) => (body.tools || []).some((t) => /^web_search/.test(t.type || ''));
+  ai.anthropic = (body) => {
+    const user = (body.messages || []).map((m) => (Array.isArray(m.content) ? m.content.map((c) => c.text || '').join('\n') : m.content)).join('\n');
+    if (isWeb(body)) return { content: [{ type: 'text', text: '1. CSA S6:19 cl. 12.4.3.5: TL-4 barriers at least 1050 mm high.', citations: [{ type: 'web_search_result_location', url: 'https://www.csagroup.org/store/product/S6-19/', title: 'CSA S6:19', cited_text: '1050 mm', encrypted_index: 'x' }] }] };
+    if (/<current_result/.test(user)) {
+      return { content: [text(JSON.stringify({ needs_reply: true, category: 'information_request', summary: 'updated', thread_summary: '', requests: [{ ask: 'Deck width', status: 'answered', answer: '12.0 m', sources: ['S1'] }, { ask: 'Minimum TL-4 barrier height', status: 'answered', answer: '1050 mm', sources: ['W1'] }], missing_info: [], search_terms: [], data_requests: [], draft_reply: 'Hi,\n\nThe clear deck width is 12.0 m. Per CSA S6:19 cl. 12.4.3.5, TL-4 barriers must be at least 1050 mm high.\n\nMonty', confidence: 'high', web_queries: [] }))] };
+    }
+    const projectFact = /Subject: Alert pour date/.test(user);
+    return { content: [text(JSON.stringify({ needs_reply: true, category: 'information_request', summary: 'Asks for the deck width and barrier height.', thread_summary: '', requests: [{ ask: 'Deck width', status: 'answered', answer: '12.0 m', sources: ['S1'] }, { ask: projectFact ? 'Pour date' : 'Minimum TL-4 barrier height', status: 'missing', answer: '', sources: [] }], missing_info: [projectFact ? 'What is the pour date?' : 'What is the minimum TL-4 barrier height?'], search_terms: [], data_requests: [], draft_reply: `Hi,\n\nThe clear deck width is 12.0 m. [MISSING: ${projectFact ? 'pour date' : 'TL-4 barrier height'}]\n\nMonty`, confidence: 'medium', web_queries: projectFact ? [] : ['CSA S6-19 TL-4 barrier minimum height'] }))] };
+  };
+  await engine(b.sw, { type: 'email.capture', email: { from: 'Engineer <engineer@client.ca>', subject: 'Alert deck width and barrier height', body: 'Hi Monty, what is the clear deck width, and how high must TL-4 barriers be? Thanks', source: 'manual' } });
+  const getItem = (re) => waitFor(async () => {
+    const items = await panel.evaluate(async () => (await import('./lib/db.js')).getAll('items'));
+    const it = items.find((i) => re.test(i.subject) && i.status !== 'processing' && i.status !== 'queued');
+    return it || null;
+  }, { what: 'draft done' });
+  const it = await getItem(/barrier height/);
+  const calls = ai.ofApi('anthropic');
+  eq(calls.length, 3, 'draft, one web search, one short update: ' + JSON.stringify(it.history));
+  assert(isWeb(calls[1].body), 'second call searches the web');
+  const updateUser = calls[2].body.messages[0].content.map((c) => c.text).join('\n');
+  assert(!/<project_files>/.test(updateUser) && /<web_results/.test(updateUser) && /csagroup\.org/.test(updateUser), 'the update sends the web results, not the files again');
+  assert(/1050 mm/.test(it.draft) && !/MISSING/.test(it.draft), 'draft filled from the web: ' + it.draft);
+  eq(it.web.sources[0].url, 'https://www.csagroup.org/store/product/S6-19/', 'source kept');
+  eq(it.summary, 'Asks for the deck width and barrier height.', 'summary from the full read kept');
+  await panel.click('.tabs [data-tab="drafts"]');
+  await panel.selectOption('#filter', 'all');
+  await panel.waitForSelector('#list .card');
+  if (!(await panel.$('#list .card [data-web]'))) await panel.click('#list .card .card-head');
+  await panel.waitForSelector('#list .card [data-web]');
+  assert(/csagroup/.test(await panel.innerHTML('#list .card')), 'card links the web source');
+  // A project fact (pour date) is never searched for online.
+  const before = ai.ofApi('anthropic').length;
+  await engine(b.sw, { type: 'email.capture', email: { from: 'Engineer <engineer@client.ca>', subject: 'Alert pour date', body: 'Hi Monty, what is the deck width and the pour date? Thanks', source: 'manual' } });
+  await getItem(/pour date/);
+  eq(ai.ofApi('anthropic').length - before, 1, 'one call only: nothing public to look up');
+  // Chat: files first, then the web.
+  ai.anthropic = (body) => {
+    if (isWeb(body)) return { content: [{ type: 'text', text: 'BC MoTI Bridge Standards and Procedures Manual Vol. 1 (2022) requires TL-4 on highways over 60 km/h.', citations: [{ type: 'web_search_result_location', url: 'https://www2.gov.bc.ca/gov/content/transportation/transportation-infrastructure/engineering-standards-guidelines/structural', title: 'BC MoTI structural standards', cited_text: 'TL-4', encrypted_index: 'y' }] }] };
+    if (!endsWithToolResult(body)) return { stop_reason: 'tool_use', content: [toolUse('search_web', { query: 'BC MoTI barrier test level requirement' })] };
+    const r = lastToolResults(body).search_web;
+    return { content: [text(`${r.answer} Source: ${r.links[0].url}`)] };
+  };
+  const reply = await chatSend(panel, 'What test level does BC MoTI require for bridge barriers?');
+  assert(/TL-4/.test(reply) && /gov\.bc\.ca/.test(reply), 'chat answer with the link: ' + reply);
+  const sp = (await engine(b.sw, { type: 'status' })).ai.spend;
+  assert(sp.byFeature.email > 0 && sp.byFeature.chat > 0, 'web searches counted under their features: ' + JSON.stringify(sp.byFeature));
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
+test('voice: read aloud with this computer\'s voice (free) or a Gemini voice (falls back when it can\'t), dictation by Gemini or on this computer; 🔊 and 🎤 buttons', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const savedModels = ai.geminiModels;
+  ai.geminiModels = [...savedModels, 'gemini-2.5-flash-preview-tts'];
+  try {
+    const me = speechWav('dictate', 'What is the clear deck width of the Alert Bridge', { speed: 140, padSec: 1 });
+    const b = await launch({ chromeArgs: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${me}`] });
+    const panel = await b.open('sidepanel.html');
+    await setSettings(panel, keys({ ttsEngine: 'computer', dictationStt: 'gemini' }));
+    // Chrome's voices are stubbed (headless has none): what would be said is recorded.
+    await panel.evaluate(() => {
+      window.__spoken = [];
+      speechSynthesis.speak = (u) => { window.__spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 20); };
+    });
+    const before = ai.requests.length;
+    const r1 = await panel.evaluate(async () => {
+      const { speak } = await import('./lib/voice.js');
+      const { getSettings } = await import('./lib/db.js');
+      return speak('**The clear deck width** is 12.0 m [S1]. See https://example.com/x.', await getSettings());
+    });
+    eq(r1.engine, 'computer', "this computer's voice");
+    eq(JSON.stringify(await panel.evaluate(() => window.__spoken)), JSON.stringify(['The clear deck width is 12.0 m. See.']), 'marks, tags and links not read out');
+    eq(ai.requests.length, before, 'no AI call for the free voice');
+    // Gemini voice: a voice model of the key, the chosen voice, audio played.
+    const pcm = Buffer.alloc(2400 * 2).toString('base64');
+    ai.gemini = (body, model) => (/tts/.test(model)
+      ? { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: pcm } }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 60, totalTokenCount: 72 } }
+      : geminiReply({ text: 'What is the clear deck width of the Alert Bridge?' }));
+    await setSettings(panel, { ttsEngine: 'gemini', ttsGeminiVoice: 'Puck' });
+    const r2 = await panel.evaluate(async () => (await import('./lib/voice.js')).speak('Deck width 12.0 m.', await (await import('./lib/db.js')).getSettings()));
+    eq(r2.engine, 'gemini', 'Gemini voice used');
+    const ttsReq = ai.ofApi('gemini').find((r) => /tts/.test(r.model || r.path || ''));
+    assert(ttsReq, 'voice model called: ' + JSON.stringify(ai.ofApi('gemini').map((r) => r.path || r.model)));
+    eq(ttsReq.body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName, 'Puck', 'chosen voice');
+    eq(ttsReq.body.generationConfig.responseModalities[0], 'AUDIO', 'audio asked for');
+    // The Gemini voice failing (e.g. AI stopped) still reads aloud, with this computer's voice.
+    ai.gemini = () => ({ __status: 500, body: { error: { code: 500, message: 'boom' } } });
+    const r3 = await panel.evaluate(async () => (await import('./lib/voice.js')).speak('Still read aloud.', await (await import('./lib/db.js')).getSettings()));
+    eq(r3.engine, 'computer', 'fell back to this computer');
+    assert(r3.fallback, 'says why');
+    // Dictation by Gemini from the microphone into the chat box.
+    ai.gemini = (body, model) => geminiReply({ text: 'What is the clear deck width of the Alert Bridge?' });
+    await panel.click('.tabs [data-tab="chat"]');
+    await panel.click('#chatMic');
+    await panel.waitForFunction(() => document.getElementById('chatMic').getAttribute('aria-pressed') === 'true');
+    await panel.waitForTimeout(4500);
+    await panel.click('#chatMic');
+    await panel.waitForFunction(() => /deck width/i.test(document.getElementById('chatInput').value), null, { timeout: 30000 });
+    const audioReq = ai.ofApi('gemini').reverse().find((r) => JSON.stringify(r.body).includes('audio/wav'));
+    assert(audioReq, 'the recording was sent to Gemini');
+    // 🔊 on chat replies.
+    ai.anthropic = () => ({ content: [text('The clear deck width is 12.0 m.')] });
+    await setSettings(panel, { ttsEngine: 'computer' });
+    await panel.evaluate(() => { document.getElementById('chatInput').value = 'deck width?'; });
+    const reply = await chatSend(panel, 'deck width?');
+    assert(/12\.0 m/.test(reply), 'reply');
+    await panel.evaluate(() => { window.__spoken = []; speechSynthesis.speak = (u) => { window.__spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 20); }; });
+    await panel.click('#chatLog .msg.assistant [data-act="speak"]');
+    await panel.waitForFunction(() => window.__spoken.length === 1);
+    eq(await panel.evaluate(() => window.__spoken[0]), 'The clear deck width is 12.0 m.', 'reply read aloud');
+    // Settings → Voice lists the choices.
+    const options = await b.open('options.html');
+    await options.waitForSelector('#ttsGeminiVoice option[value="Puck"]', { state: 'attached' });
+    eq(await options.$$eval('[data-key="dictationStt"] option', (o) => o.map((x) => x.value).join(',')), 'computer,gemini', 'dictation choices');
+    eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+  } finally {
+    ai.geminiModels = savedModels;
+  }
+});
+
+test('chat like Claude in Chrome: reads the open page, hands a task to the browser agent (it starts by itself), finds/lists/reads files, NAS changes wait for "Do it"', async () => {
+  const ai = global.mockAI;
+  ai.reset();
+  const site = await startAgentSite();
+  const b = await launch();
+  const { prefix } = await mirrorProjects(b, { pdf: false });
+  await waitIndexed(b, 5);
+  const formPage = await b.ctx.newPage();
+  await formPage.goto(site.url('/form.html'));
+  await formPage.bringToFront();
+  const panel = await b.open('sidepanel.html');
+  await setSettings(panel, keys({ crossCheck: false }));
+  let seen = {};
+  let round = 0;
+  const note = `/Notes/plan-${Date.now()}.txt`;
+  ai.anthropic = (body) => {
+    if (/<task>/.test(userText(body))) return { content: [text('Done: the form is filled in (not sent).')] }; // the agent
+    if (!endsWithToolResult(body)) {
+      round = 0;
+      const lastMsg = body.messages[body.messages.length - 1];
+      const lastText = Array.isArray(lastMsg.content) ? lastMsg.content.map((c) => c.text || '').join('\n') : String(lastMsg.content);
+      if (/fill/i.test(lastText)) return { stop_reason: 'tool_use', content: [toolUse('browser_task', { task: 'Fill in the contact form on this page with Dana Lee, dana@client.ca. Do not send it.' })] };
+      return { stop_reason: 'tool_use', content: [toolUse('read_page', {}), toolUse('find_files', { name: 'design criteria' })] };
+    }
+    round++;
+    const r = lastToolResults(body);
+    Object.assign(seen, r);
+    if (r.browser_task) return { content: [text(r.browser_task.started ? 'The browser agent is doing it.' : `Failed: ${r.browser_task.error}`)] };
+    if (round === 1) {
+      const hit = (r.find_files.hits || [])[0];
+      return { stop_reason: 'tool_use', content: [
+        toolUse('read_file', { path: hit.path }),
+        toolUse('list_folder', { path: `nas:/${prefix}` }),
+        toolUse('change_files', { changes: [{ op: 'write', path: `nas:${note}`, text: 'Pour on Nov 18.' }, { op: 'mkdir', path: 'nas:/Notes/Photos' }] }),
+      ] };
+    }
+    return { content: [text('Prepared two changes for you to approve.')] };
+  };
+  const reply = await chatSend(panel, 'What is on this page, and what do our design criteria say? Save a note about the pour.');
+  assert(/Prepared two changes/.test(reply), 'reply: ' + reply);
+  eq(seen.read_page.title, 'Project contact', 'read the open page: ' + JSON.stringify(seen.read_page));
+  assert(/Full name/.test(seen.read_page.text), 'its text');
+  assert((seen.find_files.hits || []).some((h) => /Design Criteria/i.test(h.path)), 'found by name: ' + JSON.stringify(seen.find_files));
+  assert(/deck width/i.test(seen.read_file.text), 'read the file: ' + String(seen.read_file.text).slice(0, 200));
+  assert((seen.list_folder.entries || []).length > 0, 'listed the NAS folder');
+  eq(seen.change_files.awaiting_user, true, 'changes wait for the click');
+  eq((await dav('GET', note)).status, 404, 'nothing written yet');
+  // Do it.
+  await panel.waitForSelector('#chatLog [data-test] [data-act="runTest"]');
+  const buttons = await panel.$$('#chatLog [data-test] [data-act="runTest"]');
+  eq(buttons.length, 2, 'one button per change');
+  await buttons[0].click();
+  await panel.waitForFunction(() => /Done/.test(document.querySelector('#chatLog [data-test]').textContent));
+  const got = await dav('GET', note);
+  eq(got.status, 200, 'written on the NAS');
+  assert(/Pour on Nov 18/.test(got.body), 'content');
+  // "Do this on the page": the browser agent's window opens and starts by itself.
+  const reply2 = await chatSend(panel, 'Fill in this form with Dana\'s details, but don\'t send it.');
+  assert(/browser agent is doing it/.test(reply2), 'reply: ' + reply2);
+  const agentPage = await waitFor(async () => b.ctx.pages().find((pg) => /agent\.html/.test(pg.url())) || null, { what: 'agent window' });
+  await agentPage.waitForFunction(() => /Dana Lee/.test(document.getElementById('task').value));
+  await waitFor(() => ai.ofApi('anthropic').some((r) => /<task>[\s\S]*Dana Lee/.test(userText(r.body))) || null, { what: 'agent started' });
+  eq(b.errors.length, 0, `page errors: ${b.errors.join(' | ')}`);
+});
+
 test('email chain parsing: Outlook (EN/FR), "Original Message" and "On … wrote:" quotes become separate earlier messages', async () => {
   const b = await launch();
   const page = await b.open('sidepanel.html');

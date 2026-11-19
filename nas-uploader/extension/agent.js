@@ -336,9 +336,27 @@ state.aiPaused = !!state.settings.aiPaused;
 $('confirm').value = state.settings.agentConfirm || 'risky';
 $('provider').value = state.settings.agentProvider || '';
 $('maxSteps').value = state.settings.agentMaxSteps || 40;
-const fromHash = Number(new URLSearchParams(location.hash.slice(1)).get('tab')) || undefined;
+const hashParams = new URLSearchParams(location.hash.slice(1));
+const fromHash = Number(hashParams.get('tab')) || undefined;
 await loadTabs(fromHash);
 renderAi();
 renderFlows();
 renderAsks();
 state.ready = true;
+// A task handed over by the chat ("do this on the page"): filled in and started.
+if (hashParams.get('task')) {
+  $('task').value = hashParams.get('task');
+  history.replaceState(null, '', `#tab=${fromHash || ''}`);
+  if (hashParams.get('go') === '1') start();
+}
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.to !== 'agent' || msg.type !== 'agent.task') return false;
+  if (state.agent) {
+    sendResponse({ busy: true });
+    return false;
+  }
+  $('task').value = msg.task;
+  (msg.tabId ? loadTabs(msg.tabId) : Promise.resolve()).then(() => start());
+  sendResponse({ started: true });
+  return false;
+});

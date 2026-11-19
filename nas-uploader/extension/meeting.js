@@ -19,6 +19,7 @@ import { projectFolders } from './lib/folders.js';
 import { pageLabel, chunkText } from './lib/text.js';
 import { IndexWriter } from './lib/index.js';
 import { Recording } from './lib/recorder.js';
+import { speak, stopSpeaking, attachDictation } from './lib/voice.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -698,6 +699,7 @@ function promptCardHtml(c, i) {
       ${c.id === 'summary' ? '' : `<button data-act="good" title="Useful — prefer these documents for this topic">👍</button>
       <button data-act="bad" title="Not useful — avoid these documents for this topic">👎</button>`}
       ${c.id === 'summary' || !c.topic ? '' : '<button data-act="research" title="Search the web about this topic">🔎</button>'}
+      <button data-act="speak" title="Read aloud (use a headset)">🔊</button>
       <button data-act="pin" title="Keep at the top">${c.pinned ? 'Unpin' : '📌'}</button></div></div>`;
 }
 
@@ -713,6 +715,29 @@ async function onPromptClick(e) {
   const open = e.target.closest('[data-open]');
   if (open) {
     openFile(open.dataset.open, Number(open.dataset.page) || 0);
+    return;
+  }
+  const sp = e.target.closest('[data-act="speak"], [data-act="speak-answer"]');
+  if (sp) {
+    let text = '';
+    if (sp.dataset.act === 'speak-answer') {
+      const a = state.answers[Number(sp.closest('[data-answer]')?.dataset.answer)];
+      text = a ? [a.answer, a.say ? `You could say: ${a.say}` : ''].filter(Boolean).join('. ') : '';
+    } else {
+      const c = state.prompts[Number(sp.closest('[data-i]')?.dataset.i)];
+      text = c ? (c.suggestions || []).map((s) => s.say).join('. ') : '';
+    }
+    if (sp.dataset.speaking) {
+      stopSpeaking();
+      return;
+    }
+    sp.dataset.speaking = '1';
+    try {
+      const r = await speak(text, state.settings || (await getSettings()));
+      if (r.fallback) toast(`The Gemini voice couldn't be used (${r.fallback}); this computer's voice was used.`);
+    } finally {
+      delete sp.dataset.speaking;
+    }
     return;
   }
   const b = e.target.closest('[data-act]');
@@ -753,8 +778,8 @@ async function openFile(path, page) {
 // ---------------------------------------------------------------- private questions
 
 function answersHtml() {
-  return state.answers.map((a) => (a.thinking ? `<div class="card private"><div class="small"><b>You asked:</b> ${esc(a.q)}</div><div class="thinking">Looking…</div></div>` : `<div class="card private">
-      <div class="small"><b>You asked:</b> ${esc(a.q)}</div>
+  return state.answers.map((a, n) => (a.thinking ? `<div class="card private"><div class="small"><b>You asked:</b> ${esc(a.q)}</div><div class="thinking">Looking…</div></div>` : `<div class="card private" data-answer="${n}">
+      <div class="small row nowrap"><span class="grow"><b>You asked:</b> ${esc(a.q)}</span>${a.error ? '' : '<button data-act="speak-answer" title="Read aloud (use a headset)">🔊</button>'}</div>
       ${a.error ? `<div class="err">${esc(a.error)}</div>` : `<div>${esc(a.answer)}</div>${a.say ? `<div class="say" style="margin-top:4px">Say: ${esc(a.say)}</div>` : ''}${(a.sources || []).map(sourceHtml).join('')}${checkHtml(a.check)}${webHtml(a.web)}`}
     </div>`)).join('');
 }
@@ -1157,6 +1182,7 @@ $('btnWeb').addEventListener('click', () => {
   runResearch(q);
 });
 $('btnPip').addEventListener('click', popOut);
+attachDictation($('askMic'), $('askInput'), { getSettings, onError: (m) => toast(m, 6000) });
 $('prompts').addEventListener('click', onPromptClick);
 $('answers').addEventListener('click', onPromptClick);
 $('askForm').addEventListener('submit', (e) => {
