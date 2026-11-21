@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Assistant Settings</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="options.css">
+</head>
+<body>
+<div class="layout">
+  <nav class="side" aria-label="Sections">
+    <h1>Project Assistant</h1>
+    <a href="#ai">AI provider &amp; key</a>
+    <a href="#background">Background tasks &amp; cost</a>
+    <a href="#accuracy">Accuracy &amp; safety</a>
+    <a href="#about">About you</a>
+    <a href="#instructions">Instructions</a>
+    <a href="#nas">NAS connection</a>
+    <a href="#folders">Project folders</a>
+    <a href="#projectmail">Project emails</a>
+    <a href="#indexing">Indexing</a>
+    <a href="#meetings">Meetings</a>
+    <a href="#email">Email</a>
+    <a href="#automate">Power Automate</a>
+    <a href="#teaching">Teaching</a>
+    <a href="#data">Data</a>
+    <p id="saved" class="small muted" aria-live="polite"></p>
+  </nav>
+
+  <main class="content stack">
+    <section id="ai" class="panel stack">
+      <h2>AI provider &amp; API key</h2>
+      <p class="small muted">Keys are stored only in this browser profile and are sent only to the provider's own API.</p>
+      <div class="row" role="radiogroup" aria-label="Provider">
+        <label class="check"><input type="radio" name="provider" value="anthropic" data-key="provider"> Anthropic (Claude)</label>
+        <label class="check"><input type="radio" name="provider" value="gemini" data-key="provider"> Google Gemini</label>
+      </div>
+      <div class="grid2">
+        <div class="stack">
+          <h3>Anthropic</h3>
+          <label class="field"><span>API key</span>
+            <div class="row nowrap"><input type="password" data-key="anthropicKey" class="grow" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"><button type="button" data-reveal="anthropicKey">Show</button></div>
+          </label>
+          <label class="field"><span>Model</span><select id="model-anthropic" data-model="anthropic"></select></label>
+          <input type="text" id="model-other-anthropic" data-model-other="anthropic" placeholder="Type a model name, e.g. claude-opus-5-5" spellcheck="false" hidden>
+          <label class="check small"><input type="checkbox" data-key="anthropicFallbacks"> If Claude declines a request, retry it on Anthropic's recommended fallback model</label>
+          <div class="row"><button type="button" data-test="anthropic">Test key &amp; list models</button><button type="button" data-webtest="anthropic">Test web search</button></div>
+          <div class="small muted" data-testout="anthropic"></div>
+        </div>
+        <div class="stack">
+          <h3>Google Gemini</h3>
+          <label class="field"><span>API key</span>
+            <div class="row nowrap"><input type="password" data-key="geminiKey" class="grow" autocomplete="off" spellcheck="false" placeholder="AIza…"><button type="button" data-reveal="geminiKey">Show</button></div>
+          </label>
+          <label class="field"><span>Model</span><select id="model-gemini" data-model="gemini"></select></label>
+          <input type="text" id="model-other-gemini" data-model-other="gemini" placeholder="Type a model name, e.g. gemini-3.5-pro" spellcheck="false" hidden>
+          <p class="small muted">The list shows the models your key can use. Pro is the most capable; Flash is fast and cheap. Whether you pay or use the free tier depends on the key (billing turned on for its project in Google AI Studio), not on the model.</p>
+          <div class="row"><button type="button" data-test="gemini">Test key &amp; list models</button><button type="button" data-webtest="gemini">Test web search</button></div>
+          <div class="small muted" data-testout="gemini"></div>
+        </div>
+      </div>
+      <details class="stack" id="localBox">
+        <summary><b>Your own AI model (optional, free)</b> — only if you have a computer that can run one</summary>
+        <p class="small muted">Optional. A model on a computer with a good graphics card (Ollama, LM Studio, llama.cpp — any OpenAI-compatible server) can do the cheap jobs for nothing. The HP and the Pi are too slow for this. To reach it from work, run the NAS setup script with <code>--llm-url http://&lt;that computer's address&gt;:11434</code>; it is then at <code>&lt;your NAS address&gt;/.llm/</code> behind the NAS login. Without one, Claude or Gemini does these jobs (Settings → Background tasks &amp; cost keeps them cheap).</p>
+        <div class="grid2">
+          <label class="field"><span>Address</span><input type="text" data-key="localUrl" placeholder="https://nas.your-tailnet.ts.net/.llm/" spellcheck="false"></label>
+          <label class="field"><span>Model</span><input type="text" data-key="localModel" list="localModels" placeholder="qwen2.5:7b" spellcheck="false"></label>
+          <datalist id="localModels"></datalist>
+          <label class="field"><span>Login</span><select data-key="localAuth"><option value="nas">the NAS login (through the NAS address)</option><option value="key">an API key</option><option value="none">none (home network)</option></select></label>
+          <label class="field"><span>API key (only for "an API key")</span><input type="password" data-key="localKey" autocomplete="off"></label>
+          <label class="field"><span>It can read (characters at once)</span><input type="number" min="4000" max="400000" step="1000" data-key="localContextChars" title="Ollama reads 2–4k tokens unless OLLAMA_CONTEXT_LENGTH is raised; 16384 tokens ≈ 60,000 characters"></label>
+        </div>
+        <div class="row small"><b>Use it for:</b>
+          <label class="check"><input type="checkbox" data-local-for="priorities"> priority lists</label>
+          <label class="check"><input type="checkbox" data-local-for="invoices"> invoice summaries</label>
+          <label class="check"><input type="checkbox" data-local-for="check"> second checks (when there's only one cloud key)</label>
+        </div>
+        <div class="row"><button type="button" id="localTest">Test the local model</button><span id="localOut" class="small muted"></span></div>
+      </details>
+      <details class="stack" id="hpBox">
+        <summary><b>Run on the HP</b> — commands in the NAS container, from the chat</summary>
+        <p class="small muted">Like Desktop Commander's terminal, but on the HP (nothing can run on this computer). Run the HP setup script with <code>--enable-commands</code>: commands then run in the NAS container as the limited user <code>nas-runner</code> (not root), starting in the shared folder, with a time limit, and every command is logged there. They need the NAS login <b>and</b> this command key, which the script prints at the end.</p>
+        <div class="grid2">
+          <label class="field"><span>Command key</span><span class="row nowrap"><input type="password" data-key="hpCommandKey" class="grow" autocomplete="off" spellcheck="false"><button type="button" data-reveal="hpCommandKey">Show</button></span></label>
+          <label class="check small"><input type="checkbox" data-key="hpCommandConfirm"> Each command waits for my click (recommended)</label>
+        </div>
+        <div class="row"><button type="button" id="hpTest">Test</button><span id="hpOut" class="small muted mono"></span></div>
+      </details>
+      <div class="grid3">
+        <label class="field"><span>Thinking effort</span>
+          <select data-key="effort">
+            <option value="low">Low — fewest tokens</option>
+            <option value="medium">Medium</option>
+            <option value="high">High — most thorough</option>
+          </select>
+        </label>
+        <label class="field"><span>Excerpts per email</span><input type="number" min="1" max="20" data-key="snippetCount"></label>
+        <label class="field"><span>Excerpt budget (characters)</span><input type="number" min="1000" max="40000" step="500" data-key="snippetCharBudget"></label>
+        <label class="field"><span>Max email length (characters)</span><input type="number" min="1000" max="40000" step="500" data-key="maxEmailChars"></label>
+        <label class="field"><span>Price override, USD / 1M input tokens</span><input type="number" step="0.01" data-key="priceInPerM" placeholder="auto"></label>
+        <label class="field"><span>Price override, USD / 1M output tokens</span><input type="number" step="0.01" data-key="priceOutPerM" placeholder="auto"></label>
+      </div>
+      <label class="check small"><input type="checkbox" data-key="refinePass"> When information is missing, search the files once more and re-check (one extra, smaller call)</label>
+    </section>
+
+    <section id="background" class="panel stack">
+      <h2>Background tasks &amp; cost</h2>
+      <p class="small">Everything that runs by itself and calls Claude or Gemini (which costs money) is listed here, with a switch. Searching, indexing, project detection, the free transcription and the email index all run on this computer or the HP and cost nothing.</p>
+      <div id="spendBox" class="spend small"></div>
+      <div class="row"><span class="small"><b>Presets:</b></span>
+        <button type="button" data-preset="saver" title="Only what you click: no automatic drafts, prompts or minutes, no second check, free transcription, low effort">💰 Saver</button>
+        <button type="button" data-preset="balanced" title="Drafts when you open a new email, automatic meeting prompts, the second check on, medium effort for drafts">⚖ Balanced</button>
+        <button type="button" data-preset="best" title="Everything on: automatic drafts, the second check and double look-ups, high effort for drafts">🎯 Best accuracy</button>
+        <span id="presetOut" class="small muted"></span>
+      </div>
+      <table class="jobs">
+        <thead><tr><th>Runs by itself</th><th>Cost when it runs</th><th>On / off</th></tr></thead>
+        <tbody>
+          <tr><td>Draft a reply when you open a <b>new</b> email in Outlook</td><td>1 call per email (more when information is missing)</td><td><input type="checkbox" data-key="processOnOpen"></td></tr>
+          <tr><td>Scan the inbox for new emails while you're away, and draft them (it opens each new email, so Outlook marks it read)</td><td>1 call per new email</td><td><input type="checkbox" data-key="autoScan"></td></tr>
+          <tr><td>Thinking effort for email drafts</td><td>low ≈ ½ · medium ≈ 1 · high ≈ 2–3 × the tokens</td><td><select data-key="emailEffort"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></td></tr>
+          <tr><td>Search the files again when a draft is missing information</td><td>sometimes +1 call</td><td><input type="checkbox" data-key="refinePass"></td></tr>
+          <tr><td>Second check of drafts, meeting prompts, answers, minutes, agent results</td><td>+1 call each (≈ double)</td><td><input type="checkbox" data-key="crossCheck"></td></tr>
+          <tr><td>…and correct a draft the check finds a problem in</td><td>+1 call when it does</td><td><input type="checkbox" data-key="crossCheckRevise"></td></tr>
+          <tr><td>Look standards up twice and compare</td><td>+1 web search per look-up</td><td><input type="checkbox" data-key="dualLookUp"></td></tr>
+          <tr><td>Meeting prompts</td><td>automatic: at most one every 20 s, only on a question or technical talk</td><td><select data-key="meetingPrompts"><option value="auto">automatic</option><option value="manual">only when I click</option><option value="off">off</option></select></td></tr>
+          <tr><td>Look things up online in meetings when the files don't have it</td><td>+1 web search when needed</td><td><input type="checkbox" data-key="meetingWebLookup"></td></tr>
+          <tr><td>Email drafts: look up public facts the files don't have (a standard, product data)</td><td>+1 web search and a short update, only when needed</td><td><input type="checkbox" data-key="emailWebLookup"></td></tr>
+          <tr><td>Minutes and summary when a meeting ends</td><td>1 call per meeting</td><td><input type="checkbox" data-key="meetingSummary"></td></tr>
+          <tr><td>Meeting transcription</td><td>free on this computer; Gemini ≈ a few cents an hour</td><td><select data-key="meetingStt"><option value="whisper">free (this computer)</option><option value="gemini">Gemini</option><option value="both">Gemini + free check</option></select></td></tr>
+          <tr><td>Daily spending limit (USD; 0 = none)</td><td>everything stops for the day when reached</td><td><input type="number" min="0" step="0.5" data-key="dailyBudgetUsd" style="width:6em"></td></tr>
+        </tbody>
+      </table>
+      <p class="small muted">Not listed because they cost nothing: re-indexing the project folders (every <input type="number" min="0" max="1440" data-key="autoIndexMinutes" style="width:4.5em"> minutes; 0 = off), the NAS OCR index, the email index, mirroring.</p>
+    </section>
+
+    <section id="accuracy" class="panel stack">
+      <h2>Accuracy &amp; safety</h2>
+      <p class="small muted">Everything the AI writes is checked a second way. Free checks run on this computer: every quote must really be in the file it cites, every number in a draft must be in the email or the sources, and (with "Gemini, checked by the free one") two transcriptions must hear the same numbers. An AI also checks the AI's work: with <b>both</b> a Claude and a Gemini key, each checks the other; with <b>one</b> key, the same AI does a second, separate review (a fresh call that sees only the sources and the result).</p>
+      <p id="xcState" class="small"></p>
+      <label class="check small"><input type="checkbox" data-key="crossCheck"> Second check: every email draft, meeting prompt, private answer, meeting summary and agent result is checked against the same sources — by the other AI with both keys, by a separate review with one (about double the AI cost)</label>
+      <label class="check small"><input type="checkbox" data-key="crossCheckRevise"> When it finds a problem in an email draft, the first AI corrects the draft once (one more call)</label>
+      <label class="check small"><input type="checkbox" data-key="chatFileConfirm"> File changes the chat makes on the NAS (write, move, rename, copy, delete) wait for my click</label>
+      <label class="check small"><input type="checkbox" data-key="dualLookUp"> Standards are looked up online twice, independently, and their numbers compared (by both, Anthropic's web search and Google Search, with both keys)</label>
+      <label class="field"><span>One key: model for the second review (optional; empty = the same model)</span><input type="text" data-key="selfCheckModel" placeholder="e.g. claude-sonnet-5-5 or gemini-3.5-pro" list="selfCheckModels"></label>
+      <datalist id="selfCheckModels"><option value="claude-opus-5-5"></option><option value="claude-sonnet-5-5"></option></datalist>
+      <div class="grid3">
+        <label class="field"><span>Daily AI spending limit, USD (0 = none)</span><input type="number" min="0" step="0.5" data-key="dailyBudgetUsd"></label>
+      </div>
+      <p id="spendState" class="small muted"></p>
+      <div class="row">
+        <button type="button" id="aiToggle" class="danger">⏹ Stop AI</button>
+        <span class="small muted">The kill switch: cancels every Claude and Gemini call in progress (drafts, chat, meeting prompts, Gemini transcription) and makes no new ones until you resume. The same button is in the side panel and the meeting window.</span>
+      </div>
+    </section>
+
+    <section id="about" class="panel stack">
+      <h2>About you</h2>
+      <p class="small muted">Used to write replies in your voice. Kept short so it costs almost nothing.</p>
+      <div class="grid2">
+        <label class="field"><span>Your name</span><input type="text" data-key="myName"></label>
+        <label class="field"><span>Role / title</span><input type="text" data-key="myRole" placeholder="Project Manager, Real Property"></label>
+      </div>
+      <label class="field"><span>Signature</span><textarea data-key="signature" rows="4"></textarea></label>
+      <label class="field"><span>Writing style</span><input type="text" data-key="styleNotes"></label>
+    </section>
+
+    <section id="instructions" class="panel stack">
+      <h2>Standing instructions</h2>
+      <p class="small muted">Things you told the assistant to always (or never) do. The chat adds them when you ask; you can also add one here. Each is added to the prompts it applies to, so keep them short.</p>
+      <div class="grid2">
+        <label class="field"><span>Instruction</span><input type="text" id="instText" placeholder="Keep meeting prompts to one sentence."></label>
+        <label class="field"><span>Applies to</span>
+          <select id="instScope"><option value="all">Everything</option><option value="email">Email drafts</option><option value="meeting">Meetings</option><option value="chat">The chat</option></select>
+        </label>
+      </div>
+      <div class="row"><button type="button" id="addInst">Add instruction</button></div>
+      <div id="instList" class="stack"></div>
+    </section>
+
+    <section id="nas" class="panel stack">
+      <h2>NAS connection</h2>
+      <div id="nasInfo" class="small"></div>
+      <div class="row"><button type="button" id="nasChange">Change the address or login…</button><button type="button" id="nasForget" class="danger" hidden>Forget this NAS on this computer</button><span id="nasOut" class="small muted"></span></div>
+    </section>
+
+    <section id="folders" class="panel stack">
+      <h2>Project folders</h2>
+      <p class="small">Your project folders are the mirrors you keep in <b>NAS files</b>: each one is copied from this computer to the NAS (only changes are sent) and indexed here, on this computer. Email drafts, meeting prompts and the chat all search that one index — there is no second copy.</p>
+      <div id="folderList" class="stack"></div>
+      <div class="row"><button type="button" id="addFolder">Mirror a folder…</button><button type="button" id="openNasFiles">Open NAS files</button></div>
+      <h3>Folders that are only on the NAS</h3>
+      <p class="small muted">For files you don't keep on this computer — for example the standards (S6, TAC, MoTI) copied from Google Drive into <code>/Standards</code>. The HP reads them (text and OCR) and they become searchable here. One NAS path per line.</p>
+      <textarea id="nasFolders" rows="3" placeholder="/Standards"></textarea>
+      <div class="row"><button type="button" id="saveNasFolders">Save</button><span id="nasFoldersOut" class="small muted"></span></div>
+      <h2>Automate bridge folder</h2>
+      <div class="folder-row"><div><b>Bridge folder (optional)</b><div class="small muted">A OneDrive-synced folder your Power Automate flows watch (see Power Automate below). Separate from the NAS mirror.</div></div><span id="f-bridge" class="small"></span><button type="button" data-pick="bridge">Choose…</button></div>
+    </section>
+    <section id="projectmail" class="panel stack">
+      <h2>Project emails</h2>
+      <p class="small">Which emails belong to which project. An email is filed under a project when it comes from or goes to one of its <b>people</b> (names, addresses or <code>@company.com</code>), or mentions one of its <b>keywords</b> (project number, name, site, client). Filed emails are searched for that project's drafts, meeting prompts and the chat. You can also tell the chat, e.g. "Dana Lee and @arcticfresh.ca are on the Alert Bridge project".</p>
+      <div id="projectMailList" class="stack"></div>
+    </section>
+
+    <section id="indexing" class="panel stack">
+      <h2>Indexing</h2>
+      <label class="field"><span>Read the text of these file types</span><input type="text" data-key="includeExt"></label>
+      <label class="field"><span>Index only the names of these</span><input type="text" data-key="nameOnlyExt"></label>
+      <label class="field"><span>Skip files and folders matching</span><input type="text" data-key="excludePatterns"></label>
+      <div class="grid3">
+        <label class="field"><span>Skip reading files larger than (MB)</span><input type="number" min="1" data-key="maxFileMB"></label>
+        <label class="field"><span>Max characters per file</span><input type="number" min="10000" step="10000" data-key="maxCharsPerFile"></label>
+        <label class="field"><span>Re-index every (minutes, 0 = manual)</span><input type="number" min="0" data-key="autoIndexMinutes"></label>
+      </div>
+      <label class="field"><span>OCR index on the NAS (built by the HP for scanned PDFs; NAS path)</span><input type="text" data-key="deepIndexFile"></label>
+      <p class="small muted">Indexing runs on this computer and costs no AI tokens. Only short excerpts of the best-matching files are ever sent to the AI.</p>
+    </section>
+
+    <section id="voice" class="panel stack">
+      <h2>Voice</h2>
+      <p class="small muted">Speech both ways, on this computer for free or by the AI. Meeting transcription has its own choice under Meetings.</p>
+      <div class="grid2">
+        <label class="field"><span>Read aloud (🔊 on answers, prompts and drafts)</span>
+          <select data-key="ttsEngine" id="ttsEngine">
+            <option value="computer">This computer's voices — free, works offline</option>
+            <option value="gemini">Gemini voice — more natural, about a cent a minute (needs a Gemini key)</option>
+          </select>
+        </label>
+        <label class="field"><span>Dictation (🎤 in the chat and the meeting question box)</span>
+          <select data-key="dictationStt">
+            <option value="computer">This computer — Whisper, free (the speech model downloads once)</option>
+            <option value="gemini">Gemini — better with accents and noise (needs a Gemini key)</option>
+          </select>
+        </label>
+        <label class="field"><span>This computer's voice</span><select data-key="ttsVoice" id="ttsVoice"><option value="">Default voice</option></select></label>
+        <label class="field"><span>Gemini voice</span><select data-key="ttsGeminiVoice" id="ttsGeminiVoice"></select></label>
+        <label class="field"><span>Speed</span><input type="number" min="0.5" max="2" step="0.1" data-key="ttsRate"></label>
+        <div class="field"><span>&nbsp;</span><button type="button" id="ttsTest">🔊 Test the voice</button></div>
+      </div>
+    </section>
+
+    <section id="meetings" class="panel stack">
+      <h2>Meetings</h2>
+      <p class="small muted">The meeting window listens to the Teams meeting and your microphone, transcribes, and shows prompts of what to say with quotes from your project files and standards. Transcripts are saved to the NAS.</p>
+      <div class="grid2">
+        <label class="field"><span>Transcription</span>
+          <select data-key="meetingStt">
+            <option value="whisper">Free — on this computer (Whisper, no key needed)</option>
+            <option value="gemini">Gemini (needs a Gemini key; better with accents and noise)</option>
+            <option value="both">Gemini, checked by the free one: lines where they hear different numbers are flagged</option>
+          </select>
+        </label>
+        <label class="field"><span>Prompts</span>
+          <select data-key="meetingPrompts">
+            <option value="auto">Automatic — when a question or a new topic comes up</option>
+            <option value="manual">Only when I click "Ask now"</option>
+            <option value="off">Off — transcript only</option>
+          </select>
+        </label>
+        <label class="field"><span>AI for prompts</span>
+          <select data-key="meetingProvider">
+            <option value="">Same as above</option>
+            <option value="anthropic">Claude</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </label>
+        <label class="field"><span>At most one automatic prompt every (seconds)</span><input type="number" min="5" max="900" data-key="meetingMinGapSec"></label>
+        <label class="field"><span>Save transcripts to this NAS folder</span><input type="text" data-key="meetingFolder"></label>
+        <label class="field"><span>Label for your own voice</span><input type="text" data-key="myVoiceLabel"></label>
+      </div>
+      <label class="check small"><input type="checkbox" data-key="meetingWebLookup"> If a standard isn't in my files, look it up online (e.g. BC MoTI, CSA S6)</label>
+      <label class="check small"><input type="checkbox" data-key="meetingSummary"> At the end, write a summary with decisions and action items (one call) and remember them for the project</label>
+      <details class="small"><summary>Free transcription model</summary>
+        <div class="grid2">
+          <label class="field"><span>Model</span><input type="text" data-key="whisperModel" list="whisperModels"></label>
+          <label class="field"><span>Download from</span><input type="text" data-key="whisperHost"></label>
+        </div>
+        <datalist id="whisperModels"><option value="Xenova/whisper-base.en"></option><option value="Xenova/whisper-tiny.en"></option><option value="Xenova/whisper-small.en"></option></datalist>
+        <label class="field"><span>Path template</span><input type="text" data-key="whisperPathTemplate"></label>
+        <p class="muted">Downloaded once (about 80 MB for base.en) and kept in this browser. If this computer can't reach huggingface.co, run the HP setup script with <code>--whisper-model</code> and set "Download from" to your NAS address.</p>
+      </details>
+    </section>
+    <section id="email" class="panel stack">
+      <h2>Email</h2>
+      <label class="check"><input type="checkbox" data-key="processOnOpen"> Draft automatically when I open a new email</label>
+      <label class="check"><input type="checkbox" data-key="autoScan"> Watch the Outlook inbox and draft replies to new mail</label>
+      <label class="check"><input type="checkbox" data-key="autoScanOnlyWhenIdle"> …only while I'm away from the Outlook tab (it has to open each message to read it)</label>
+      <label class="field"><span>Ignore senders containing</span><input type="text" data-key="ignoreSenders"></label>
+      <label class="field"><span>Ignore subjects containing</span><input type="text" data-key="ignoreSubjects"></label>
+      <label class="field"><span>Other Outlook web addresses (on-premises OWA), one per line, e.g. https://webmail.example.gc.ca/owa/*</span><textarea data-key="extraOutlookUrls" rows="2"></textarea></label>
+      <div class="row"><button type="button" id="grantOutlook">Allow these addresses</button><span id="grantOut" class="small muted"></span></div>
+    </section>
+
+    <section id="automate" class="panel stack">
+      <h2>Power Automate</h2>
+      <p class="small"><b>Easiest:</b> describe the job in the side panel's <b>Chat</b> ("set up a flow that logs every email to my tracker") and it walks you through Power Automate step by step, adds the action here, and tests it.</p>
+      <p class="small">Each flow below becomes an action the assistant can run. <b>Read</b> actions fetch data (an SAP report, a row from a SharePoint Excel tracker); the AI can ask for them while drafting. <b>Write</b> actions change records (add a tracker row, file to GCdocs) and always wait for your click unless you tick "run after every draft".</p>
+      <details class="small"><summary>How to connect a flow</summary>
+        <ol>
+          <li><b>HTTP (premium trigger):</b> create a flow starting with <i>When an HTTP request is received</i>, finish it with a <i>Response</i> action returning JSON <code>{"ok": true, "data": …, "message": "…"}</code>, and paste the trigger URL here.</li>
+          <li><b>Bridge folder (standard connectors only):</b> choose a OneDrive-synced folder above. The assistant writes <code>requests/&lt;id&gt;.json</code>; a flow with <i>When a file is created</i> (OneDrive for Business) reads it, does the work, and creates <code>responses/&lt;id&gt;.json</code> with the same JSON shape.</li>
+          <li>The request the assistant sends: <code>{"requestId","action","kind","params":{…},"item":{"subject","from","project","summary","status"}}</code>. Ask the chat for the exact schema of any action.</li>
+        </ol>
+      </details>
+      <div id="actions" class="stack"></div>
+      <div class="row">
+        <button type="button" id="addAction">Add flow</button>
+        <button type="button" id="exportActions">Copy as JSON</button>
+        <button type="button" id="importActions">Paste JSON…</button>
+      </div>
+    </section>
+
+    <section id="teaching" class="panel stack">
+      <h2>Teaching</h2>
+      <p class="small muted">What the assistant has learned about which documents answer which emails. Thumbs-up/down on a draft's sources adds rules here; you can also add a hint directly.</p>
+      <div class="grid2">
+        <label class="field"><span>When an email is about…</span><input type="text" id="hintText" placeholder="concrete strength, cylinder tests, 28-day results"></label>
+        <label class="field"><span>…use this document</span><input type="text" id="hintPath" placeholder="type to search files" list="hintPaths"></label>
+      </div>
+      <datalist id="hintPaths"></datalist>
+      <div class="row"><button type="button" id="addHint">Add hint</button><span id="hintOut" class="small muted"></span></div>
+      <div id="rules" class="stack"></div>
+    </section>
+
+    <section id="data" class="panel stack">
+      <h2>Data</h2>
+      <div class="row">
+        <button type="button" id="rebuildIndex">Rebuild index from scratch</button>
+        <button type="button" id="clearDrafts" class="danger">Clear draft log</button>
+        <button type="button" id="clearRules" class="danger">Forget all teaching</button>
+      </div>
+      <div class="row">
+        <button type="button" id="exportSetup">Export settings (no keys)</button>
+        <button type="button" id="importSetup">Import settings…</button>
+      </div>
+      <p class="small muted">None of these touch your files, Outlook, or the NAS.</p>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast" role="status" hidden></div>
+<script type="module" src="options.js"></script>
+</body>
+</html>

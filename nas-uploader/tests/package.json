@@ -1,0 +1,11 @@
+{
+  "name": "nas-uploader-tests",
+  "private": true,
+  "description": "End-to-end tests for the NAS Uploader Chrome extension (real Chromium + real WebDAV servers).",
+  "scripts": {
+    "test": "node e2e.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "nas-uploader-vendor-build",
+  "private": true,
+  "description": "Bundles third-party libraries into extension/vendor (run ./build-vendor.sh). Output is committed so the extension needs no build step.",
+  "devDependencies": {
+    "@anthropic-ai/sdk": "1.4.0",
+    "@huggingface/transformers": "4.3.2",
+    "esbuild": "0.25.10"
+  }
+}
